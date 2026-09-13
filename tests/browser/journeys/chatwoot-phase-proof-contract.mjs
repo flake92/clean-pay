@@ -11,7 +11,10 @@ import {
   JOURNEY_COMPOSE_EXPECTED_SERVICE_STATES,
   JOURNEY_COMPOSE_SERVICE_NAMES,
 } from "./journey-compose-runtime-attestation.mjs";
-import { normalizeProviderOverlapSemanticEntry } from "./provider-overlap-browser-contract.mjs";
+import {
+  normalizeProviderOverlapRequestContractSemanticLedger,
+  normalizeProviderOverlapSemanticEntry,
+} from "./provider-overlap-browser-contract.mjs";
 
 export const CHATWOOT_PHASE_PROOF_KIND =
   "clean-pay-dual-image-chatwoot-phase-stability-proof";
@@ -1582,15 +1585,18 @@ function assertBrowserStaticProvenance(value, label) {
       (total, observation) => total + observation.assetBytes,
       0,
     ), `${label} ${name} static response byte total`);
+    const requestContractSemanticLedger = name === "initial"
+      ? normalizeProviderOverlapRequestContractSemanticLedger(semanticRequestLedger)
+      : semanticRequestLedger;
     const summary = name === "initial" ? {
       version: 1,
-      semanticLedger: semanticRequestLedger,
+      semanticLedger: requestContractSemanticLedger,
       staticClasses: [...new Set(staticRequestLedger.map(({ class: className }) => className))]
         .sort(),
     } : {
       version: 1,
       scenario: CHATWOOT_PHASE_PROOF_SCENARIO,
-      semanticLedger: semanticRequestLedger,
+      semanticLedger: requestContractSemanticLedger,
       staticClasses: [...new Set(staticRequestLedger.map(({ class: className }) => className))]
         .sort(),
     };

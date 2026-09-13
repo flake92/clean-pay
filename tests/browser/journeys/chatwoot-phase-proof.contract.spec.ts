@@ -74,6 +74,7 @@ import {
   extractProviderOverlapCssMediaReferences,
   extractProviderOverlapResponseStaticDeclarations,
   finalizeProviderOverlapHistoryContract,
+  normalizeProviderOverlapRequestContractSemanticLedger,
   readProviderOverlapStaticResponseEvidence,
 } from "./provider-overlap-browser-contract.mjs";
 import {
@@ -504,10 +505,13 @@ test("requires 6/6 semantic equality and one exact 2/3 PNG majority per role", (
       generation.requestOrderContractSha256 = sha256(JSON.stringify(
         generation.requestOrderLedger,
       ));
+      const requestContractSemanticLedger = name === "initial"
+        ? normalizeProviderOverlapRequestContractSemanticLedger(generation.semanticRequestLedger)
+        : generation.semanticRequestLedger;
       const summary = {
         version: 1,
         ...(name === "recreated" ? { scenario: CHATWOOT_PHASE_PROOF_SCENARIO } : {}),
-        semanticLedger: generation.semanticRequestLedger,
+        semanticLedger: requestContractSemanticLedger,
         staticClasses: [...new Set(generation.staticRequestLedger.map((entry) => entry.class))]
           .sort(),
       };
