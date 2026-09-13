@@ -1516,10 +1516,14 @@ function assertBrowserStaticProvenance(value, label) {
     ]) {
       stringMatch(entry[digestName], sha256Pattern, `${label} ${name} ${digestName}`);
     }
-    const expectedDocumentGenerationCounts = name === "initial" ? [3] : [1, 2];
+    const expectedDocumentGenerationCounts = name === "initial" ? [2, 3] : [1, 2];
     if (!expectedDocumentGenerationCounts.includes(entry.documentGenerationCount)) {
       fail(`${label} ${name} document generations does not match its exact contract.`);
     }
+    const expectedDocumentKeys = expectedStaticDocumentKeys(
+      name,
+      entry.documentGenerationCount,
+    );
     if (!integerInRange(entry.requestCount, 1, 256)
       || !integerInRange(entry.staticRequestCount, 1, entry.requestCount)
       || !integerInRange(entry.staticResponseByteLength, 1, 1024 * 1024 * 1024)) {
@@ -1547,7 +1551,7 @@ function assertBrowserStaticProvenance(value, label) {
       `${label} ${name} request order digest`);
     const responseDeclarationLedger = assertResponseDeclarationLedger(
       entry.responseDeclarationLedger,
-      name,
+      expectedDocumentKeys,
       `${label} ${name} response declarations`,
     );
     equal(
@@ -1558,11 +1562,12 @@ function assertBrowserStaticProvenance(value, label) {
     const semanticRequestLedger = assertStaticSemanticLedger(
       entry.semanticRequestLedger,
       name,
+      expectedDocumentKeys,
       `${label} ${name} semantic requests`,
     );
     const staticRequestLedger = assertStaticRequestLedger(
       entry.staticRequestLedger,
-      name,
+      expectedDocumentKeys,
       `${label} ${name} static requests`,
     );
     equal(semanticRequestLedger.length, occurrences.semantic,
@@ -1594,6 +1599,7 @@ function assertBrowserStaticProvenance(value, label) {
     const staticLoadGraph = assertStaticLoadGraph(
       entry.staticLoadGraph,
       name,
+      expectedDocumentKeys,
       `${label} ${name} static load graph`,
     );
     equal(
@@ -1704,16 +1710,10 @@ function assertBrowserStaticProvenance(value, label) {
   };
 }
 
-function assertResponseDeclarationLedger(value, generation, label) {
-  const documentKeys = generation === "initial"
-    ? ["app-login-document", "app-profile-document", "app-cabinet-document"]
-    : ["app-login-document", "app-cabinet-document"];
+function assertResponseDeclarationLedger(value, expectedDocumentKeys, label) {
   if (!isDenseArray(value)) {
     fail(`${label} ledger is invalid.`);
   }
-  const expectedDocumentKeys = generation === "recreated" && value.length === 1
-    ? ["app-login-document"]
-    : documentKeys;
   if (value.length !== expectedDocumentKeys.length) {
     fail(`${label} ledger is invalid.`);
   }
@@ -1737,7 +1737,7 @@ function declarationDigestUnion(ledger) {
   return [...new Set(ledger.flatMap(({ pathSha256s }) => pathSha256s))].sort();
 }
 
-function assertStaticSemanticLedger(value, generation, label) {
+function assertStaticSemanticLedger(value, generation, expectedDocumentKeys, label) {
   if (!isDenseArray(value) || value.length < 1 || value.length > 256) {
     fail(`${label} is outside its exact bound.`);
   }
@@ -1774,9 +1774,13 @@ function assertStaticSemanticLedger(value, generation, label) {
     "app-cabinet-document",
   ]);
   const observedFlow = normalized.map(({ key }) => key).filter((key) => navigationKeys.has(key));
+  const initialShortcutFlow = generation === "initial"
+    && expectedDocumentKeys.length === 2;
   const terminalRecreatedFlow = generation === "recreated"
     && stableJson(observedFlow) === stableJson(["app-login-document", "app-telegram-start"]);
-  const expectedFlow = generation === "initial"
+  const expectedFlow = initialShortcutFlow
+    ? ["app-login-document", "app-telegram-start", "app-cabinet-document"]
+    : generation === "initial"
     ? [
       "app-login-document", "app-telegram-start", "telegram-oidc-authorize",
       "app-telegram-callback", "app-profile-document", "app-cabinet-document",
@@ -1788,6 +1792,12 @@ function assertStaticSemanticLedger(value, generation, label) {
       "app-login-document", "app-telegram-start", "telegram-oidc-authorize",
       "app-telegram-callback", "app-cabinet-document",
     ];
+  if (initialShortcutFlow) {
+    const keys = normalized.map(({ key }) => key);
+    if (!keys.includes("app-profile-action")) {
+      fail(`${label} initial shortcut lacks its authenticated profile action.`);
+    }
+  }
   if (terminalRecreatedFlow) {
     const keys = normalized.map(({ key }) => key);
     if (!keys.includes("app-cabinet-action") || !keys.includes("chatwoot-widget-frame")
@@ -1801,20 +1811,10 @@ function assertStaticSemanticLedger(value, generation, label) {
   return normalized;
 }
 
-function assertStaticRequestLedger(value, generation, label) {
+function assertStaticRequestLedger(value, expectedDocumentKeys, label) {
   if (!isDenseArray(value) || value.length < 1 || value.length > 256) {
     fail(`${label} is outside its exact bound.`);
   }
-  const documentKeys = generation === "initial"
-    ? ["app-login-document", "app-profile-document", "app-cabinet-document"]
-    : ["app-login-document", "app-cabinet-document"];
-  const expectedDocumentKeys = generation === "recreated"
-    && value.every((entry) => (
-      entry && typeof entry === "object" && !Array.isArray(entry)
-      && entry.documentKey === "app-login-document"
-    ))
-    ? ["app-login-document"]
-    : documentKeys;
   let aggregateBytes = 0;
   return value.map((raw, index) => {
     const entry = record(raw, `${label} ${index}`);
@@ -1838,7 +1838,7 @@ function assertStaticRequestLedger(value, generation, label) {
   });
 }
 
-function assertStaticLoadGraph(value, generation, label) {
+function assertStaticLoadGraph(value, generation, expectedDocuments, label) {
   const graph = record(value, label);
   const commonKeys = [
     "assetAttestationSha256",
@@ -1871,10 +1871,6 @@ function assertStaticLoadGraph(value, generation, label) {
     256,
     `${label} declared paths`,
   );
-  const expectedDocuments = generation === "initial"
-    ? ["app-login-document", "app-profile-document", "app-cabinet-document"]
-    : graph.documentLoadLedger?.length === 1 ? ["app-login-document"]
-      : ["app-login-document", "app-cabinet-document"];
   if (!isDenseArray(graph.documentLoadLedger)
     || graph.documentLoadLedger.length !== expectedDocuments.length) {
     fail(`${label} document load ledger is invalid.`);
@@ -1950,11 +1946,25 @@ function assertStaticLoadGraph(value, generation, label) {
     entry.expectedChunkPathSha256s
   )))].sort()), stableJson(expectedChunkPathSha256s),
   `${label} expected document chunk union`);
-  equal(stableJson([...new Set(documentLoadLedger.flatMap((entry) => (
+  const activeRouteDeclaredPathSha256s = [...new Set(documentLoadLedger.flatMap((entry) => (
     entry.routeDeclaredPathSha256s
-  )))].sort()), stableJson(routeDeclaredPathSha256s),
-  `${label} route document union`);
-  if (routeDeclaredPathSha256s.some((digest) => !expectedChunkPathSha256s.includes(digest))) {
+  )))].sort();
+  if (generation === "initial" && expectedDocuments.length === 2) {
+    if (activeRouteDeclaredPathSha256s.some((digest) => (
+      !routeDeclaredPathSha256s.includes(digest)
+    )) || routeDeclaredPathSha256s.length <= activeRouteDeclaredPathSha256s.length) {
+      fail(`${label} shortcut route document union does not preserve its full attested graph.`);
+    }
+  } else {
+    equal(stableJson(activeRouteDeclaredPathSha256s), stableJson(routeDeclaredPathSha256s),
+      `${label} route document union`);
+  }
+  const loadedRouteDeclaredPathSha256s = generation === "initial" && expectedDocuments.length === 2
+    ? activeRouteDeclaredPathSha256s
+    : routeDeclaredPathSha256s;
+  if (loadedRouteDeclaredPathSha256s.some((digest) => (
+    !expectedChunkPathSha256s.includes(digest)
+  ))) {
     fail(`${label} route graph escaped its expected chunks.`);
   }
   if (!isDenseArray(graph.inventoryLedger)
@@ -1983,12 +1993,14 @@ function assertStaticLoadGraph(value, generation, label) {
   });
   equal(graph.inventoryLedgerContractSha256, sha256(JSON.stringify(inventoryLedger)),
     `${label} inventory ledger digest`);
-  equal(graph.routeDeclaredPathContractSha256, sha256(JSON.stringify(
-    documentLoadLedger.map((entry) => ({
-      documentKey: entry.documentKey,
-      routeDeclaredPathSha256s: entry.routeDeclaredPathSha256s,
-    })),
-  )), `${label} route projection digest`);
+  if (!(generation === "initial" && expectedDocuments.length === 2)) {
+    equal(graph.routeDeclaredPathContractSha256, sha256(JSON.stringify(
+      documentLoadLedger.map((entry) => ({
+        documentKey: entry.documentKey,
+        routeDeclaredPathSha256s: entry.routeDeclaredPathSha256s,
+      })),
+    )), `${label} route projection digest`);
+  }
   return {
     assetAttestationSha256: graph.assetAttestationSha256,
     assetInventorySha256: graph.assetInventorySha256,
@@ -2002,6 +2014,17 @@ function assertStaticLoadGraph(value, generation, label) {
     routeDeclaredPathContractSha256: graph.routeDeclaredPathContractSha256,
     routeDeclaredPathSha256s,
   };
+}
+
+function expectedStaticDocumentKeys(generation, documentGenerationCount) {
+  if (generation === "initial") {
+    return documentGenerationCount === 2
+      ? ["app-login-document", "app-cabinet-document"]
+      : ["app-login-document", "app-profile-document", "app-cabinet-document"];
+  }
+  return documentGenerationCount === 1
+    ? ["app-login-document"]
+    : ["app-login-document", "app-cabinet-document"];
 }
 
 function assertCssMediaReferenceLedger(value, label) {
@@ -2113,8 +2136,11 @@ function assertSerializedStaticBinding(generation, generationGraph, inventoryGra
       fail(`${label} ${documentLoad.documentKey} response-declared media partition is incomplete.`);
     }
   }
+  const boundRouteDeclaredPathSha256s = inventoryGraph.documentLoadLedger.length === 2
+    ? generationGraph.documentLoadLedger.flatMap((entry) => entry.routeDeclaredPathSha256s)
+    : inventoryGraph.routeDeclaredPathSha256s;
   const reachableChunkPaths = new Set([
-    ...inventoryGraph.routeDeclaredPathSha256s,
+    ...boundRouteDeclaredPathSha256s,
     ...declaredChunkPaths,
   ]);
   equal(stableJson([...reachableChunkPaths].sort()),

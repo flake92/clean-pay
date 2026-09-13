@@ -250,6 +250,27 @@ test("requires three independent A/B pairs and exact cross-image PNG quorums", (
   ]) expect(serialized).not.toContain(forbidden);
 });
 
+test("accepts the exact two-document initial authenticated shortcut in all six stacks", () => {
+  const proof = createChatwootPhaseProof(pairReports("shortcut"));
+  for (const pair of proof.pairs) {
+    for (const role of ["baseline", "candidate"] as const) {
+      const initial = pair.stacks[role].browser.staticProvenance.initial;
+      expect(initial.documentGenerationCount).toBe(2);
+      expect(initial.staticLoadGraph.documentLoadLedger.map(
+        ({ documentKey }: { documentKey: string }) => documentKey,
+      ))
+        .toEqual(["app-login-document", "app-cabinet-document"]);
+      expect(initial.responseDeclarationLedger.map(
+        ({ documentKey }: { documentKey: string }) => documentKey,
+      ))
+        .toEqual(["app-login-document", "app-cabinet-document"]);
+      expect(initial.semanticRequestLedger.map(
+        ({ key }: { key: string }) => key,
+      )).toContain("app-profile-action");
+    }
+  }
+});
+
 test("accepts the exact containerd root-manifest image identity union", () => {
   const proof = createChatwootPhaseProof(containerdPairReports());
   expect(proof.pairs[0].stacks.baseline).toMatchObject({
@@ -3733,27 +3754,7 @@ test("accepts the exact initial authenticated shortcut browser flow", () => {
     "app-profile-document",
     "app-cabinet-document",
   ]);
-  const record = browserRecordFixture(staticAssetContract);
-  const records = [
-    record("app-login-document", "app-login-document", 200, "text/html", {
-      navigation: true,
-    }),
-    ...staticRecordsForDocument(staticAssetContract, "app-login-document"),
-    record("turnstile-widget-script", "app-login-document", 200, "application/javascript"),
-    record("chatwoot-sdk-script", "app-login-document", 200, "application/javascript"),
-    record("app-telegram-start", "app-login-document", 307, "application/octet-stream", {
-      navigation: true,
-    }),
-    record("app-profile-action", "app-login-document", 200, "text/x-component"),
-    record("app-root-rsc", "app-login-document", 200, "text/x-component"),
-    record("chatwoot-widget-frame", "app-login-document", 200, "text/html"),
-    record("app-profile-action", "app-login-document", 200, "text/x-component"),
-    record("chatwoot-widget-conversation-frame", "app-login-document", 200, "text/html"),
-    record("app-cabinet-document", "app-cabinet-document", 200, "text/html", {
-      navigation: true,
-    }),
-    ...staticRecordsForDocument(staticAssetContract, "app-cabinet-document"),
-  ];
+  const records = initialShortcutBrowserRecords(staticAssetContract);
 
   const finalized = finalizeChatwootPhaseBrowserContract(records, {
     cssMediaReferences: graph.cssMediaReferences,
@@ -4343,10 +4344,24 @@ test("keeps the sidecar contract separate from baselines, projection, and fixtur
   });
   const validate = new Ajv({ allErrors: true }).compile(schema);
   const schemaProof = createChatwootPhaseProof(pairReports());
+  const shortcutSchemaProof = createChatwootPhaseProof(pairReports("shortcut"));
   const containerdSchemaProof = createChatwootPhaseProof(containerdPairReports());
   type MutableSchemaProof = DeepMutable<typeof schemaProof>;
   expect(validate(schemaProof), JSON.stringify(validate.errors)).toBe(true);
+  expect(validate(shortcutSchemaProof), JSON.stringify(validate.errors)).toBe(true);
   expect(validate(containerdSchemaProof), JSON.stringify(validate.errors)).toBe(true);
+  const shortcutWithFullCardinality = structuredClone(shortcutSchemaProof) as MutableSchemaProof;
+  (shortcutWithFullCardinality.pairs[0].stacks.baseline.browser.staticProvenance.initial as unknown as
+    MutableStaticGenerationEvidence).documentGenerationCount = 3;
+  expect(validate(shortcutWithFullCardinality), "shortcut with full cardinality schema").toBe(false);
+  expect(() => assertChatwootPhaseProof(shortcutWithFullCardinality),
+    "shortcut with full cardinality JS").toThrow();
+  const fullWithShortcutCardinality = structuredClone(schemaProof) as MutableSchemaProof;
+  (fullWithShortcutCardinality.pairs[0].stacks.baseline.browser.staticProvenance.initial as unknown as
+    MutableStaticGenerationEvidence).documentGenerationCount = 2;
+  expect(validate(fullWithShortcutCardinality), "full flow with shortcut cardinality schema").toBe(false);
+  expect(() => assertChatwootPhaseProof(fullWithShortcutCardinality),
+    "full flow with shortcut cardinality JS").toThrow();
   const containerdRootNamedConfig = structuredClone(containerdSchemaProof) as unknown as {
     pairs: ContainerdPairReport[];
   };
@@ -4410,7 +4425,7 @@ test("keeps the sidecar contract separate from baselines, projection, and fixtur
     }],
     ["initial static generation cardinality", (value: MutableSchemaProof) => {
       (value.pairs[0].stacks.baseline.browser.staticProvenance.initial as unknown as
-        MutableStaticGenerationEvidence).documentGenerationCount = 2;
+        MutableStaticGenerationEvidence).documentGenerationCount = 1;
     }],
     ["recreated static generation cardinality", (value: MutableSchemaProof) => {
       (value.pairs[0].stacks.baseline.browser.staticProvenance.recreated as unknown as
@@ -4577,13 +4592,13 @@ test("keeps the sidecar contract separate from baselines, projection, and fixtur
   expect(documentation).toContain("3 baseline + 3 candidate");
 });
 
-function pairReports() {
+function pairReports(initialFlow: "full" | "shortcut" = "full") {
   const sealer = createChatwootPhaseEvidenceSealer();
   return Array.from({ length: CHATWOOT_PHASE_PROOF_PAIR_COUNT }, (_, index) => {
     const pairIndex = index + 1;
     const stacks = {
-      baseline: stackReport("baseline", pairIndex, sealer),
-      candidate: stackReport("candidate", pairIndex, sealer),
+      baseline: stackReport("baseline", pairIndex, sealer, initialFlow),
+      candidate: stackReport("candidate", pairIndex, sealer, initialFlow),
     };
     const cleanup = {
       status: "verifier-owned-stack-pair-cleaned",
@@ -4806,6 +4821,7 @@ function stackReport(
   role: "baseline" | "candidate",
   pairIndex: number,
   sealer: ReturnType<typeof createChatwootPhaseEvidenceSealer>,
+  initialFlow: "full" | "shortcut" = "full",
 ) {
   const projectSha256 = sha256(`${role}:project:${pairIndex}`);
   const runScope = sha256(`${role}:run-scope:${pairIndex}`);
@@ -4850,7 +4866,7 @@ function stackReport(
   const fixtureStaticAssetContract = createChatwootPhaseStaticAssetContract(
     staticAssetAttestation(role),
   );
-  const staticProvenance = staticProvenanceFixture(fixtureStaticAssetContract);
+  const staticProvenance = staticProvenanceFixture(fixtureStaticAssetContract, initialFlow);
   const fixtureMountContractSha256 = sha256("shared:fixture-mounts");
   const fixtureBindingContractSha256 = sha256(JSON.stringify({
     globalFixtureContractSha256: fixtureContractSha256,
@@ -5057,6 +5073,7 @@ function stackReport(
 
 function staticProvenanceFixture(
   contract: ReturnType<typeof createChatwootPhaseStaticAssetContract>,
+  initialFlow: "full" | "shortcut" = "full",
 ) {
   const initialGraph = staticLoadGraphFixture(contract, [
     "app-login-document",
@@ -5064,7 +5081,9 @@ function staticProvenanceFixture(
     "app-cabinet-document",
   ]);
   const initial = finalizeChatwootPhaseBrowserContract(
-    initialBrowserRecords(contract),
+    initialFlow === "shortcut"
+      ? initialShortcutBrowserRecords(contract)
+      : initialBrowserRecords(contract),
     {
       cssMediaReferences: initialGraph.cssMediaReferences,
       generation: "initial",
@@ -5117,7 +5136,7 @@ function staticProvenanceFixture(
     assetInventoryProjectionSha256:
       contract.providerContract.inventoryLedgerContractSha256,
     assetRouteGraphSha256: contract.providerContract.routeDeclaredPathContractSha256,
-    initial: generation(initial, 3),
+    initial: generation(initial, initialFlow === "shortcut" ? 2 : 3),
     recreated: generation(recreated as typeof initial, 2),
   };
 }
@@ -6099,6 +6118,32 @@ function initialBrowserRecords(
       navigation: true,
     }),
     ...staticRecordsForDocument(contract, "app-profile-document"),
+    record("app-cabinet-document", "app-cabinet-document", 200, "text/html", {
+      navigation: true,
+    }),
+    ...staticRecordsForDocument(contract, "app-cabinet-document"),
+  ];
+}
+
+function initialShortcutBrowserRecords(
+  contract: ReturnType<typeof createChatwootPhaseStaticAssetContract>,
+) {
+  const record = browserRecordFixture(contract);
+  return [
+    record("app-login-document", "app-login-document", 200, "text/html", {
+      navigation: true,
+    }),
+    ...staticRecordsForDocument(contract, "app-login-document"),
+    record("turnstile-widget-script", "app-login-document", 200, "application/javascript"),
+    record("chatwoot-sdk-script", "app-login-document", 200, "application/javascript"),
+    record("app-telegram-start", "app-login-document", 307, "application/octet-stream", {
+      navigation: true,
+    }),
+    record("app-profile-action", "app-login-document", 200, "text/x-component"),
+    record("app-root-rsc", "app-login-document", 200, "text/x-component"),
+    record("chatwoot-widget-frame", "app-login-document", 200, "text/html"),
+    record("app-profile-action", "app-login-document", 200, "text/x-component"),
+    record("chatwoot-widget-conversation-frame", "app-login-document", 200, "text/html"),
     record("app-cabinet-document", "app-cabinet-document", 200, "text/html", {
       navigation: true,
     }),
