@@ -539,7 +539,7 @@ async function assertEvidenceFilesystemIdentity(state) {
     // realpath identity is exact; the proof-owned immediate parent additionally
     // keeps an exact ctime boundary.
     if (!sameObjectIdentity(identity, observed)
-      || (index === 0 && identity.ctimeMs !== observed.ctimeMs)) {
+      || (index === 0 && identity.ctimeNs !== observed.ctimeNs)) {
       throw new Error(`Chatwoot evidence ancestor ${index} identity changed.`);
     }
   }
@@ -567,7 +567,7 @@ async function refreshOwnedDirectoryIdentity(state, name) {
     `Chatwoot evidence ${name}`,
     "directory",
   );
-  if (!sameObjectIdentity(prior, observed) || observed.ctimeMs < prior.ctimeMs) {
+  if (!sameObjectIdentity(prior, observed) || observed.ctimeNs < prior.ctimeNs) {
     throw new Error(`Chatwoot evidence ${name} was replaced during an owned mutation.`);
   }
   expected[name] = observed;
@@ -581,7 +581,7 @@ async function readStablePrivateFile(target, label) {
   let handleBefore;
   let handleAfter;
   try {
-    handleBefore = identityFromMetadata(await handle.stat(), before.realpath, "file");
+    handleBefore = identityFromMetadata(await handle.stat({ bigint: true }), before.realpath, "file");
     if (!sameIdentity(before, handleBefore)) {
       throw new Error(`${label} path and FileHandle identity differ.`);
     }
@@ -590,13 +590,13 @@ async function readStablePrivateFile(target, label) {
     if (!bytes.equals(repeated)) {
       throw new Error(`${label} content changed between exact FileHandle reads.`);
     }
-    handleAfter = identityFromMetadata(await handle.stat(), before.realpath, "file");
+    handleAfter = identityFromMetadata(await handle.stat({ bigint: true }), before.realpath, "file");
   } finally {
     await handle.close();
   }
   const after = await capturePathIdentity(target, label, "file");
   if (!sameIdentity(before, handleAfter) || !sameIdentity(before, after)
-    || bytes.byteLength !== before.size) {
+    || BigInt(bytes.byteLength) !== before.size) {
     throw new Error(`${label} changed during its stable FileHandle read.`);
   }
   return Object.freeze({
@@ -619,7 +619,7 @@ async function readFileHandleAtPosition(handle, size, label) {
 
 async function capturePathIdentity(target, label, kind, requireStableMetadata = true) {
   const requested = path.resolve(target);
-  const beforeMetadata = await lstat(requested);
+  const beforeMetadata = await lstat(requested, { bigint: true });
   if (beforeMetadata.isSymbolicLink()) {
     throw new Error(`${label} must not be a symbolic link or junction.`);
   }
@@ -632,11 +632,11 @@ async function capturePathIdentity(target, label, kind, requireStableMetadata = 
   const handle = await open(requested, fsConstants.O_RDONLY | noFollow);
   let handleIdentity;
   try {
-    handleIdentity = identityFromMetadata(await handle.stat(), resolved, kind);
+    handleIdentity = identityFromMetadata(await handle.stat({ bigint: true }), resolved, kind);
   } finally {
     await handle.close();
   }
-  const afterMetadata = await lstat(requested);
+  const afterMetadata = await lstat(requested, { bigint: true });
   if (afterMetadata.isSymbolicLink()) {
     throw new Error(`${label} changed into a symbolic link or junction.`);
   }
@@ -656,14 +656,15 @@ async function capturePathIdentity(target, label, kind, requireStableMetadata = 
 function identityFromMetadata(metadata, resolved, kind) {
   if ((kind === "directory" && !metadata.isDirectory())
     || (kind === "file" && !metadata.isFile())
-    || !Number.isFinite(metadata.ctimeMs) || metadata.ctimeMs < 0
-    || !Number.isFinite(metadata.size) || metadata.size < 0) {
+    || typeof metadata.ctimeNs !== "bigint" || metadata.ctimeNs < 0n
+    || typeof metadata.size !== "bigint" || metadata.size < 0n
+    || typeof metadata.dev !== "bigint" || typeof metadata.ino !== "bigint") {
     throw new Error("Chatwoot evidence path identity has an invalid filesystem type.");
   }
   return Object.freeze({
-    ctimeMs: metadata.ctimeMs,
-    dev: String(metadata.dev),
-    ino: String(metadata.ino),
+    ctimeNs: metadata.ctimeNs,
+    dev: metadata.dev,
+    ino: metadata.ino,
     kind,
     realpath: path.resolve(resolved),
     size: metadata.size,
@@ -672,7 +673,7 @@ function identityFromMetadata(metadata, resolved, kind) {
 
 function sameIdentity(left, right) {
   return sameObjectIdentity(left, right)
-    && left.ctimeMs === right.ctimeMs
+    && left.ctimeNs === right.ctimeNs
     && left.size === right.size;
 }
 

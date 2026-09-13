@@ -1334,7 +1334,7 @@ async function readBoundedExactFileWithIdentity(target, maximumBytes, label) {
     throw new Error(`${label} file byte bound is invalid.`);
   }
   const before = await captureExactPathIdentity(target, "file", label);
-  if (before.size <= 0 || before.size > maximumBytes) {
+  if (before.size <= 0n || before.size > BigInt(maximumBytes)) {
     throw new Error(`${label} is outside its bounded file contract.`);
   }
   const noFollow = process.platform === "win32" ? 0 : (fsConstants.O_NOFOLLOW ?? 0);
@@ -1343,18 +1343,26 @@ async function readBoundedExactFileWithIdentity(target, maximumBytes, label) {
   let handleBefore;
   let handleAfter;
   try {
-    handleBefore = pathIdentityFromMetadata(await handle.stat(), before.realpath, "file");
+    handleBefore = pathIdentityFromMetadata(
+      await handle.stat({ bigint: true }),
+      before.realpath,
+      "file",
+    );
     if (!samePathIdentity(before, handleBefore)) {
       throw new Error(`${label} path and FileHandle identity differ.`);
     }
     bytes = await handle.readFile();
-    handleAfter = pathIdentityFromMetadata(await handle.stat(), before.realpath, "file");
+    handleAfter = pathIdentityFromMetadata(
+      await handle.stat({ bigint: true }),
+      before.realpath,
+      "file",
+    );
   } finally {
     await handle.close();
   }
   const after = await captureExactPathIdentity(target, "file", label);
   if (!samePathIdentity(before, handleAfter) || !samePathIdentity(before, after)
-    || bytes.byteLength !== before.size || bytes.byteLength > maximumBytes) {
+    || BigInt(bytes.byteLength) !== before.size || bytes.byteLength > maximumBytes) {
     throw new Error(`${label} changed while its immutable bytes were read.`);
   }
   return Object.freeze({ bytes, identity: before });
@@ -1362,7 +1370,7 @@ async function readBoundedExactFileWithIdentity(target, maximumBytes, label) {
 
 async function captureExactPathIdentity(target, kind, label) {
   const requested = path.resolve(target);
-  const beforeMetadata = await lstat(requested);
+  const beforeMetadata = await lstat(requested, { bigint: true });
   if (beforeMetadata.isSymbolicLink()) {
     throw new Error(`${label} must not be a symbolic link or junction.`);
   }
@@ -1375,11 +1383,11 @@ async function captureExactPathIdentity(target, kind, label) {
   const handle = await open(requested, fsConstants.O_RDONLY | noFollow);
   let handleIdentity;
   try {
-    handleIdentity = pathIdentityFromMetadata(await handle.stat(), resolved, kind);
+    handleIdentity = pathIdentityFromMetadata(await handle.stat({ bigint: true }), resolved, kind);
   } finally {
     await handle.close();
   }
-  const afterMetadata = await lstat(requested);
+  const afterMetadata = await lstat(requested, { bigint: true });
   const afterResolved = await realpath(requested);
   const after = pathIdentityFromMetadata(afterMetadata, afterResolved, kind);
   if (afterMetadata.isSymbolicLink() || !samePathIdentity(before, handleIdentity)
@@ -1392,28 +1400,29 @@ async function captureExactPathIdentity(target, kind, label) {
 function pathIdentityFromMetadata(metadata, resolved, kind) {
   if ((kind === "file" && !metadata.isFile())
     || (kind === "directory" && !metadata.isDirectory())
-    || !Number.isFinite(metadata.ctimeMs) || metadata.ctimeMs < 0
-    || !Number.isFinite(metadata.mtimeMs) || metadata.mtimeMs < 0
-    || !Number.isFinite(metadata.size) || metadata.size < 0) {
+    || typeof metadata.ctimeNs !== "bigint" || metadata.ctimeNs < 0n
+    || typeof metadata.mtimeNs !== "bigint" || metadata.mtimeNs < 0n
+    || typeof metadata.size !== "bigint" || metadata.size < 0n
+    || typeof metadata.dev !== "bigint" || typeof metadata.ino !== "bigint") {
     throw new Error("Chatwoot immutable path identity is invalid.");
   }
   return Object.freeze({
-    ctimeMs: metadata.ctimeMs,
-    dev: String(metadata.dev),
-    ino: String(metadata.ino),
+    ctimeNs: metadata.ctimeNs,
+    dev: metadata.dev,
+    ino: metadata.ino,
     kind,
-    mtimeMs: metadata.mtimeMs,
+    mtimeNs: metadata.mtimeNs,
     realpath: path.resolve(resolved),
     size: metadata.size,
   });
 }
 
 function samePathIdentity(left, right) {
-  return left.ctimeMs === right.ctimeMs
+  return left.ctimeNs === right.ctimeNs
     && left.dev === right.dev
     && left.ino === right.ino
     && left.kind === right.kind
-    && left.mtimeMs === right.mtimeMs
+    && left.mtimeNs === right.mtimeNs
     && normalizePath(left.realpath) === normalizePath(right.realpath)
     && left.size === right.size;
 }
