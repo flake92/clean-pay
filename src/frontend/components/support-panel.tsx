@@ -13,9 +13,9 @@ export function SupportPanel({ support }: { support: SupportViewModel }) {
   return (
     <div className="flex flex-column gap-4">
       <Card title={`Контакты ${branding.name}`}>
-        {(support.enabled && hasContacts) || support.liveChatEnabled ? (
+        {support.enabled && hasContacts ? (
           <div className="flex flex-wrap gap-3">
-            {support.liveChatEnabled ? <SupportChatOpenButton /> : null}
+            {support.liveChatEnabled ? <SupportChatOpenButton hideWhenSignedOut /> : null}
             {support.email ? (
               <LinkButton href={`mailto:${support.email}`} icon="pi pi-envelope" label="Написать на почту" outlined />
             ) : null}
@@ -32,6 +32,8 @@ export function SupportPanel({ support }: { support: SupportViewModel }) {
               <LinkButton external href={support.faqUrl} icon="pi pi-book" label="FAQ и инструкции" outlined />
             ) : null}
           </div>
+        ) : support.liveChatEnabled ? (
+          <SupportChatOpenButton />
         ) : (
           <p className="m-0 line-height-3 text-600">Контакты поддержки пока не опубликованы.</p>
         )}

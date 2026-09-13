@@ -67,7 +67,11 @@ function chatwootActionState(
   ) ? "ready" : "connecting";
 }
 
-export function SupportChatOpenButton() {
+export function SupportChatOpenButton({
+  hideWhenSignedOut = false,
+}: {
+  hideWhenSignedOut?: boolean;
+} = {}) {
   const authenticated = useSupportChatSessionAuthenticated();
   const expectedIdentity = useSupportChatExpectedIdentity();
   const [state, setState] = useState<ChatwootActionState>(
@@ -94,7 +98,14 @@ export function SupportChatOpenButton() {
   }, [authenticated, expectedIdentity]);
 
   if (state === "signed-out") {
-    return <span className="line-height-3 text-600">Чат доступен после входа в аккаунт.</span>;
+    if (hideWhenSignedOut) {
+      return null;
+    }
+    return (
+      <p className="m-0 line-height-3 text-600">
+        Войдите в аккаунт, чтобы написать нам в чате поддержки.
+      </p>
+    );
   }
 
   if (state === "failed") {
