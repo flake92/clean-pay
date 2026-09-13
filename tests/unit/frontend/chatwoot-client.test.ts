@@ -5,6 +5,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { ChatwootWidgetConfig } from "@/application/models/chatwoot";
 import {
   applyChatwootManagedLabels,
+  clearChatwootSupportContextCache,
   confirmChatwootIdentity,
   confirmChatwootIdentityOwnership,
   enterChatwootAuthenticatedMode,
@@ -20,6 +21,7 @@ import {
 
 const config: ChatwootWidgetConfig = {
   baseUrl: "https://chat.example.com",
+  identityFingerprint: "1111111111111111111111111111111111111111111111111111111111111111",
   websiteToken: "website_token_123456789",
   user: {
     identifier: "user-123",
@@ -72,6 +74,7 @@ describe("Chatwoot browser lifecycle", () => {
     window.cleanPayChatwootPendingIdentity = undefined;
     window.cleanPayChatwootFailedIdentity = undefined;
     window.localStorage.clear();
+    clearChatwootSupportContextCache();
     document.getElementById("clean-pay-chatwoot-sdk")?.remove();
     document.cookie = "cw_conversation=; Path=/; Max-Age=0";
     document.cookie = `cw_user_${config.websiteToken}=; Path=/; Max-Age=0`;
@@ -97,7 +100,7 @@ describe("Chatwoot browser lifecycle", () => {
     });
     confirmIdentity();
     expect(identifyChatwootUser(config)).toBe("ready");
-    expect(api.toggleBubbleVisibility).toHaveBeenCalledWith("show");
+    expect(api.toggleBubbleVisibility).toHaveBeenCalledWith("hide");
     expect(api.toggleBubbleVisibility.mock.invocationCallOrder[0]).toBeLessThan(
       api.setUser.mock.invocationCallOrder[0],
     );
@@ -119,6 +122,7 @@ describe("Chatwoot browser lifecycle", () => {
 
     const updated = {
       ...config,
+      identityFingerprint: "2222222222222222222222222222222222222222222222222222222222222222",
       user: {
         ...config.user,
         customAttributes: { ...config.user.customAttributes, telegram_id: "999" },
@@ -143,6 +147,7 @@ describe("Chatwoot browser lifecycle", () => {
     expect(identifyChatwootUser({
       ...config,
       baseUrl: "https://new-chat.example.com",
+      identityFingerprint: "3333333333333333333333333333333333333333333333333333333333333333",
     })).toBe("pending");
     expect(api.setUser).toHaveBeenCalledTimes(2);
     expect(api.toggleBubbleVisibility).toHaveBeenLastCalledWith("hide");
@@ -182,7 +187,7 @@ describe("Chatwoot browser lifecycle", () => {
 
     expect(confirmChatwootIdentityOwnership(attemptId)).toBe(true);
     expect(identifyChatwootUser(config)).toBe("ready");
-    expect(api.toggleBubbleVisibility).toHaveBeenLastCalledWith("show");
+    expect(api.toggleBubbleVisibility).toHaveBeenLastCalledWith("hide");
     expect(window.localStorage.length).toBe(1);
     const persisted = Array.from(
       { length: window.localStorage.length },
@@ -201,7 +206,7 @@ describe("Chatwoot browser lifecycle", () => {
     document.cookie = `cw_user_${config.websiteToken}=; Path=/; Max-Age=0`;
     expect(identifyChatwootUser(config)).toBe("ready");
     expect(api.setUser).toHaveBeenCalledTimes(1);
-    expect(api.toggleBubbleVisibility).toHaveBeenLastCalledWith("show");
+    expect(api.toggleBubbleVisibility).toHaveBeenLastCalledWith("hide");
   });
 
   it("never restores a persisted proof for another conversation or signed actor", () => {
@@ -230,6 +235,7 @@ describe("Chatwoot browser lifecycle", () => {
     document.cookie = "cw_conversation=authenticated; Path=/";
     const otherActor = {
       ...config,
+      identityFingerprint: "4444444444444444444444444444444444444444444444444444444444444444",
       user: {
         ...config.user,
         identifier: "user-456",
@@ -258,14 +264,14 @@ describe("Chatwoot browser lifecycle", () => {
 
     // Chatwoot 4.16 can remove this transport cookie after Clean Pay has
     // already proved that the conversation belongs to the authenticated user.
-    // The bounded ownership proof keeps the official launcher available
+    // The bounded ownership proof keeps the first-party support action available
     // without persisting the signed hash, token, or optional metadata payload.
     document.cookie = `cw_user_${config.websiteToken}=; Path=/; Max-Age=0`;
     expect(identifyChatwootUser(config)).toBe("ready");
     expect(getChatwootPendingIdentityAttempt()).toMatchObject({
       phase: "ownership_confirmed",
     });
-    expect(api.toggleBubbleVisibility).toHaveBeenLastCalledWith("show");
+    expect(api.toggleBubbleVisibility).toHaveBeenLastCalledWith("hide");
     expect(window.localStorage.length).toBe(1);
   });
 
@@ -404,6 +410,76 @@ describe("Chatwoot browser lifecycle", () => {
     resetChatwootSession();
     await loadChatwootSupportContextCached("user-123", loader, 1_002);
     expect(loader).toHaveBeenCalledTimes(2);
+  });
+
+  it("isolates browser support context by user and bounds retained entries", async () => {
+    const loaders = Array.from({ length: 17 }, (_, index) => vi.fn(async () => ({
+      customAttributes: { clean_pay_user_id: `user-${index}` },
+      managedLabels: [],
+    })));
+
+    for (let index = 0; index < loaders.length; index += 1) {
+      await loadChatwootSupportContextCached(
+        `user-${index}`,
+        loaders[index],
+        1_000,
+      );
+    }
+
+    const currentUser = await loadChatwootSupportContextCached(
+      "user-16",
+      loaders[16],
+      1_001,
+    );
+    expect(currentUser?.customAttributes.clean_pay_user_id).toBe("user-16");
+    expect(loaders[16]).toHaveBeenCalledOnce();
+
+    await loadChatwootSupportContextCached("user-0", loaders[0], 1_001);
+    expect(loaders[0]).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not let an expired rejection delete a newer cache generation", async () => {
+    let rejectExpired!: (error: Error) => void;
+    const expired = new Promise<never>((_resolve, reject) => {
+      rejectExpired = reject;
+    });
+    let resolveCurrent!: (value: {
+      customAttributes: Record<string, string>;
+      managedLabels: [];
+    }) => void;
+    const current = new Promise<{
+      customAttributes: Record<string, string>;
+      managedLabels: [];
+    }>((resolve) => {
+      resolveCurrent = resolve;
+    });
+    const expiredLoader = vi.fn(() => expired);
+    const currentLoader = vi.fn(() => current);
+
+    const expiredLoad = loadChatwootSupportContextCached(
+      "same-user",
+      expiredLoader,
+      1_000,
+    );
+    const currentLoad = loadChatwootSupportContextCached(
+      "same-user",
+      currentLoader,
+      61_000,
+    );
+    rejectExpired(new Error("expired request failed"));
+    await expect(expiredLoad).rejects.toThrow("expired request failed");
+
+    expect(loadChatwootSupportContextCached(
+      "same-user",
+      currentLoader,
+      61_001,
+    )).toBe(currentLoad);
+    expect(currentLoader).toHaveBeenCalledOnce();
+    resolveCurrent({ customAttributes: {}, managedLabels: [] });
+    await expect(currentLoad).resolves.toEqual({
+      customAttributes: {},
+      managedLabels: [],
+    });
   });
 
   it("resets before logout and keeps cleanup safe if the third-party SDK throws", () => {

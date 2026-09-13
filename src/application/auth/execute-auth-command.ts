@@ -12,6 +12,7 @@ import type {
   AuthExecutionCommand,
   AuthExecutionResult,
 } from "@/application/models/auth-actions";
+import { securityCheckFailedMessage } from "@/application/models/security-check-messages";
 import { normalizeReferralCode } from "@/shared/domain/referrals";
 
 const MAX_EMAIL_LENGTH = 254;
@@ -41,6 +42,8 @@ function errorResult(error: unknown): AuthExecutionResult {
     VALIDATION_ERROR: "Проверьте введённые данные.",
     EMAIL_CODE_INVALID: "Код не подошёл. Проверьте его и попробуйте снова.",
     EMAIL_CODE_EXPIRED: "Код истёк. Запросите новый.",
+    FORBIDDEN: "Действие недоступно.",
+    SECURITY_CHECK_FAILED: securityCheckFailedMessage,
     UPSTREAM_UNAVAILABLE: "Сервис временно недоступен. Попробуйте позже.",
   };
   return { ok: false, code, message: messages[code] ?? "Не удалось выполнить действие." };

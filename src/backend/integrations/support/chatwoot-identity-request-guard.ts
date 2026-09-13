@@ -32,13 +32,15 @@ type DistributedLease = {
 };
 
 type GuardOptions = {
+  actionName?: string;
   distributedCommand?: RedisCommand | null;
   limits?: GuardLimits;
+  metricPrefix?: string;
   now?: () => number;
   token?: () => string;
 };
 
-const actionName = "chatwoot_identity_probe";
+const defaultActionName = "chatwoot_identity_probe";
 const defaultSessionRateLimit = 24;
 const defaultSessionConcurrencyLimit = 2;
 const defaultRateWindowMs = 60_000;
@@ -79,22 +81,11 @@ function productionLimits(): GuardLimits {
   };
 }
 
-function capacityError(
-  reason: ChatwootIdentityCapacityError["reason"],
-  scope: ChatwootIdentityCapacityError["scope"],
-) {
-  recordOperationalEvent(
-    reason === "rate_limited"
-      ? "chatwoot_identity_rate_limited"
-      : "chatwoot_identity_concurrency_saturated",
-    scope,
-  );
-  return new ChatwootIdentityCapacityError(reason, scope);
-}
-
 export function createChatwootIdentityRequestGuard(
   options: GuardOptions = {},
 ) {
+  const actionName = options.actionName ?? defaultActionName;
+  const metricPrefix = options.metricPrefix ?? "chatwoot_identity";
   const distributedCommand = options.distributedCommand === null
     ? null
     : options.distributedCommand
@@ -107,6 +98,17 @@ export function createChatwootIdentityRequestGuard(
   let lastRedisWarningAt = Number.NEGATIVE_INFINITY;
 
   const limits = () => options.limits ?? productionLimits();
+
+  function capacityError(
+    reason: ChatwootIdentityCapacityError["reason"],
+    scope: ChatwootIdentityCapacityError["scope"],
+  ) {
+    recordOperationalEvent(
+      `${metricPrefix}_${reason}`,
+      scope,
+    );
+    return new ChatwootIdentityCapacityError(reason, scope);
+  }
 
   function pruneCounters(currentTime: number) {
     for (const [key, counter] of counters) {
@@ -164,7 +166,7 @@ export function createChatwootIdentityRequestGuard(
   }
 
   function redisDegraded(phase: "acquire" | "release", error: unknown) {
-    recordOperationalEvent("chatwoot_identity_guard_degraded", "redis");
+    recordOperationalEvent(`${metricPrefix}_guard_degraded`, "redis");
     const currentTime = now();
 
     if (currentTime - lastRedisWarningAt < redisWarningIntervalMs) {
@@ -172,7 +174,7 @@ export function createChatwootIdentityRequestGuard(
     }
 
     lastRedisWarningAt = currentTime;
-    logger.warn("chatwoot_identity_guard_redis_unavailable", {
+    logger.warn(`${metricPrefix}_guard_redis_unavailable`, {
       phase,
       errorName: error instanceof Error ? error.name : "UnknownError",
     });
@@ -333,7 +335,7 @@ export function createChatwootIdentityRequestGuard(
       const existing = inFlightProbes.get(probeKey) as Promise<T> | undefined;
 
       if (existing) {
-        recordOperationalEvent("chatwoot_identity_probe_coalesced", "session");
+        recordOperationalEvent(`${metricPrefix}_probe_coalesced`, "session");
         return existing;
       }
 

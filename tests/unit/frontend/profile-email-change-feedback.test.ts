@@ -312,7 +312,10 @@ describe("profile e-mail change feedback", () => {
       }));
     });
 
-    expect(container.textContent).toContain("Сейчас нельзя включить напоминания");
+    expect(container.textContent).toContain(
+      "Нельзя включить напоминания: e-mail не подтверждён или отправка на этот адрес отключена.",
+    );
+    expect(container.textContent).not.toContain("попробуйте позже");
     expect(container.textContent).not.toMatch(/Remnashop|Remnawave/i);
     expect(container.querySelector<HTMLInputElement>('[role="switch"]')?.disabled).toBe(true);
   });
