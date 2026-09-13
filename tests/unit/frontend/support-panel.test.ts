@@ -65,8 +65,72 @@ describe("SupportPanel", () => {
   it("points to the configured live chat instead of claiming support is unpublished", () => {
     renderSupport(false);
 
-    expect(screen.getByText(/Чат доступен после входа в аккаунт/i)).toBeTruthy();
+    expect(screen.getByText(/Войдите в аккаунт, чтобы написать нам в чате поддержки/i))
+      .toBeTruthy();
     expect(screen.queryByText(/Контакты поддержки пока не опубликованы/i)).toBeNull();
+  });
+
+  it("keeps configured contacts unchanged for signed-out users", () => {
+    render(createElement(
+      SupportChatSessionBoundary,
+      { authenticated: false, chatwootConfig: null },
+      createElement(SupportPanel, {
+        support: {
+          ...unavailable,
+          enabled: true,
+          email: "help@example.com",
+          telegramUsername: "cleanpay_support",
+          faqUrl: "https://help.example.com/faq",
+          liveChatEnabled: true,
+        },
+      }),
+    ));
+
+    expect(screen.getAllByRole("link")).toHaveLength(3);
+    expect(screen.getByRole("link", { name: /Написать на почту/i })).toBeTruthy();
+    expect(screen.getByRole("link", { name: /Telegram/i })).toBeTruthy();
+    expect(screen.getByRole("link", { name: /FAQ и инструкции/i })).toBeTruthy();
+    expect(screen.queryByText(/Войдите в аккаунт, чтобы написать нам в чате поддержки/i))
+      .toBeNull();
+    expect(screen.queryByRole("button", { name: /Открыть чат поддержки/i })).toBeNull();
+  });
+
+  it("adds the verified chat button without replacing configured contacts", async () => {
+    window.cleanPayChatwootAuthorized = true;
+    window.cleanPayChatwootIdentity = {
+      core: expectedCore,
+      customAttributes: "context",
+    };
+    document.cookie = "cw_conversation=conversation-1; Path=/";
+    document.cookie = `cw_user_${chatwootConfig.websiteToken}=identified; Path=/`;
+    window.$chatwoot = {
+      baseUrl: chatwootConfig.baseUrl,
+      websiteToken: chatwootConfig.websiteToken,
+      hasLoaded: true,
+      setUser: vi.fn(),
+      toggle: vi.fn(),
+      toggleBubbleVisibility: vi.fn(),
+      reset: vi.fn(),
+    };
+
+    render(createElement(
+      SupportChatSessionBoundary,
+      { authenticated: true, chatwootConfig },
+      createElement(SupportPanel, {
+        support: {
+          ...unavailable,
+          enabled: true,
+          email: "help@example.com",
+          telegramUsername: "cleanpay_support",
+          faqUrl: "https://help.example.com/faq",
+          liveChatEnabled: true,
+        },
+      }),
+    ));
+
+    expect(screen.getAllByRole("link")).toHaveLength(3);
+    expect(await screen.findByRole("button", { name: /Открыть чат поддержки/i }))
+      .toBeTruthy();
   });
 
   it("opens the verified Chatwoot conversation from an explicit support button", async () => {
