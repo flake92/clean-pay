@@ -251,9 +251,9 @@ export async function resolveChatwootPhaseInputPaths(value) {
     for (const role of roles) {
       const stack = pair[role];
       const [contractMetadata, assetMetadata, environmentMetadata] = await Promise.all([
-        lstat(stack.contractPath),
-        lstat(stack.assetAttestationPath),
-        lstat(stack.generatedEnvironmentPath),
+        lstat(stack.contractPath, { bigint: true }),
+        lstat(stack.assetAttestationPath, { bigint: true }),
+        lstat(stack.generatedEnvironmentPath, { bigint: true }),
       ]);
       if (!contractMetadata.isFile() || contractMetadata.isSymbolicLink()) {
         fail(`${role} pair ${pair.pairIndex} contract path is not an exact regular file.`);
