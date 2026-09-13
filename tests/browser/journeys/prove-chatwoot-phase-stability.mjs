@@ -54,10 +54,31 @@ try {
     status: "dual_image_chatwoot_phase_stability_failed",
     errorClass: error?.constructor?.name ?? "Error",
     messageSha256: sha256(String(error?.message ?? "unknown")),
+    sourceLocations: chatwootFailureSourceLocations(error),
     causeEvidence: sanitized.causeEvidence,
     causeEvidenceTruncated: sanitized.causeEvidenceTruncated,
   })}\n`);
   process.exitCode = 1;
+}
+
+function chatwootFailureSourceLocations(error) {
+  const stack = typeof error?.stack === "string" ? error.stack : "";
+  const locations = [];
+  const seen = new Set();
+  const pattern = /tests[\\/]browser[\\/]journeys[\\/]([A-Za-z0-9._-]+):(\d+):(\d+)/g;
+  for (const match of stack.matchAll(pattern)) {
+    const location = {
+      file: match[1],
+      line: Number(match[2]),
+      column: Number(match[3]),
+    };
+    const key = `${location.file}:${location.line}:${location.column}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    locations.push(location);
+    if (locations.length === 8) break;
+  }
+  return Object.freeze(locations);
 }
 
 function parseArguments(values) {
