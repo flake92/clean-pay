@@ -14,6 +14,7 @@ import {
   chatwootSessionRefreshTarget,
 } from "@/frontend/components/chatwoot-widget-state";
 import * as chatwoot from "@/frontend/lib/chatwoot";
+import { chatwootDigest } from "@/frontend/lib/chatwoot-digest";
 import {
   failedChatwootIdentityAttempt,
   ownershipConfirmedChatwootIdentityAttempt,
@@ -24,6 +25,7 @@ import {
 
 const config: ChatwootWidgetConfig = {
   baseUrl: "https://chat.example.com",
+  identityFingerprint: "1111111111111111111111111111111111111111111111111111111111111111",
   websiteToken: "website-token",
   user: {
     identifier: "user-123",
@@ -90,7 +92,7 @@ describe("Chatwoot decomposition contracts", () => {
     expect(window.cleanPayChatwootAuthorized).toBe(false);
   });
 
-  it("projects the exact signed core and merged custom-attribute fingerprints", () => {
+  it("projects the server-signed core and exact canonical custom attributes", () => {
     expect(projectChatwootIdentity(config, {
       source: "telegram",
       subscription_status: "ACTIVE",
@@ -100,10 +102,34 @@ describe("Chatwoot decomposition contracts", () => {
         subscription_status: "ACTIVE",
       },
       identity: {
-        core: "99:f270f3a9",
-        customAttributes: "52:573f330f",
+        core: config.identityFingerprint,
+        customAttributes: '[["source","telegram"],["subscription_status","ACTIVE"]]',
       },
     });
+  });
+
+  it("uses standard collision-resistant SHA-256 for persisted browser proofs", () => {
+    expect(chatwootDigest("")).toBe(
+      "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    );
+    expect(chatwootDigest("abc")).toBe(
+      "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad",
+    );
+    expect(chatwootDigest("Clean Pay — поддержка")).toBe(
+      "929d12b66965da416a52bd0d793d030a6c29e46746f229be5b2159cc5190034b",
+    );
+  });
+
+  it("keeps distinct support contexts as distinct exact in-memory values", () => {
+    const first = projectChatwootIdentity(config, {
+      recent_payments: "costarring",
+    }).identity;
+    const second = projectChatwootIdentity(config, {
+      recent_payments: "liquid",
+    }).identity;
+
+    expect(first.core).toBe(second.core);
+    expect(first.customAttributes).not.toBe(second.customAttributes);
   });
 
   it("keeps sent, waiting, ownership, and failure transitions byte-stable", () => {

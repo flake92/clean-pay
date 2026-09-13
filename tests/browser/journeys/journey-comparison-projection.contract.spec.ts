@@ -361,10 +361,10 @@ test("projects only the exact idempotent authenticated Chatwoot boundary retry",
   const frameLoaded = { method: "frame.loaded" };
   const removeLabel = { method: "removeLabel", label: "subscription_expired" };
   const identityConfirmed = { method: "identity.confirmed" };
-  const canonical = [run, hide, setUser, frameLoaded, show, removeLabel, identityConfirmed];
+  const canonical = [run, hide, setUser, frameLoaded, hide, removeLabel, identityConfirmed];
   const retried = [
-    run, hide, setUser, frameLoaded, show,
-    show, setUser, frameLoaded, show,
+    run, hide, setUser, frameLoaded, hide,
+    hide, setUser, frameLoaded, hide,
     removeLabel, identityConfirmed,
   ];
   baseline.boundaries = [{ label: "chatwoot-authenticated", value: retried }] as never;
@@ -378,10 +378,10 @@ test("projects only the exact idempotent authenticated Chatwoot boundary retry",
   expect(projectPair(changedRetry, candidate).actual)
     .not.toEqual(projectPair(changedRetry, candidate).expected);
 
-  const extraShow = structuredClone(baseline);
-  (extraShow.boundaries[0]!.value as unknown as unknown[]).splice(9, 0, show);
-  expect(projectPair(extraShow, candidate).actual)
-    .not.toEqual(projectPair(extraShow, candidate).expected);
+  const visibleLauncher = structuredClone(baseline);
+  (visibleLauncher.boundaries[0]!.value as unknown as unknown[])[4] = show;
+  expect(projectPair(visibleLauncher, candidate).actual)
+    .not.toEqual(projectPair(visibleLauncher, candidate).expected);
 });
 
 test("projects general Chatwoot journey identifiers before merge-specific checks", () => {

@@ -288,6 +288,43 @@ describe("server application flows", () => {
     });
   });
 
+  it("distinguishes Turnstile rejection from a general forbidden auth result", async () => {
+    const securityFailure = authCommands({
+      verifyHuman: vi.fn(async () => {
+        throw new AuthGatewayError("SECURITY_CHECK_FAILED");
+      }),
+    });
+    await expect(executeAuthCommand(securityFailure, {
+      kind: "login",
+      email: "u@example.com",
+      password: "secret123",
+      turnstileToken: "rejected-token",
+    })).resolves.toEqual({
+      ok: false,
+      code: "SECURITY_CHECK_FAILED",
+      message: "Cloudflare Turnstile не подтвердил проверку. Выполните её ещё раз и повторите действие.",
+    });
+    expect(securityFailure.authenticate).not.toHaveBeenCalled();
+
+    const providerForbidden = authCommands({
+      authenticate: vi.fn(async () => {
+        throw new AuthGatewayError("FORBIDDEN");
+      }),
+    });
+    const result = await executeAuthCommand(providerForbidden, {
+      kind: "login",
+      email: "blocked@example.com",
+      password: "secret123",
+      turnstileToken: "valid-token",
+    });
+    expect(result).toEqual({
+      ok: false,
+      code: "FORBIDDEN",
+      message: "Действие недоступно.",
+    });
+    expect(JSON.stringify(result)).not.toContain("Turnstile");
+  });
+
   it("owns registration fallback, session establishment, verification and audit", async () => {
     const providerSession = { context: { token: "provider-session" } };
     const commands = authCommands({

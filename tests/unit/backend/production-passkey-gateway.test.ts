@@ -130,6 +130,18 @@ describe("production passkey gateway through application workflows", () => {
     expect(mocks.generateAuthenticationOptions).toHaveBeenCalledWith(expect.objectContaining({ allowCredentials: [{ id: "credential-1", transports: ["internal"] }] }));
   });
 
+  it("preserves the dedicated Turnstile failure code and HTTP status", async () => {
+    const { ServiceError } = await import("@/backend/errors/service-error");
+    mocks.verifyTurnstileToken.mockRejectedValueOnce(
+      new ServiceError("SECURITY_CHECK_FAILED", 403),
+    );
+
+    await expect(gateway.verifyHuman("rejected-token")).rejects.toMatchObject({
+      code: "SECURITY_CHECK_FAILED",
+      status: 403,
+    });
+  });
+
   it("verifies login, advances counter and creates the full session in order", async () => {
     await expect(verifyPasskeyLogin(gateway, authenticationResponse)).resolves.toEqual({ ok: true });
     expect(mocks.verifyAuthenticationResponse).toHaveBeenCalledWith(expect.objectContaining({ expectedChallenge: "authentication" }));

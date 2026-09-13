@@ -445,7 +445,7 @@ describe("auth form controller characterization", () => {
     expect(mocks.executeAuthAction).not.toHaveBeenCalled();
     expect(hook.result.current.api).toEqual({
       loading: false,
-      error: "Пройдите единую проверку безопасности.",
+      error: "Завершите проверку Cloudflare Turnstile в блоке ниже и повторите действие.",
     });
 
     const telegram = renderHook(() => useTelegramLoginController({
@@ -455,7 +455,7 @@ describe("auth form controller characterization", () => {
     act(() => telegram.result.current.login());
     expect(telegram.result.current).toMatchObject({
       loading: false,
-      error: "Пройдите единую проверку безопасности.",
+      error: "Завершите проверку Cloudflare Turnstile в блоке ниже и повторите действие.",
     });
     expect(turnstile.reset).not.toHaveBeenCalled();
   });
