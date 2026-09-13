@@ -272,15 +272,29 @@ test("emits bounded Chatwoot child-evidence fields without starting Docker", asy
     "causeEvidenceTruncated",
     "errorClass",
     "messageSha256",
+    "sourceLocations",
     "status",
   ]);
-  expect(record).toEqual({
+  expect(record).toMatchObject({
     causeEvidence: [],
     causeEvidenceTruncated: false,
     errorClass: "Error",
     messageSha256: sha256("Chatwoot proof requires exact --plan and --output flag/value pairs."),
     status: "dual_image_chatwoot_phase_stability_failed",
   });
+  expect(record.sourceLocations.length).toBeGreaterThanOrEqual(1);
+  expect(record.sourceLocations.length).toBeLessThanOrEqual(8);
+  expect(record.sourceLocations[0]).toEqual({
+    column: expect.any(Number),
+    file: "prove-chatwoot-phase-stability.mjs",
+    line: expect.any(Number),
+  });
+  for (const location of record.sourceLocations) {
+    expect(Object.keys(location).sort()).toEqual(["column", "file", "line"]);
+    expect(location.file).toMatch(/^[A-Za-z0-9._-]+$/);
+    expect(location.line).toBeGreaterThan(0);
+    expect(location.column).toBeGreaterThan(0);
+  }
   expect(failure?.stderr).not.toContain(privateMarker);
   expect(failure?.stderr?.toLowerCase()).not.toContain(repositoryRoot.toLowerCase());
 });
