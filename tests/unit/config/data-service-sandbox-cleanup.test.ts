@@ -5,6 +5,8 @@ import { describe, expect, it } from "vitest";
 const postgresImage = "postgres:17-alpine@sha256:18cfe3ef5e6815560c98237d6216d1e5119702fb0f3894c8785dd58b8bbe5d73";
 const redisImage = "redis:7-alpine@sha256:ff02b58f971e7d7d156a1267e283fcbbeee91773b6aa36c49dac28ecfe28eadf";
 const cleanupFailureMarker = "data-service sandbox exact cleanup was not proven";
+const sandboxProcessTimeoutMs = 30_000;
+const sandboxTestTimeoutMs = sandboxProcessTimeoutMs + 5_000;
 
 function runSandbox(mode: "combined-failure" | "down-failure" | "owned-remnant") {
   const harness = `#!/usr/bin/env bash
@@ -90,7 +92,7 @@ source "\${1:?sandbox script path is required}"
       encoding: "utf8",
       env: process.env,
       input: harness,
-      timeout: 30_000,
+      timeout: sandboxProcessTimeoutMs,
     },
   );
 }
@@ -101,19 +103,19 @@ describe("data-service sandbox exact cleanup", () => {
 
     expect(result.status).not.toBe(0);
     expect(result.stderr).toContain(cleanupFailureMarker);
-  });
+  }, sandboxTestTimeoutMs);
 
   it("fails a successful verification when an owned resource remains", () => {
     const result = runSandbox("owned-remnant");
 
     expect(result.status).not.toBe(0);
     expect(result.stderr).toContain(cleanupFailureMarker);
-  });
+  }, sandboxTestTimeoutMs);
 
   it("preserves the primary status and reports a simultaneous cleanup failure", () => {
     const result = runSandbox("combined-failure");
 
     expect(result.status).toBe(23);
     expect(result.stderr).toContain(cleanupFailureMarker);
-  });
+  }, sandboxTestTimeoutMs);
 });
