@@ -87,6 +87,11 @@ export function useTelegramWebAppLoginController({
           initData,
         );
         if (!result.ok) throw new Error(result.message);
+        // A Server Action can resolve as soon as React has decoded its result,
+        // while Chromium is still committing its Set-Cookie response. Yield a
+        // browser task before replacing the document so the authenticated
+        // navigation cannot abort that response and lose the new session.
+        await new Promise<void>((resolve) => window.setTimeout(resolve, 0));
         dependencies.replaceLocation(redirectTo);
       } catch (nextError) {
         if (alive) {

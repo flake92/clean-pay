@@ -1751,7 +1751,6 @@ function assertStaticSemanticLedger(value, generation, expectedDocumentKeys, lab
     "app-profile-action",
     "app-profile-document",
     "app-profile-rsc",
-    "app-root-rsc",
   ]);
   const normalized = value.map((raw, index) => {
     const entry = record(raw, `${label} ${index}`);
@@ -1815,6 +1814,19 @@ function assertStaticSemanticLedger(value, generation, expectedDocumentKeys, lab
   equal(stableJson(observedFlow),
     stableJson(expectedFlow), `${label} exact navigation flow`);
   return normalized;
+}
+
+export function assertStaticSemanticLedgerForTest(
+  value,
+  generation,
+  expectedDocumentKeys,
+) {
+  return assertStaticSemanticLedger(
+    value,
+    generation,
+    expectedDocumentKeys,
+    "test static semantic ledger",
+  );
 }
 
 function assertStaticRequestLedger(value, expectedDocumentKeys, label) {

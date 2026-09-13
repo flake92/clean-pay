@@ -26,6 +26,7 @@ import {
   assertChatwootJourneyContract,
   assertChatwootPhaseInput,
   assertChatwootPhaseProof,
+  assertStaticSemanticLedgerForTest,
   createChatwootPhaseComposeProjectName,
   createChatwootPhaseProof,
   readExactChatwootExternalPlan,
@@ -3782,6 +3783,27 @@ test("accepts the exact recreated terminal SPA cabinet browser flow", () => {
       .map((entry) => entry.documentKey));
   expect(semanticRequestLedger.map((entry) => entry.key))
     .toEqual(expect.arrayContaining(["app-cabinet-action", "chatwoot-widget-frame"]));
+  expect(assertStaticSemanticLedgerForTest(
+    finalized.semanticRequestLedger,
+    "recreated",
+    ["app-login-document"],
+  )).toEqual(finalized.semanticRequestLedger);
+
+  for (const forbiddenKey of [
+    "app-profile-action",
+    "app-profile-document",
+    "app-profile-rsc",
+  ]) {
+    const forbiddenProfileRequest = structuredClone(
+      finalized.semanticRequestLedger,
+    ) as Array<Record<string, unknown>>;
+    forbiddenProfileRequest[0].key = forbiddenKey;
+    expect(() => assertStaticSemanticLedgerForTest(
+      forbiddenProfileRequest,
+      "recreated",
+      ["app-login-document"],
+    ), forbiddenKey).toThrow(/provider-profile request/);
+  }
 
   const unrelatedFailure = structuredClone(records);
   const widgetFrame = unrelatedFailure.find(({ classification }) => (
