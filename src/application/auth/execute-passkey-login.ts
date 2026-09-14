@@ -6,6 +6,7 @@ import type {
   PasskeyLoginOptionsResult,
   PasskeyVerificationResult,
 } from "@/application/models/passkey-actions";
+import { securityCheckFailedMessage } from "@/application/models/security-check-messages";
 
 function failure(
   error: unknown,
@@ -21,6 +22,16 @@ function failure(
       code,
       message: "Этот ключ не подходит выбранному аккаунту. Войдите по паролю и при необходимости создайте новый ключ в профиле.",
     };
+  }
+  if (code === "SECURITY_CHECK_FAILED") {
+    return {
+      ok: false,
+      code,
+      message: securityCheckFailedMessage,
+    };
+  }
+  if (code === "FORBIDDEN") {
+    return { ok: false, code, message: "Действие недоступно." };
   }
   return { ok: false, code, message: fallback };
 }

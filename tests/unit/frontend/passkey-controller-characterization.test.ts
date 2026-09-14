@@ -204,7 +204,9 @@ describe("passkey controller characterization", () => {
     expect(mocks.verifyLogin).not.toHaveBeenCalled();
     expect(resetTurnstile).not.toHaveBeenCalled();
     expect((button as HTMLButtonElement).disabled).toBe(false);
-    expect(screen.getByText("Пройдите единую проверку безопасности.")).toBeTruthy();
+    expect(screen.getByText(
+      "Завершите проверку Cloudflare Turnstile в блоке ниже и повторите действие.",
+    )).toBeTruthy();
   });
 
   it("keeps one catch reset when the begin action throws", async () => {

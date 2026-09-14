@@ -16,7 +16,7 @@ export type ProfilePresentationState =
       hasEmail: boolean;
       isEmailVerified: boolean;
       isTelegramOnly: boolean;
-      canManageRemnashopEmail: boolean;
+      canManageEmail: boolean;
       canChangePassword: boolean;
     };
 
@@ -63,7 +63,7 @@ export function selectProfilePresentation(
     hasEmail,
     isEmailVerified: hasEmail && user.emailVerified,
     isTelegramOnly: Boolean(user.telegramId) && !user.email,
-    canManageRemnashopEmail: Boolean(user.email),
+    canManageEmail: Boolean(user.email),
     canChangePassword: hasEmail,
   };
 }

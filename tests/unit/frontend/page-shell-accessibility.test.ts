@@ -32,7 +32,7 @@ vi.mock("@/shared/branding", () => ({
   getBranding: () => ({ name: "Clean Pay", logoUrl: "/logo.png" }),
 }));
 vi.mock("@/frontend/components/chatwoot-widget", () => ({
-  ChatwootGuestBoundary: () => null,
+  SupportChatGuestBoundary: () => null,
 }));
 vi.mock("@/frontend/layout/AppTopbar", () => ({
   default: () => createElement("header", null, "topbar"),

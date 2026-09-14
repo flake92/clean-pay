@@ -29,12 +29,13 @@ import {
   type ProfileTurnstileHandle,
 } from "@/frontend/components/profile-transitions";
 import { navigateTo } from "@/frontend/lib/browser-navigation";
-import { hasTurnstileSiteKey } from "@/frontend/lib/turnstile-transitions";
+import {
+  hasTurnstileSiteKey,
+  missingSecurityCheckTokenMessage,
+} from "@/frontend/lib/turnstile-transitions";
 
 function missingTurnstileTokenMessage(siteKey?: string | null) {
-  return hasTurnstileSiteKey(siteKey)
-    ? "Пройдите проверку Cloudflare Turnstile."
-    : "Ключ сайта Cloudflare Turnstile не настроен.";
+  return missingSecurityCheckTokenMessage(hasTurnstileSiteKey(siteKey));
 }
 
 export function useProfileController({

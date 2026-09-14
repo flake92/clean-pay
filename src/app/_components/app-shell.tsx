@@ -2,9 +2,10 @@ import { loadNavigationShell } from "@/application/navigation/load-navigation";
 import { requestAuthProfileGateway } from "@/app/_composition/request-scoped-readers";
 import { createChatwootWidgetConfig } from "@/app/_composition/support-runtime";
 import {
-  ChatwootGuestBoundary,
-  ChatwootWidget,
+  SupportChatGuestBoundary,
+  SupportChatRuntime,
 } from "@/frontend/components/chatwoot-widget";
+import { SupportChatSessionBoundary } from "@/frontend/components/chatwoot-session-context";
 import Layout from "@/frontend/layout/layout";
 import { sessionRefreshPath } from "@/shared/auth/session-navigation";
 import { redirect } from "next/navigation";
@@ -29,9 +30,12 @@ export async function AppShell({
   const chatwoot = createChatwootWidgetConfig(shell.supportIdentity);
 
   return (
-    <>
+    <SupportChatSessionBoundary
+      authenticated={shell.navigation.authenticated}
+      chatwootConfig={chatwoot}
+    >
       <Layout navigation={shell.navigation}>{children}</Layout>
-      {chatwoot ? <ChatwootWidget config={chatwoot} /> : <ChatwootGuestBoundary />}
-    </>
+      {chatwoot ? <SupportChatRuntime config={chatwoot} /> : <SupportChatGuestBoundary />}
+    </SupportChatSessionBoundary>
   );
 }

@@ -3,7 +3,10 @@ import {
   authStageAfterIdentification,
   type AuthFormStage,
 } from "@/frontend/components/auth-form-presentation";
-import { hasTurnstileSiteKey } from "@/frontend/lib/turnstile-transitions";
+import {
+  hasTurnstileSiteKey,
+  missingSecurityCheckTokenMessage,
+} from "@/frontend/lib/turnstile-transitions";
 import { registrationEmailVerificationPath } from "@/shared/auth/account-setup-flow";
 
 export type AuthApiState = {
@@ -165,9 +168,7 @@ export function normalizeAuthCode(value: string) {
 }
 
 export function missingAuthTurnstileTokenMessage(siteKey?: string | null) {
-  return hasTurnstileSiteKey(siteKey)
-    ? "Пройдите единую проверку безопасности."
-    : "Проверка безопасности временно недоступна.";
+  return missingSecurityCheckTokenMessage(hasTurnstileSiteKey(siteKey));
 }
 
 export function authenticatedAuthDestination(

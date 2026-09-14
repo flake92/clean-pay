@@ -74,7 +74,7 @@ function ProfilePanelContent({
   const telegramId = user.telegramId;
   const {
     canChangePassword,
-    canManageRemnashopEmail,
+    canManageEmail,
     hasEmail,
     isEmailVerified,
     isTelegramOnly,
@@ -143,7 +143,7 @@ function ProfilePanelContent({
             {!emailReminders.emailEligible ? (
               <Message
                 severity="warn"
-                text="Remnashop сейчас не разрешает включить напоминания. Проверьте подтверждение e-mail или попробуйте позже; уже сохранённую настройку можно отключить."
+                text="Нельзя включить напоминания: e-mail не подтверждён или отправка на этот адрес отключена. Подтвердите адрес; если он уже подтверждён, обратитесь в поддержку. Уже сохранённую настройку можно отключить."
               />
             ) : null}
             <p className="m-0 line-height-3 text-sm text-600" id="email-expiration-reminders-help">
@@ -174,7 +174,7 @@ function ProfilePanelContent({
         </Card>
       ) : null}
 
-      {canManageRemnashopEmail ? (
+      {canManageEmail ? (
         <Card title="Смена e-mail">
           <form className="flex flex-column gap-3" onSubmit={changeEmail}>
             <ProfileEmailChangeFields

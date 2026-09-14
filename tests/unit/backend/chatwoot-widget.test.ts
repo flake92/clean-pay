@@ -44,6 +44,7 @@ describe("Chatwoot widget server configuration", () => {
 
     expect(config).toEqual({
       baseUrl: "https://chat.example.com",
+      identityFingerprint: expect.stringMatching(/^[a-f0-9]{64}$/),
       websiteToken: "website_token_123456789",
       user: {
         identifier: "user-123",
@@ -57,7 +58,38 @@ describe("Chatwoot widget server configuration", () => {
         },
       },
     });
+    expect(config?.identityFingerprint).not.toBe(config?.user.identifierHash);
     expect(JSON.stringify(config)).not.toContain(mockedEnv.chatwoot!.hmacToken);
+  });
+
+  it("cryptographically binds the browser core to every relevant server field", () => {
+    const baseline = createChatwootWidgetConfig(identity)!;
+    const variants = [
+      createChatwootWidgetConfig({ ...identity, userId: "user-456" })!,
+      createChatwootWidgetConfig({ ...identity, displayName: "Other Name" })!,
+      createChatwootWidgetConfig({ ...identity, email: "other@example.com" })!,
+      createChatwootWidgetConfig({ ...identity, telegramId: "999" })!,
+      createChatwootWidgetConfig({ ...identity, telegramUsername: "other" })!,
+    ];
+
+    expect(new Set([
+      baseline.identityFingerprint,
+      ...variants.map((config) => config.identityFingerprint),
+    ]).size).toBe(variants.length + 1);
+
+    mockedEnv.chatwoot = {
+      ...mockedEnv.chatwoot!,
+      baseUrl: "https://other-chat.example.com",
+    };
+    const otherOrigin = createChatwootWidgetConfig(identity)!;
+    mockedEnv.chatwoot = {
+      ...mockedEnv.chatwoot,
+      websiteToken: "other-website-token",
+    };
+    const otherInbox = createChatwootWidgetConfig(identity)!;
+
+    expect(otherOrigin.identityFingerprint).not.toBe(baseline.identityFingerprint);
+    expect(otherInbox.identityFingerprint).not.toBe(otherOrigin.identityFingerprint);
   });
 
   it("never sends an unverified e-mail and clears missing Telegram attributes", () => {

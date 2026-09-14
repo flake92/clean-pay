@@ -239,10 +239,11 @@ export function useChatwootWidgetController(
               cancelIdentityAttemptTimer();
               cancelIdentityProbeTimer();
               identityProbeCounts.delete(attemptId);
-              // Ownership permits revealing this contact, but does not prove
-              // that Chatwoot applied the complete setUser payload. The
-              // bounded fingerprint restores only this exact conversation;
-              // identify() reveals it or queues newer context separately.
+              // Ownership permits the first-party support action to open this
+              // contact, but does not prove that Chatwoot applied the complete
+              // setUser payload. The server-bound, SHA-backed ownership proof
+              // restores only this exact conversation; identify() updates
+              // context separately.
               identifyWithCurrentContext();
             }
             return;
@@ -281,7 +282,7 @@ export function useChatwootWidgetController(
         } catch {
           cancelIdentityAttemptTimer();
           cancelIdentityProbeTimer();
-          clearChatwootIdentityState(true);
+          failChatwootIdentity(config, supportContext?.customAttributes);
           hideLauncher();
         }
       }
@@ -359,8 +360,8 @@ export function useChatwootWidgetController(
 
         // Chatwoot emits an uncorrelated error before its contact endpoint is
         // necessarily queryable. Keep the bounded server verification alive:
-        // it can safely restore the official launcher for the same actor, or
-        // the existing timeout/retry path will still fail closed.
+        // it can safely restore the first-party support action for the same
+        // actor, or the existing timeout/retry path will still fail closed.
         hideLauncher();
         scheduleIdentityAttemptTimeout();
         scheduleIdentityProbe(0);
@@ -423,6 +424,7 @@ export function useChatwootWidgetController(
     window.addEventListener("chatwoot:ready", identifyWithCurrentContext);
     window.addEventListener("chatwoot:error", identityTransportFailed);
     window.addEventListener("chatwoot:opened", identifyAndRefresh);
+    window.addEventListener("chatwoot:closed", hideLauncher);
     window.addEventListener("chatwoot:on-start-conversation", identifyAndRefresh);
     // The first message is emitted only after Chatwoot has created the actual
     // conversation. Reapplying here makes managed labels reliable for a new
@@ -451,6 +453,7 @@ export function useChatwootWidgetController(
         // A running SDK cannot switch inboxes safely without reloading the
         // document. Hide a stale deployment instead of mixing conversations.
         enterChatwootGuestMode();
+        failChatwootIdentity(config, supportContext?.customAttributes);
         return;
       }
 
@@ -459,7 +462,7 @@ export function useChatwootWidgetController(
       }
     }).catch(() => {
       if (active) {
-        clearChatwootIdentityState(true);
+        failChatwootIdentity(config, supportContext?.customAttributes);
       }
     });
 
@@ -473,6 +476,7 @@ export function useChatwootWidgetController(
       window.removeEventListener("chatwoot:ready", identifyWithCurrentContext);
       window.removeEventListener("chatwoot:error", identityTransportFailed);
       window.removeEventListener("chatwoot:opened", identifyAndRefresh);
+      window.removeEventListener("chatwoot:closed", hideLauncher);
       window.removeEventListener("chatwoot:on-start-conversation", identifyAndRefresh);
       window.removeEventListener("chatwoot:on-message", identifyAndRefresh);
       // AppShell is a page-level wrapper. Do not reset here: ordinary client

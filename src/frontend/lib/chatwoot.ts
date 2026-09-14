@@ -22,6 +22,7 @@ import {
   sentChatwootIdentityAttempt,
   waitingChatwootIdentityAttempt,
 } from "@/frontend/lib/chatwoot-transitions";
+import { notifyChatwootStateChanged } from "@/frontend/lib/chatwoot-state-events";
 
 export type { ChatwootIdentificationStatus };
 export {
@@ -70,6 +71,7 @@ function sendChatwootIdentity(
 
   expireChatwootCookie(`cw_user_${config.websiteToken}`);
   window.cleanPayChatwootPendingIdentity = pending;
+  notifyChatwootStateChanged();
 
   try {
     chatwoot.setUser(config.user.identifier, {
@@ -127,9 +129,7 @@ function queueChatwootIdentityAfterOwnership(
   chatwoot.user = undefined;
   chatwoot.hasLoaded = false;
   chatwoot.resetTriggered = false;
-  chatwoot.toggleBubbleVisibility(
-    pending.core === identity.core ? "show" : "hide",
-  );
+  chatwoot.toggleBubbleVisibility("hide");
   expireChatwootCookie(`cw_user_${config.websiteToken}`);
   window.cleanPayChatwootPendingIdentity = waitingChatwootIdentityAttempt(
     identity,
@@ -137,6 +137,7 @@ function queueChatwootIdentityAfterOwnership(
     Date.now(),
     0,
   );
+  notifyChatwootStateChanged();
   frame.replaceWith(replacement);
   return true;
 }
@@ -144,6 +145,7 @@ function queueChatwootIdentityAfterOwnership(
 export function enterChatwootAuthenticatedMode() {
   if (typeof window !== "undefined") {
     window.cleanPayChatwootAuthorized = true;
+    notifyChatwootStateChanged();
   }
 }
 
@@ -158,11 +160,12 @@ export function identifyChatwootUser(
   }
 
   const { identity: desired } = projectChatwootIdentity(config, supportAttributes);
-  const previous = window.cleanPayChatwootIdentity ?? storedChatwootIdentity();
+  const previous = window.cleanPayChatwootIdentity
+    ?? storedChatwootIdentity(desired);
   const identityCookieName = `cw_user_${config.websiteToken}`;
   const conversation = chatwootCookieValue("cw_conversation");
   const ownership = conversation
-    ? restoreChatwootOwnership(desired.core, conversation)
+    ? restoreChatwootOwnership(desired, conversation)
     : undefined;
   const failed = window.cleanPayChatwootFailedIdentity;
 
@@ -170,6 +173,7 @@ export function identifyChatwootUser(
     // A prior server-confirmed proof for this exact signed actor and
     // conversation wins over an uncorrelated, late metadata error.
     window.cleanPayChatwootFailedIdentity = undefined;
+    notifyChatwootStateChanged();
   }
 
   if (
@@ -183,6 +187,7 @@ export function identifyChatwootUser(
   if (failed) {
     // A changed signed identity or support context gets its own bounded cycle.
     window.cleanPayChatwootFailedIdentity = undefined;
+    notifyChatwootStateChanged();
   }
 
   const pending = window.cleanPayChatwootPendingIdentity;
@@ -191,7 +196,7 @@ export function identifyChatwootUser(
     if (pending.phase === "ownership_confirmed") {
       const ownershipMatches = (
         conversation !== null
-        && restoreChatwootOwnership(pending.core, conversation)?.customAttributes
+        && restoreChatwootOwnership(pending, conversation)?.customAttributes
           === pending.customAttributes
       );
 
@@ -213,7 +218,7 @@ export function identifyChatwootUser(
         pending.core === desired.core
         && pending.customAttributes === desired.customAttributes
       ) {
-        chatwoot.toggleBubbleVisibility("show");
+        chatwoot.toggleBubbleVisibility("hide");
         return "ready";
       }
 
@@ -228,7 +233,7 @@ export function identifyChatwootUser(
     // message from the replacement iframe. Generic ready/open events must not
     // race it.
     if (ownership?.core === pending.core) {
-      chatwoot.toggleBubbleVisibility("show");
+      chatwoot.toggleBubbleVisibility("hide");
     }
     return "pending";
   }
@@ -242,12 +247,12 @@ export function identifyChatwootUser(
     if (conversation) {
       rememberChatwootOwnership(desired, conversation, false);
     }
-    chatwoot.toggleBubbleVisibility("show");
+    chatwoot.toggleBubbleVisibility("hide");
     return "ready";
   }
 
   if (ownership?.customAttributes === desired.customAttributes) {
-    chatwoot.toggleBubbleVisibility("show");
+    chatwoot.toggleBubbleVisibility("hide");
     return "ready";
   }
 
@@ -257,9 +262,9 @@ export function identifyChatwootUser(
     // in flight.
     chatwoot.toggleBubbleVisibility("hide");
   } else {
-    // Metadata may be stale, but the conversation itself was already proved
-    // to belong to the current actor and can remain usable during its update.
-    chatwoot.toggleBubbleVisibility("show");
+    // Metadata may be stale, but the conversation itself remains available
+    // through Clean Pay's support button during its update.
+    chatwoot.toggleBubbleVisibility("hide");
   }
 
   // The SDK's identity cookie ignores custom_attributes. Force the signed
@@ -287,6 +292,7 @@ export function failChatwootPendingIdentityAttempt(
 
   window.cleanPayChatwootFailedIdentity = failedChatwootIdentityAttempt(pending);
   window.cleanPayChatwootPendingIdentity = undefined;
+  notifyChatwootStateChanged();
   if (websiteToken) {
     expireChatwootCookie(`cw_user_${websiteToken}`);
   }
@@ -361,6 +367,7 @@ export function retryChatwootIdentityAttempt(
     Date.now(),
     pending.retryCount + 1,
   );
+  notifyChatwootStateChanged();
   frame.replaceWith(replacement);
   return true;
 }
@@ -400,6 +407,7 @@ export function confirmChatwootIdentity(expectedAttemptId?: string) {
   if (conversation) {
     rememberChatwootOwnership(pending, conversation, false);
   }
+  notifyChatwootStateChanged();
   return true;
 }
 
@@ -407,9 +415,9 @@ export function confirmChatwootIdentity(expectedAttemptId?: string) {
  * Marks a transport generation as ownership-confirmed after the current
  * conversation was proved to belong to the desired user, without claiming
  * that Chatwoot applied the generation's name, email or custom attributes.
- * The bounded proof persists only non-reversible identity, attempted-payload,
- * and conversation fingerprints; confirmChatwootIdentity() remains the sole
- * path that records the complete payload as successfully applied.
+ * The bounded proof persists only a domain-separated server identity and
+ * SHA-256 payload/conversation digests; confirmChatwootIdentity() remains the
+ * sole path that records the complete payload as successfully applied.
  */
 export function confirmChatwootIdentityOwnership(expectedAttemptId: string) {
   const pending = window.cleanPayChatwootPendingIdentity;
@@ -432,11 +440,12 @@ export function confirmChatwootIdentityOwnership(expectedAttemptId: string) {
     customAttributes: pending.customAttributes,
   }, conversation, true);
   window.cleanPayChatwootFailedIdentity = undefined;
+  notifyChatwootStateChanged();
   return true;
 }
 
 /**
- * Keeps the official launcher usable when Chatwoot reports a late payload
+ * Keeps the verified conversation usable when Chatwoot reports a late payload
  * update error after Clean Pay already proved that the active conversation
  * belongs to the authenticated user. The proof is scoped to fingerprints of
  * the signed core identity and exact conversation; logout or an account or
@@ -461,7 +470,7 @@ export function retainChatwootVerifiedOwnership(
   }
 
   const { identity } = projectChatwootIdentity(config, supportAttributes);
-  const ownership = restoreChatwootOwnership(identity.core, conversation);
+  const ownership = restoreChatwootOwnership(identity, conversation);
 
   if (
     !ownership
@@ -481,9 +490,10 @@ export function retainChatwootVerifiedOwnership(
       ownershipConfirmedChatwootIdentityAttempt(pending);
   }
   window.cleanPayChatwootFailedIdentity = undefined;
+  notifyChatwootStateChanged();
 
   try {
-    chatwoot.toggleBubbleVisibility("show");
+    chatwoot.toggleBubbleVisibility("hide");
   } catch {
     return false;
   }

@@ -364,10 +364,16 @@ describe("Turnstile helpers", () => {
     );
 
     vi.stubEnv("TURNSTILE_SECRET_KEY", "secret");
-    await expect(verifyTurnstileToken(null, "auth_login")).rejects.toMatchObject({ code: "FORBIDDEN", status: 403 });
+    await expect(verifyTurnstileToken(null, "auth_login")).rejects.toMatchObject({
+      code: "SECURITY_CHECK_FAILED",
+      status: 403,
+    });
 
     vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(JSON.stringify({ success: false }), { status: 200 }));
-    await expect(verifyTurnstileToken("bad", "auth_login")).rejects.toMatchObject({ code: "FORBIDDEN" });
+    await expect(verifyTurnstileToken("bad", "auth_login")).rejects.toMatchObject({
+      code: "SECURITY_CHECK_FAILED",
+      status: 403,
+    });
   });
 
   it("rejects a successful Turnstile response issued for another hostname", async () => {
@@ -378,7 +384,10 @@ describe("Turnstile helpers", () => {
       new Response(JSON.stringify({ success: true, hostname: "attacker.example", action: "auth_login" }), { status: 200 }),
     );
 
-    await expect(verifyTurnstileToken("token", "auth_login")).rejects.toMatchObject({ code: "FORBIDDEN", status: 403 });
+    await expect(verifyTurnstileToken("token", "auth_login")).rejects.toMatchObject({
+      code: "SECURITY_CHECK_FAILED",
+      status: 403,
+    });
   });
 
   it("rejects a successful token issued for another action", async () => {
@@ -389,7 +398,10 @@ describe("Turnstile helpers", () => {
       new Response(JSON.stringify({ success: true, hostname: "localhost", action: "auth_register" }), { status: 200 }),
     );
 
-    await expect(verifyTurnstileToken("token", "auth_login")).rejects.toMatchObject({ code: "FORBIDDEN", status: 403 });
+    await expect(verifyTurnstileToken("token", "auth_login")).rejects.toMatchObject({
+      code: "SECURITY_CHECK_FAILED",
+      status: 403,
+    });
   });
 
   it("rejects replay after Cloudflare consumes a single-use token", async () => {
@@ -406,7 +418,7 @@ describe("Turnstile helpers", () => {
 
     await expect(verifyTurnstileToken("single-use", "auth_login")).resolves.toBeUndefined();
     await expect(verifyTurnstileToken("single-use", "auth_login")).rejects.toMatchObject({
-      code: "FORBIDDEN",
+      code: "SECURITY_CHECK_FAILED",
       status: 403,
     });
   });

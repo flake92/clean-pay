@@ -269,6 +269,12 @@ describe("production auth and profile adapters", () => {
   });
 
   it("translates security, persistence and unknown failures at the gateway boundary", async () => {
+    mocks.verifyTurnstileToken.mockRejectedValueOnce(
+      new ServiceError("SECURITY_CHECK_FAILED", 403),
+    );
+    await expect(productionAuthCommands.verifyHuman("token", "auth_login"))
+      .rejects.toMatchObject({ code: "SECURITY_CHECK_FAILED" });
+
     mocks.verifyTurnstileToken.mockRejectedValueOnce(new ServiceError("RATE_LIMITED", 429));
     await expect(productionAuthCommands.verifyHuman("token", "auth_login"))
       .rejects.toMatchObject({ code: "RATE_LIMITED" });
@@ -318,6 +324,12 @@ describe("production auth and profile adapters", () => {
   });
 
   it("translates e-mail verification adapter failures", async () => {
+    mocks.verifyTurnstileToken.mockRejectedValueOnce(
+      new ServiceError("SECURITY_CHECK_FAILED", 403),
+    );
+    await expect(productionEmailVerificationCommands.verifyHuman("token", "email_verification"))
+      .rejects.toMatchObject({ code: "SECURITY_CHECK_FAILED" });
+
     mocks.verifyTurnstileToken.mockRejectedValueOnce(new ServiceError("RATE_LIMITED", 429));
     await expect(productionEmailVerificationCommands.verifyHuman("token", "email_verification"))
       .rejects.toMatchObject({ code: "RATE_LIMITED" });

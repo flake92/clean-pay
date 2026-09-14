@@ -29,13 +29,14 @@ import {
   type LinkAccountTurnstileHandle,
 } from "@/frontend/components/link-account-transitions";
 import { navigateTo, replaceWith } from "@/frontend/lib/browser-navigation";
-import { hasTurnstileSiteKey } from "@/frontend/lib/turnstile-transitions";
+import {
+  hasTurnstileSiteKey,
+  missingSecurityCheckTokenMessage,
+} from "@/frontend/lib/turnstile-transitions";
 import { accountSetupCompletePath } from "@/shared/auth/account-setup-flow";
 
 function missingTurnstileTokenMessage(siteKey?: string | null) {
-  return hasTurnstileSiteKey(siteKey)
-    ? "Пройдите проверку Cloudflare Turnstile."
-    : "Cloudflare Turnstile site key is not configured.";
+  return missingSecurityCheckTokenMessage(hasTurnstileSiteKey(siteKey));
 }
 
 export function useLinkAccountController({
