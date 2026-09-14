@@ -14,13 +14,15 @@ import {
 
 type ChatwootActionState = "signed-out" | "connecting" | "failed" | "ready";
 
+type ExpectedChatwootIdentity = {
+  baseUrl: string;
+  core: string;
+  websiteToken: string;
+};
+
 function chatwootActionState(
   authenticated: boolean,
-  expectedIdentity: {
-    baseUrl: string;
-    core: string;
-    websiteToken: string;
-  } | null,
+  expectedIdentity: ExpectedChatwootIdentity | null,
 ): ChatwootActionState {
   if (!authenticated || typeof window === "undefined") {
     return "signed-out";
@@ -67,11 +69,7 @@ function chatwootActionState(
   ) ? "ready" : "connecting";
 }
 
-export function SupportChatOpenButton({
-  hideWhenSignedOut = false,
-}: {
-  hideWhenSignedOut?: boolean;
-} = {}) {
+function useSupportChatActionState() {
   const authenticated = useSupportChatSessionAuthenticated();
   const expectedIdentity = useSupportChatExpectedIdentity();
   const [state, setState] = useState<ChatwootActionState>(
@@ -96,6 +94,16 @@ export function SupportChatOpenButton({
       window.removeEventListener("chatwoot:error", refreshAfterCurrentEvent);
     };
   }, [authenticated, expectedIdentity]);
+
+  return { authenticated, expectedIdentity, state };
+}
+
+export function SupportChatOpenButton({
+  hideWhenSignedOut = false,
+}: {
+  hideWhenSignedOut?: boolean;
+} = {}) {
+  const { authenticated, expectedIdentity, state } = useSupportChatActionState();
 
   if (state === "signed-out") {
     if (hideWhenSignedOut) {
@@ -134,6 +142,54 @@ export function SupportChatOpenButton({
     >
       <span className="p-button-icon p-c pi pi-comments" />
       <span className="p-button-label">Открыть чат поддержки</span>
+    </button>
+  );
+}
+
+export function SupportChatFloatingButton() {
+  const { authenticated, expectedIdentity, state } = useSupportChatActionState();
+  const [chatOpen, setChatOpen] = useState(false);
+
+  useEffect(() => {
+    const markOpen = () => setChatOpen(true);
+    const markClosed = () => setChatOpen(false);
+
+    window.addEventListener("chatwoot:opened", markOpen);
+    window.addEventListener("chatwoot:closed", markClosed);
+
+    return () => {
+      window.removeEventListener("chatwoot:opened", markOpen);
+      window.removeEventListener("chatwoot:closed", markClosed);
+    };
+  }, []);
+
+  if (!expectedIdentity || state === "signed-out" || state === "failed") {
+    return null;
+  }
+
+  const ready = state === "ready";
+  const expanded = ready && chatOpen;
+  const label = ready
+    ? (expanded ? "Закрыть чат поддержки" : "Открыть чат поддержки")
+    : "Подключаем чат поддержки";
+
+  return (
+    <button
+      aria-busy={!ready}
+      aria-expanded={expanded}
+      aria-label={label}
+      className="clean-pay-chatwoot-launcher"
+      data-state={state}
+      disabled={!ready}
+      onClick={() => {
+        if (chatwootActionState(authenticated, expectedIdentity) === "ready") {
+          window.$chatwoot?.toggle?.(expanded ? "close" : "open");
+        }
+      }}
+      title={label}
+      type="button"
+    >
+      <i className={`pi ${expanded ? "pi-times" : "pi-comments"}`} aria-hidden="true" />
     </button>
   );
 }

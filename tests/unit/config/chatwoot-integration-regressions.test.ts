@@ -80,7 +80,10 @@ describe("Chatwoot integration boundaries", () => {
 
     for (const path of [
       "tests/unit/frontend/chatwoot-client.test.ts",
+      "tests/unit/frontend/chatwoot-floating-button.test.ts",
+      "tests/unit/frontend/support-panel.test.ts",
       "tests/unit/frontend/chatwoot-widget.test.ts",
+      "src/frontend/components/chatwoot-open-button.tsx",
       "src/frontend/components/chatwoot-widget.tsx",
       "src/frontend/lib/chatwoot.ts",
     ]) {
@@ -90,12 +93,16 @@ describe("Chatwoot integration boundaries", () => {
     expect(coverage).toContain(
       '\"src/frontend/components/chatwoot-widget.tsx\": {',
     );
+    expect(coverage).toContain(
+      '\"src/frontend/components/chatwoot-open-button.tsx\": {',
+    );
     expect(coverage).toContain('\"src/frontend/lib/chatwoot.ts\": {');
   });
 
   it("keeps extracted Chatwoot modules inside equivalent coverage gates", () => {
     const coverage = source("config/vitest/frontend.mts");
     const componentModules = [
+      "src/frontend/components/chatwoot-open-button.tsx",
       "src/frontend/components/chatwoot-widget-controller.ts",
       "src/frontend/components/chatwoot-widget-state.ts",
     ];
@@ -148,6 +155,7 @@ describe("Chatwoot integration boundaries", () => {
   });
 
   it("keeps the third-party launcher hidden behind the first-party support action", () => {
+    const appShell = source("src/app/_components/app-shell.tsx");
     const component = source("src/frontend/components/chatwoot-widget.tsx");
     const client = source("src/frontend/lib/chatwoot.ts");
     const supportButton = source("src/frontend/components/chatwoot-open-button.tsx");
@@ -159,8 +167,14 @@ describe("Chatwoot integration boundaries", () => {
     expect(client).not.toContain('toggleBubbleVisibility("show")');
     expect(supportButton).toContain('window.$chatwoot?.toggle?.("open")');
     expect(supportButton).toContain("Открыть чат поддержки");
-    expect(layout).not.toContain('@use "./chatwoot"');
-    expect(existsSync("src/frontend/styles/layout/_chatwoot.scss")).toBe(false);
+    expect(supportButton).toContain("clean-pay-chatwoot-launcher");
+    expect(appShell).toContain("<SupportChatFloatingButton />");
+    expect(layout).toContain('@use "./chatwoot"');
+    expect(existsSync("src/frontend/styles/layout/_chatwoot.scss")).toBe(true);
+    const launcherStyle = source("src/frontend/styles/layout/_chatwoot.scss");
+    expect(launcherStyle).toContain("position: fixed");
+    expect(launcherStyle).toContain("bottom: max(1rem, env(safe-area-inset-bottom))");
+    expect(launcherStyle).toContain("right: max(1rem, env(safe-area-inset-right))");
   });
 
   it("keeps internal subscription-provider names out of customer frontend modules", () => {

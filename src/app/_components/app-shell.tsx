@@ -5,6 +5,7 @@ import {
   SupportChatGuestBoundary,
   SupportChatRuntime,
 } from "@/frontend/components/chatwoot-widget";
+import { SupportChatFloatingButton } from "@/frontend/components/chatwoot-open-button";
 import { SupportChatSessionBoundary } from "@/frontend/components/chatwoot-session-context";
 import Layout from "@/frontend/layout/layout";
 import { sessionRefreshPath } from "@/shared/auth/session-navigation";
@@ -35,7 +36,12 @@ export async function AppShell({
       chatwootConfig={chatwoot}
     >
       <Layout navigation={shell.navigation}>{children}</Layout>
-      {chatwoot ? <SupportChatRuntime config={chatwoot} /> : <SupportChatGuestBoundary />}
+      {chatwoot ? (
+        <>
+          <SupportChatRuntime config={chatwoot} />
+          <SupportChatFloatingButton />
+        </>
+      ) : <SupportChatGuestBoundary />}
     </SupportChatSessionBoundary>
   );
 }
