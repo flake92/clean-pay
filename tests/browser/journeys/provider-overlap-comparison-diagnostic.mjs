@@ -1,7 +1,10 @@
 import { createHash } from "node:crypto";
 import { types } from "node:util";
 
-import { validateProviderOverlapSemanticLedger } from "./provider-overlap-browser-contract.mjs";
+import {
+  normalizeProviderOverlapRequestContractSemanticLedger,
+  validateProviderOverlapSemanticLedger,
+} from "./provider-overlap-browser-contract.mjs";
 
 const maximumEntries = 256;
 const maximumMismatches = 8;
@@ -94,7 +97,9 @@ function normalizedSnapshot(navigation) {
     return Object.fromEntries(semanticFields.map((field) => [field, dataProperty(entry, field)]));
   });
   // Reuse the oracle's allowlist on safe data copies; never serialize raw input.
-  const ledger = validateProviderOverlapSemanticLedger(projected);
+  const ledger = normalizeProviderOverlapRequestContractSemanticLedger(
+    validateProviderOverlapSemanticLedger(projected),
+  );
   const classes = [...new Set(boundedArray(dataProperty(navigation, "staticRequestLedger"))
     .map((entry) => {
       const value = dataProperty(entry, "class");
