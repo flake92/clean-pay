@@ -192,6 +192,85 @@ export function providerOverlapChatwootIdentityBoundarySettled(scope = globalThi
   return identityConfirmationCount === 1;
 }
 
+export function recordProviderOverlapRouteIdentity({
+  request,
+  requestByIdentity,
+  routedRequestIdentities,
+}) {
+  if (!(requestByIdentity instanceof Map) || !(routedRequestIdentities instanceof Set)
+    || !request || typeof request !== "object"
+    || requestByIdentity.get(request)?.request !== request
+    || typeof request.redirectedFrom !== "function") {
+    fail("Browser route escaped its owned request identity ledger.");
+  }
+  // Playwright's Chromium adapter continues redirect successors internally;
+  // its public route callback covers only the initial request of each chain.
+  if (request.redirectedFrom() !== null) {
+    fail("Browser redirect successor unexpectedly emitted a route callback.");
+  }
+  if (routedRequestIdentities.has(request) || routedRequestIdentities.size >= maximumRequests) {
+    fail("Browser route identity was repeated or exceeded its bounded ledger.");
+  }
+  routedRequestIdentities.add(request);
+}
+
+export function assertProviderOverlapRouteIdentityLedger({
+  requests,
+  requestByIdentity,
+  routedRequestIdentities,
+  semanticRequestLedger,
+}) {
+  if (!Array.isArray(requests) || requests.length < 1 || requests.length > maximumRequests
+    || !(requestByIdentity instanceof Map) || requestByIdentity.size !== requests.length
+    || !(routedRequestIdentities instanceof Set)) {
+    fail("Browser route identity ledger is outside its bounded contract.");
+  }
+  const semanticLedger = validateProviderOverlapSemanticLedger(semanticRequestLedger);
+  const seen = new Set();
+  const redirectedSources = new Set();
+  let semanticIndex = 0;
+  let redirectCount = 0;
+  for (const entry of requests) {
+    const request = entry?.request;
+    if (!request || typeof request !== "object" || seen.has(request)
+      || requestByIdentity.get(request) !== entry
+      || typeof request.redirectedFrom !== "function") {
+      fail("Browser route ledger contains an unowned or repeated request identity.");
+    }
+    const source = request.redirectedFrom();
+    const redirected = source !== null;
+    if (redirected) {
+      if (!seen.has(source) || requestByIdentity.get(source)?.request !== source
+        || redirectedSources.has(source) || routedRequestIdentities.has(request)) {
+        fail("Browser redirect successor escaped its prior owned source or emitted a route.");
+      }
+      redirectedSources.add(source);
+      redirectCount += 1;
+    } else if (!routedRequestIdentities.has(request)) {
+      fail("Browser non-redirect request has no exact route callback.");
+    }
+    if (entry.classification?.staticPath === null) {
+      const semantic = semanticLedger[semanticIndex++];
+      if (!semantic || semantic.key !== entry.classification.key
+        || (semantic.redirectEdge !== null) !== redirected
+        || (redirected && !semantic.redirectEdge.startsWith(
+          `${requestByIdentity.get(source).classification.key}:`,
+        ))) {
+        fail("Browser redirect identity differs from its validated semantic edge.");
+      }
+    } else if (redirected) {
+      fail("Browser static request unexpectedly followed a redirect.");
+    }
+    seen.add(request);
+  }
+  if (semanticIndex !== semanticLedger.length
+    || routedRequestIdentities.size !== requests.length - redirectCount
+    || [...routedRequestIdentities].some((request) => !seen.has(request))) {
+    fail("Browser route identity coverage is not exact.");
+  }
+  return Object.freeze({ redirectCount, routedRequestCount: routedRequestIdentities.size });
+}
+
 export function createProviderOverlapEventSeal(maximumEvents = 1_024) {
   if (!Number.isSafeInteger(maximumEvents) || maximumEvents < 32 || maximumEvents > 4_096) {
     fail("Browser event seal bound is invalid.");
@@ -1456,6 +1535,16 @@ export function normalizeProviderOverlapObservedResponseContentType(input) {
   if (normalized === null && input.status === 307
     && new Set(["app-telegram-start", "app-telegram-callback"]).has(input.key)) {
     return "application/octet-stream";
+  }
+  // The immutable baseline's bodyless root RSC redirect is exposed by
+  // Playwright as text/plain; the same redirect may omit Content-Type.
+  // Both representations describe the exact 307 edge and no body is consumed;
+  // canonicalize only these two allowlisted root-RSC keys to the existing
+  // null representation. Other RSC redirects retain their observed MIME.
+  if (input.status === 307
+    && new Set(["app-root-rsc", "app-login-root-rsc"]).has(input.key)
+    && (normalized === null || normalized === "text/plain")) {
+    return null;
   }
   return normalized;
 }

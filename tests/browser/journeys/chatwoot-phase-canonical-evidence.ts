@@ -1,5 +1,6 @@
 import { canonicalizeChatwootProviderArrivalOrder } from "./chatwoot-provider-ledger-order.mjs";
 import { projectExactJourneyGeneratedValues } from "../journey-comparison-projection";
+import { projectChatwootProviderCausalEntries } from "./chatwoot-provider-causal-contract.mjs";
 
 const BASELINE_COMMIT = "f5cb6f543d85256e7733a1ade6a4f451d86cf378";
 const PROJECT = "journey-1440x900";
@@ -13,6 +14,7 @@ type ExactPhaseEvidenceInput = {
   dom: unknown;
   fixtureContractSha256: string;
   interactive: unknown[];
+  phase: "gap" | "stable" | "recreated";
   network: {
     requests: unknown[];
     serverActionCount: number;
@@ -27,8 +29,9 @@ type ExactPhaseEvidenceInput = {
 
 /**
  * Applies only the immutable journey-v5 referential projection, in memory,
- * before turning the complete bounded observations into ordered canonical
- * strings for the proof-scoped HMAC sealer. No raw value leaves this call.
+ * before turning the complete bounded observations into canonical strings
+ * for the proof-scoped HMAC sealer. Raw provider occurrence order is retained
+ * separately from the versioned, source-derived causal read projection.
  */
 export function canonicalChatwootPhaseEvidence(
   input: ExactPhaseEvidenceInput,
@@ -76,6 +79,7 @@ export function canonicalChatwootPhaseEvidence(
   if (providerEntries.length === 0 || provider.database === undefined) {
     throw new Error("Projected provider evidence is incomplete.");
   }
+  const providerCausal = projectChatwootProviderCausalEntries(providerEntries, input.phase);
 
   return Object.freeze({
     accessibility: Object.freeze([canonical(input.accessibility)]),
@@ -83,6 +87,14 @@ export function canonicalChatwootPhaseEvidence(
     computedStyles: canonicalEntries(input.computedStyles, "computed styles"),
     dom: Object.freeze([canonical(input.dom)]),
     interactive: canonicalEntries(input.interactive, "interactive state"),
+    providerCausalLedger: Object.freeze([
+      ...providerCausal.nodes.map(canonical),
+      canonical({
+        contractVersion: providerCausal.contractVersion,
+        edges: providerCausal.edges,
+        database: provider.database,
+      }),
+    ]),
     providerEffects: Object.freeze([
       ...providerEntries.map((entry) => canonical(
         exactRecord(entry, "projected provider entry").effect,
@@ -115,6 +127,7 @@ function assertExactInput(value: ExactPhaseEvidenceInput) {
     "fixtureContractSha256",
     "interactive",
     "network",
+    "phase",
     "providerEffects",
     "storage",
   ], "phase evidence input");
@@ -124,6 +137,9 @@ function assertExactInput(value: ExactPhaseEvidenceInput) {
     || value.accessibility.length > 1_000_000
     || !/^[a-f0-9]{64}$/.test(value.fixtureContractSha256)
   ) throw new Error("Phase accessibility or fixture contract is invalid.");
+  if (!["gap", "stable", "recreated"].includes(value.phase)) {
+    throw new Error("Phase causal evidence generation is invalid.");
+  }
   for (const [name, entries] of [
     ["strict browser requests", value.browserRequests],
     ["boundary calls", value.boundaryCalls],

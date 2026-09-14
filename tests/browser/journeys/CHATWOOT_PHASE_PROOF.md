@@ -1,5 +1,15 @@
 # Dual-image Chatwoot phase stability proof
 
+Proof schema 2 adds provider causal contract version 2. The original f5 tests
+and immutable journey baseline are unchanged. This explicitly corrects a
+characterization introduced by this task: its 15-event initial expectation
+omitted six existing cold-auth/profile effects, and its total arrival-order
+comparison treated concurrent cabinet reads as sequential application actions.
+The exact initial contract now has 21 events. The complete raw ledger remains
+role-scoped evidence; a separate causal ledger is compared across all six runs.
+The recreated provider suffix must be independently characterized before this
+version can produce a complete accepted proof; an unknown suffix fails closed.
+
 This additive sidecar proves the asynchronous Chatwoot cookie lifecycle without
 changing production code, the immutable journey baseline, the Caddy fixture,
 or the baseline comparison path. It is not an alternate acceptance path for a
@@ -127,17 +137,28 @@ values.
 At Gap, Stable, and Recreated, each process also captures bounded canonical
 DOM, computed styles, accessibility tree, interactive/button state, storage,
 raw request order, Server Action count/order/payload/status, Chatwoot boundary
-calls, and provider ledger/effect order. Corresponding HMACs must agree across
-all three baseline processes, all three candidate processes, and cross-image.
+calls, and the complete raw provider ledger/effect order. The raw provider
+HMACs and ranges are retained for each process, including their actual arrival
+ordinals. All other semantic HMACs, including the separate versioned provider
+causal ledger, must agree across all three baseline processes, all three
+candidate processes, and cross-image. Raw provider counts still agree 6/6.
+Schema 2 reports `allComparableCanonicalPhaseEvidenceExact: true` and
+`providerCausalEvidenceExact: true`, with
+`rawProviderArrivalOrderCompared: false`; it does not claim equality of the
+role-scoped raw provider hashes.
 The complete automatic/manual history lifecycle is separately reduced to an
 exact entry count, initial/recreated partition, single generation boundary,
 and canonical semantic digest. That history projection also agrees 6/6 and
 contains no role-specific static provenance; an extra `replaceState`,
 `hashchange`, navigation, or checkpoint changes the proof.
 Generated journey values may be converted only by the existing exact
-referential-symbol contract; there is no new field drop, sorting, or request
-reordering. Cookie/contact values remain represented only by byte lengths and
-within-run equality relations.
+referential-symbol contract. Raw records are never sorted, rewritten, or
+filtered. For the additional causal ledger, each validated provider occurrence
+is bound to a fixed source-derived node ID; its complete value is preserved
+except for the arrival ordinal, which remains in the raw ledger. Nodes use a
+fixed contract order, and the dependency edges and database state are included
+in the causal HMAC. Cookie/contact values remain represented only by byte
+lengths and within-run equality relations.
 Role-specific static-asset attestation, inventory, and load-graph digests are
 kept in a separate provenance binding and must match that role's preflight and
 runtime attestation in all three runs. They are deliberately not inserted into
@@ -188,10 +209,19 @@ diagnostic, automatic/manual history, continuous network, strict browser, and
 provider sources are read and compared again, then the common ledger must
 remain quiet and clean through its bounded final seal. A late event, in-flight
 callback, reordered provider effect, or changed snapshot fails the run.
-Provider evidence is decoded by the exact phase sequence rather than by a
-service-name allowlist: Gap and Stable require the same complete
-Turnstile/Telegram/Remnashop/Remnawave/Chatwoot order, while Recreated requires
-the exact second direct-cabinet login suffix and one additional contact probe.
+Provider evidence is decoded by exact endpoint and phase-specific causal
+contracts rather than by a service-name allowlist. Gap and Stable preserve all
+auth, cold JWKS, profile, support and contact anchors. Within the cabinet read
+window, referral, subscription, offers and devices are independent source
+nodes; the Remnawave user lookup depends on the subscription result. Each of
+these five nodes must occur exactly once, and subscription must precede the
+lookup. The validator does not require independent reads to precede that
+lookup. Its permutation tests admit all 60 topological orders and reject the
+60 dependency violations, rather than accepting a list of observed traces.
+The causal contract pins occurrences to these fixed anchor windows; the
+independent browser document, generation, action and support checks remain
+mandatory. Recreated requires its independently characterized
+second direct-cabinet login suffix; the raw initial prefix remains identical.
 Turnstile, OIDC query/token, and Remnashop Telegram-auth bodies use
 endpoint-field descriptor decoders with exact literal, URL, redaction kind,
 format, byte-length, and digest shapes. Both synthetic Turnstile challenges
@@ -209,7 +239,10 @@ Chromium processes. A single byte-identical 2/3 majority is required; all three
 raw files, including a dissenting file, remain in the create-only inventory.
 The selected baseline and candidate PNG must then be byte-identical. Three
 different files, two competing majorities, or a cross-image difference fails
-closed. All non-PNG phase observations must agree exactly across all six runs.
+closed. All semantic non-PNG phase observations must agree exactly across all
+six runs. Only the two raw provider arrival-order HMACs and their ranges are
+role-scoped provenance; their counts, validity, within-role stable rereads,
+ordered prefixes, and final seal remain mandatory.
 Each PNG is decoded as an exact 1440x900, non-interlaced 8-bit RGB/RGBA raster;
 only `IHDR`, contiguous `IDAT`, and terminal `IEND` chunks are permitted, so
 text metadata cannot carry hidden evidence. Evidence ancestors, root, raw

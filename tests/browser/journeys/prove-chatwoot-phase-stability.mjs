@@ -5,6 +5,7 @@ import { collectJourneyOneShotLifecycleFailureEvidence } from "./journey-compose
 
 import { orchestrateChatwootPhaseProof } from "./chatwoot-phase-proof-orchestrator.mjs";
 import { createJourneySanitizedErrorEvidence } from "./journey-error-evidence.mjs";
+import { collectChatwootProviderLedgerMismatchEvidence } from "./chatwoot-provider-ledger-diagnostic.mjs";
 import {
   readExactChatwootExternalPlan,
   sha256,
@@ -50,6 +51,7 @@ try {
     })}\n`);
   }
   const sanitized = createJourneySanitizedErrorEvidence(error);
+  const providerLedgerMismatchEvidence = collectChatwootProviderLedgerMismatchEvidence(error);
   process.stderr.write(`${JSON.stringify({
     status: "dual_image_chatwoot_phase_stability_failed",
     errorClass: error?.constructor?.name ?? "Error",
@@ -57,6 +59,7 @@ try {
     sourceLocations: chatwootFailureSourceLocations(error),
     causeEvidence: sanitized.causeEvidence,
     causeEvidenceTruncated: sanitized.causeEvidenceTruncated,
+    ...(providerLedgerMismatchEvidence === undefined ? {} : { providerLedgerMismatchEvidence }),
   })}\n`);
   process.exitCode = 1;
 }

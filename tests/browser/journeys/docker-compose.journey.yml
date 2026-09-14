@@ -1,5 +1,11 @@
 services:
   app:
+    # Keep the production readiness command and fresh startup health gate.
+    # Its periodic external probes must stay outside the bounded browser proof;
+    # Chatwoot verifies the exact health identity before and after measurement.
+    healthcheck:
+      interval: 1h
+      start_interval: 1s
     environment:
       NODE_EXTRA_CA_CERTS: /browser-ca/root.crt
       TZ: Europe/Moscow
