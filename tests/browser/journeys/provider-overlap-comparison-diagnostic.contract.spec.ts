@@ -12,6 +12,7 @@ import {
   createProviderOverlapComparisonDiagnostic,
   withProviderOverlapComparisonDiagnostic,
 } from "./provider-overlap-comparison-diagnostic.mjs";
+import { normalizeProviderOverlapRequestContractSemanticLedger } from "./provider-overlap-browser-contract.mjs";
 
 type SemanticEntry = {
   disposition: "abort" | "continue";
@@ -22,12 +23,24 @@ type SemanticEntry = {
   responseStatus: number | null;
 };
 
-test("binds the failure diagnostic and its regression contract into the journey fixture", () => {
+test("binds the failure diagnostic and its regression contract into the journey fixture", async () => {
   const required = [
     "provider-overlap-comparison-diagnostic.contract.spec.ts",
     "provider-overlap-comparison-diagnostic.mjs",
   ];
   expect(JOURNEY_FIXTURE_FILENAMES.filter((filename) => required.includes(filename))).toEqual(required);
+  const runnerSource = await readFile(path.resolve(__dirname, "prove-provider-overlap.mjs"), "utf8");
+  expect(runnerSource).toContain(
+    'import { withProviderOverlapComparisonDiagnostic } from "./provider-overlap-comparison-diagnostic.mjs";',
+  );
+  expect(runnerSource).toContain("document = withProviderOverlapComparisonDiagnostic({");
+  expect(runnerSource).toContain("compare: () => createDualProviderOverlapProof(");
+  expect(runnerSource).toContain(
+    "retainDiagnostic: (diagnostic) => { providerComparisonDiagnostic = diagnostic; },",
+  );
+  expect(runnerSource).toContain(
+    "? {} : { requestContractComparison: providerComparisonDiagnostic }),",
+  );
 });
 
 test("distinguishes order differences from changed semantic counts without changing either ledger", () => {
@@ -78,6 +91,32 @@ test("reconstructs the real normalized property order and separates static-class
   expect(diagnostic.candidate.staticClasses).toContain("next-static-image");
   expect(createProviderOverlapComparisonDiagnostic(baseline, structuredClone(baseline)))
     .toMatchObject({ status: "equal", mismatchCount: 0 });
+});
+
+test("binds the current normalized request contract instead of degrading its diagnostic", () => {
+  const observedLedger = navigation().semanticRequestLedger;
+  observedLedger.splice(-1, 0, {
+    ...semantic("app-profile-action"),
+    responseContentType: "text/x-component",
+    responseFailureSha256: sha256("net::ERR_ABORTED"),
+  });
+  const normalizedLedger = normalizeProviderOverlapRequestContractSemanticLedger(observedLedger);
+  expect(normalizedLedger).not.toEqual(observedLedger);
+  const observed = navigation(observedLedger);
+  observed.requestContractSha256 = sha256(JSON.stringify({
+    version: 1,
+    semanticLedger: normalizedLedger,
+    staticClasses: ["next-static-css", "next-static-font", "next-static-js"],
+  }));
+  const diagnostic = createProviderOverlapComparisonDiagnostic(observed, structuredClone(observed));
+  expect(diagnostic).toMatchObject({
+    status: "equal",
+    mismatchCount: 0,
+    baseline: {
+      semanticEntryCount: observedLedger.length,
+      semanticLedgerSha256: sha256(JSON.stringify(normalizedLedger)),
+    },
+  });
 });
 
 test("bounds the normalized ledgers, mismatch samples and serialized bytes", () => {
