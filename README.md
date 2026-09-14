@@ -2,20 +2,54 @@
 
 Clean Pay — веб-кабинет для оплаты и управления подписками Remnashop/Remnawave.
 Пользователь может войти по e-mail, Telegram или Passkey, купить и продлить
-подписку, управлять устройствами, посмотреть историю платежей и обратиться в
-поддержку через авторизованный виджет Chatwoot.
+подписку, управлять устройствами и посмотреть историю платежей. Если настроена
+необязательная интеграция поддержки, авторизованному пользователю также
+доступен чат.
 
-Приложение запускается в Docker Compose вместе с собственными PostgreSQL и
-Redis. Node.js на сервер устанавливать не нужно.
+Production-окружение запускается в Docker Compose вместе с собственными
+PostgreSQL и Redis. Установщик выполняет проверки локального Remnashop,
+применяет миграции отдельным одноразовым контейнером и запускает приложение,
+worker сверки платежей и worker очистки данных.
 
-![Личный кабинет Clean Pay](docs/screenshots/dashboard.png)
+## Интерфейс
+
+<p align="center">
+  <a href="docs/screenshots/dashboard.png">
+    <img src="docs/screenshots/dashboard.png" alt="Личный кабинет Clean Pay" width="100%">
+  </a>
+</p>
+<p align="center">
+  <sub>Личный кабинет: подписка, устройства, трафик и платежи.</sub>
+</p>
+
+<table>
+  <tr>
+    <td width="50%" valign="top">
+      <a href="docs/screenshots/login.png">
+        <img src="docs/screenshots/login.png" alt="Вход в Clean Pay по e-mail или через Telegram">
+      </a>
+    </td>
+    <td width="50%" valign="top">
+      <a href="docs/screenshots/authentication-methods.png">
+        <img src="docs/screenshots/authentication-methods.png" alt="Настройка способов входа в Clean Pay">
+      </a>
+    </td>
+  </tr>
+  <tr>
+    <td align="center"><sub>Вход по e-mail или через Telegram.</sub></td>
+    <td align="center"><sub>E-mail, Telegram и быстрый вход.</sub></td>
+  </tr>
+</table>
 
 ## Что потребуется
 
 - Linux-сервер с Docker Engine и Docker Compose v2;
-- работающие Remnashop и Remnawave;
+- Node.js точной версии из [`.node-version`](.node-version) (сейчас `24.18.0`),
+  `git`, `openssl` и `curl`;
+- не менее 8 ГиБ свободного места в файловой системе checkout перед сборкой;
+- `vm.overcommit_memory=1` на хосте выбранного Docker daemon;
+- работающий Remnashop на том же Docker daemon и доступный Remnawave;
 - домен с настроенным HTTPS reverse proxy;
-- `git` и `openssl`;
 - значения из таблицы ниже.
 
 | Что подготовить | Где взять |
@@ -28,17 +62,34 @@ Redis. Node.js на сервер устанавливать не нужно.
 | Website Token и HMAC Token Chatwoot | Необязательно; настройки Website Inbox и Identity Validation |
 | Docker-сеть reverse proxy | Обычно `remnawave-network` |
 
+Штатный `deploy.sh` проверяет локальные контейнеры Remnashop до изменения Clean
+Pay. API, worker и scheduler Remnashop должны быть запущены из одного
+immutable image; PostgreSQL-контейнер должен быть доступен тому же Docker
+daemon. Путь `REMNASHOP_ENV_FILE` должен быть абсолютным, сам файл — обычным
+файлом с правами `0400` или `0600`, а ожидаемые UID/GID задаются через
+`REMNASHOP_ENV_EXPECTED_UID` и `REMNASHOP_ENV_EXPECTED_GID`.
+
 ## Установка: один мастер, три этапа
 
+Выберите полный 40-символьный SHA проверенного релиза. Production не должен
+устанавливаться прямо из меняющейся вершины ветки:
+
 ```bash
+RELEASE_SHA='REPLACE_WITH_REVIEWED_40_HEX_SHA'
 sudo mkdir -p /opt/clean-pay
 sudo chown "$USER":"$USER" /opt/clean-pay
 git clone https://github.com/flake92/clean-pay.git /opt/clean-pay
 cd /opt/clean-pay
-./deploy.sh
+git fetch --depth=1 origin "$RELEASE_SHA"
+git checkout --detach "$RELEASE_SHA"
+test "$(git rev-parse HEAD)" = "$RELEASE_SHA"
+test -z "$(git status --porcelain --untracked-files=all)"
+test "$(node --version)" = "v$(cat .node-version)"
+./deploy.sh setup
 ```
 
-Без аргументов `deploy.sh` запускает понятный интерактивный мастер:
+В интерактивном терминале запуск `deploy.sh` без аргументов равнозначен
+`./deploy.sh setup`. Мастер выполняет три этапа:
 
 1. **Настройка `.env`.** Мастер задаёт только необходимые вопросы, скрывает
    ввод секретов и автоматически генерирует пароль PostgreSQL и внутренние
@@ -52,7 +103,10 @@ cd /opt/clean-pay
    HTTPS и security headers.
 
 В конце мастер покажет адрес приложения и команды диагностики. Повторный запуск
-безопасен: существующие секреты сохраняются, Docker volumes не удаляются.
+сохраняет существующие секреты и Docker volumes, но `install` не является
+резервной копией или zero-downtime rollout: приложение и workers временно
+останавливаются, а при ошибке миграции остаются остановленными. Для обновления
+заранее подготовьте и проверьте резервную копию базы и конфигурации.
 
 ### Важный шаг для Remnashop
 
@@ -77,8 +131,13 @@ APP_AUTH_SERVICE_KEY=<то же значение, что REMNASHOP_AUTH_SERVICE_
 ```bash
 ./deploy.sh configure  # интерактивно заполнить .env
 ./deploy.sh compose    # проверить .env, Compose и сеть
+sh deploy/prod/prepare-remnashop-rollout.sh deploy/prod/.env check
 ./deploy.sh install    # подготовить, запустить и проверить сервисы
 ```
+
+Команда `check` в третьей строке только проверяет защищённый env-файл,
+контейнеры, единый image, схему и API-контракт Remnashop; она не меняет данные.
+`./deploy.sh install` повторяет эту проверку перед остановкой runtime.
 
 Для полностью ручной настройки используйте `./deploy.sh init`, затем откройте
 `deploy/prod/.env` в своём редакторе.
@@ -90,14 +149,28 @@ APP_AUTH_SERVICE_KEY=<то же значение, что REMNASHOP_AUTH_SERVICE_
 имена и многострочные значения. Полный перечень настроек находится в
 [`deploy/prod/.env.example`](deploy/prod/.env.example).
 
+`deploy/prod/.env` — единственный authoritative файл конфигурации и должен
+оставаться доступным только владельцу с правами `0600`. Файлы `.env.app`,
+`.env.migration`, `.env.provision`, `.env.postgres`, `.env.reconciliation` и
+`.env.retention` генерируются установщиком для отдельных ролей: не редактируйте
+их вручную и не используйте вместо основного `.env`.
+
 ### Сборка на сервере или готовые образы
 
 По умолчанию `CLEAN_PAY_DEPLOY_SOURCE=build`: сервер собирает оба Docker target
 из текущего checkout — `runner` для приложения и `migration` для
 `prisma migrate deploy`. `CLEAN_PAY_IMAGE` и `CLEAN_PAY_MIGRATION_IMAGE` должны
-быть разными явными тегами без digest. Для трассируемой локальной сборки также
-задайте одинаковые для обоих target `CLEAN_PAY_RELEASE` и
-`CLEAN_PAY_REVISION`; значения `local` допустимы только для режима `build`.
+быть разными явными тегами без digest. Для трассируемой локальной сборки задайте
+общие для обоих target `CLEAN_PAY_RELEASE` и `CLEAN_PAY_REVISION`; значения
+`local` допустимы только для режима `build`.
+
+Перед maintenance window можно выполнить `./deploy.sh build`: команда
+подготавливает и проверяет оба образа, но не останавливает контейнеры и не
+запускает миграцию. `./deploy.sh migrate`, напротив, останавливает приложение и
+workers, применяет миграции и намеренно оставляет runtime остановленным до
+последующего `./deploy.sh install`. Если перед локальной сборкой свободно менее
+8 ГиБ, установщик очищает только неиспользуемый build cache и dangling images,
+а затем всё равно завершится ошибкой, если места недостаточно.
 
 Чтобы сервер только скачивал заранее проверенный release, укажите в `.env`:
 
@@ -138,11 +211,13 @@ tags. После review четырёх exact digest scopes отдельный `p
 [`docs/deployment-safety.md`](docs/deployment-safety.md).
 
 Штатный `install` использует короткое maintenance window и не является
-zero-downtime командой. Для текущей одно-репличной production-топологии с Caddy
-используйте отдельный guarded canary flow из
-[`deploy/prod/zero-downtime-production-runbook.md`](deploy/prod/zero-downtime-production-runbook.md):
-он оставляет старый app запущенным до полной readiness canary, запрещает pending
-миграции и требует явных атомарных переключений reverse proxy.
+zero-downtime командой. Отдельный guarded canary flow, описанный в
+[`deploy/prod/zero-downtime-production-runbook.md`](deploy/prod/zero-downtime-production-runbook.md),
+можно использовать только после независимого прохождения всех его topology
+guards: Compose-managed Caddy, точные private/external сети и bind mount,
+обязательные маршруты и отсутствие pending migrations. Если хотя бы одно
+условие не выполнено, используйте обычный maintenance `./deploy.sh install` и
+не называйте выпуск zero-downtime.
 
 ## Поддержка через Chatwoot
 
@@ -318,34 +393,67 @@ workers, пересоздаёт их из новых role-scoped env-файло�
 Перед обновлением сохраните базу по процедуре из migration runbook и создайте
 зашифрованную резервную копию конфигурации в утверждённом secret manager.
 Не копируйте authoritative `.env` в ещё один plaintext-файл. После проверки
-backup выполните обновление:
+backup закрепите точный проверенный commit. Для режима сборки на сервере
+обновите только provenance-поля, сохранив остальные production-настройки:
 
 ```bash
 cd /opt/clean-pay
-git pull --ff-only
+release_sha='REPLACE_WITH_REVIEWED_40_HEX_SHA'
+release_id='REPLACE_WITH_UNIQUE_RELEASE_ID'
+printf '%s' "$release_sha" | grep -Eq '^[0-9a-f]{40}$'
+git fetch --depth=1 origin "$release_sha"
+git checkout --detach "$release_sha"
+test "$(git rev-parse HEAD)" = "$release_sha"
+test -z "$(git status --porcelain --untracked-files=all)"
+test "$(node --version)" = "v$(cat .node-version)"
+printf '%s' build | node deploy/prod/credential-file-guard.mjs env-set deploy/prod/.env CLEAN_PAY_DEPLOY_SOURCE
+printf '%s' "clean-pay-prod-app:$release_id" | node deploy/prod/credential-file-guard.mjs env-set deploy/prod/.env CLEAN_PAY_IMAGE
+printf '%s' "clean-pay-prod-migration:$release_id" | node deploy/prod/credential-file-guard.mjs env-set deploy/prod/.env CLEAN_PAY_MIGRATION_IMAGE
+printf '%s' "$release_id" | node deploy/prod/credential-file-guard.mjs env-set deploy/prod/.env CLEAN_PAY_RELEASE
+printf '%s' "$release_sha" | node deploy/prod/credential-file-guard.mjs env-set deploy/prod/.env CLEAN_PAY_REVISION
+./deploy.sh build
 ./deploy.sh install
 ```
 
-Установщик применяет только `prisma migrate deploy`, ждёт healthcheck и не
-удаляет volumes. Расширенный порядок обновления и восстановления описан в
+`build` можно выполнить заранее без остановки runtime. `install` запускайте
+только в согласованное maintenance window после проверенного backup. Для
+`CLEAN_PAY_DEPLOY_SOURCE=pull` используйте digest-pinned пару из раздела выше,
+а не команды с локальными тегами. Установщик применяет только
+`prisma migrate deploy`, ждёт подробную readiness и внешнюю проверку HSTS/CSP и
+не удаляет volumes. Расширенный порядок обновления и восстановления описан в
 [`docs/production-migration-runbook.md`](docs/production-migration-runbook.md).
 
 ## Совместимость Remnashop
 
 Clean Pay использует generic e-mail auth, service-session, объединение аккаунтов
-и восстановление статуса платежей. Пока эти контракты не вошли в официальный
-release Remnashop, собирайте API, worker и scheduler из одного checkout на
-точном immutable commit PR #135, закреплённом в CI, с полной цепочкой миграций
-через `0058`. Не смешивайте роли из разных образов или ревизий.
+и восстановление статуса платежей. API, worker и scheduler Remnashop всегда
+разворачивайте из одного проверенного immutable commit и одного image. Базовый
+контракт Clean Pay требует Alembic revision не ниже значения
+`REMNASHOP_MINIMUM_ALEMBIC_REVISION` (`0058` по умолчанию); не смешивайте роли
+из разных образов или ревизий.
 
 Remnashop также остаётся единственным владельцем SMTP и очереди напоминаний об
 окончании подписки. В нём задаются
 `EMAIL_SUBSCRIPTION_EXPIRATION_CABINET_URL`, SMTP-параметры и независимый
 fail-closed переключатель
 `EMAIL_SUBSCRIPTION_EXPIRATION_REMINDERS_ENABLED`. Clean Pay только показывает
-пользователю opt-in/opt-out в профиле; настройка по умолчанию выключена, не
-проводит оплату и не включает автопродление. Порядок безопасного включения
-описан в
+пользователю opt-in/opt-out в профиле.
+
+Для принятой политики default-on нужен Remnashop с миграцией `0059`: она один
+раз включает напоминания всем существующим пользователям с подтверждённым
+e-mail, а успешное подтверждение e-mail нового пользователя включает их
+автоматически. Последующий явный opt-out сохраняется; при смене адреса
+настройка сбрасывается до подтверждения нового e-mail. После применения `0059`
+и замены API/worker/scheduler на один image задайте
+`REMNASHOP_MINIMUM_ALEMBIC_REVISION=0059` в Clean Pay и включите глобальную
+доставку в Remnashop:
+
+```dotenv
+EMAIL_SUBSCRIPTION_EXPIRATION_REMINDERS_ENABLED=true
+```
+
+Напоминания отправляются за 7, 3 и 1 день, не проводят оплату и не включают
+автопродление. Порядок безопасного включения описан в
 [`docs/production-migration-runbook.md`](docs/production-migration-runbook.md).
 
 Фоновая сверка платежей включается переменной
@@ -393,6 +501,20 @@ curl -f https://pay.example.com/api/health/readiness
 Поддерживается Node.js из `.node-version` и только npm с фиксированным
 `package-lock.json`.
 
+Для локального запуска используйте Dev Container. После выполнения его
+`postCreateCommand` запустите внутри контейнера:
+
+```bash
+npm run prisma:migrate
+npm run dev
+```
+
+Clean Pay будет доступен на локальном forwarded-порту `4000`, а тестовая почта
+Mailpit — на порту `8025`. Контейнер приложения по умолчанию выполняет
+`sleep infinity`, поэтому `npm run dev` запускается явно.
+
+Перед push и запуском GitHub CI сначала должны пройти локальные быстрые gates:
+
 ```bash
 npm ci
 npm run lint
@@ -404,10 +526,25 @@ npm run test:coverage:frontend
 npm run build
 ```
 
-Локальный full-stack E2E контракта `0058` запускайте с
-`REMNASHOP_HOST_SOURCE`, указывающим на проверенный checkout PR #135. В CI
-workflow checkout'ит тот же точный immutable commit со встроенной реализацией
-напоминаний; локальный overlay больше не используется.
+Отдельно запускаются более тяжёлые проверки с реальными сервисами:
+
+```bash
+REAL_DATABASE_URL="$DATABASE_URL" npm run test:services
+npm run test:e2e
+CLEAN_PAY_BROWSER_BASE_URL='<URL_DISPOSABLE_RUNNER>' npm run test:browser
+npm run test:browser:journey -- --project journey-contract
+```
+
+Первая команда действительно включает PostgreSQL-тесты, которые без
+`REAL_DATABASE_URL` будут пропущены. `test:e2e` поднимает отдельный Docker full
+stack. Браузерная characterization ожидает уже запущенный disposable runner по
+`CLEAN_PAY_BROWSER_BASE_URL`. Полный production-image journey и его обязательные
+provenance-переменные описаны в [`tests/browser/README.md`](tests/browser/README.md).
+
+Для локального full-stack E2E задайте `REMNASHOP_HOST_SOURCE` на чистый checkout
+того же проверенного immutable Remnashop commit, который закреплён для релиза.
+Минимальную схему задаёт `REMNASHOP_MINIMUM_ALEMBIC_REVISION`; для проверки
+default-on напоминаний используйте `0059` и companion source с этой миграцией.
 
 CI дополнительно выполняет:
 
