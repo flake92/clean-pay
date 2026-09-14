@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       release:
-        description: Immutable release label and Docker tag (for example 0.1.1)
+        description: Immutable release label and Docker tag (for example 0.2.0)
         required: true
         type: string
       public_app_url:
