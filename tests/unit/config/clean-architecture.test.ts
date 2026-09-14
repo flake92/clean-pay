@@ -767,7 +767,7 @@ describe("clean architecture boundaries", () => {
       {
         path: "src/frontend/components/chatwoot-widget.tsx",
         boundaryImports: ["@/frontend/components/chatwoot-widget-controller"],
-        runtimeExports: ["ChatwootWidget", "ChatwootGuestBoundary"],
+        runtimeExports: ["SupportChatRuntime", "SupportChatGuestBoundary"],
       },
       {
         path: "src/frontend/components/telegram-webapp-login.tsx",
@@ -1425,7 +1425,7 @@ describe("clean architecture boundaries", () => {
     expect(composition).toContain("export const productionPaymentMaintenanceRunner");
   });
 
-  it("constructs the shared Chatwoot identity guard and gateway only in app composition", () => {
+  it("constructs shared Chatwoot guards, caches, and gateways only in app composition", () => {
     const composition = readFileSync("src/app/_composition/action-runtime.ts", "utf8");
     const gateway = readFileSync(
       "src/backend/integrations/support/chatwoot-identity-gateway.ts",
@@ -1435,12 +1435,20 @@ describe("clean architecture boundaries", () => {
       "src/backend/integrations/support/chatwoot-identity-request-guard.ts",
       "utf8",
     );
+    const contextCache = readFileSync(
+      "src/backend/integrations/support/chatwoot-context-request-cache.ts",
+      "utf8",
+    );
 
     expect(gateway).toContain("export function createProductionChatwootIdentityGateway(");
     expect(gateway).not.toContain("productionChatwootIdentityRequestGuard");
     expect(gateway).not.toContain("export const productionChatwootIdentityGateway");
     expect(guard).not.toContain("export const productionChatwootIdentityRequestGuard");
+    expect(contextCache).not.toContain(
+      "export const productionChatwootSupportContextRequestCache",
+    );
     expect(composition).toContain("createChatwootIdentityRequestGuard()");
+    expect(composition).toContain("createChatwootSupportContextRequestCache()");
     expect(composition).toContain(
       "createProductionChatwootIdentityGateway(\n    productionChatwootIdentityRequestGuard,",
     );

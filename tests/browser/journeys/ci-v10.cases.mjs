@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
+import { webcrypto } from "node:crypto";
 import path from "node:path";
 import { readFileSync } from "node:fs";
+import { TextEncoder } from "node:util";
 import { runInNewContext } from "node:vm";
 import ts from "typescript";
 import { createInitialChatwootBootstrap, isInitialChatwootContextResponse } from "./chatwoot-initial-bootstrap.mjs";
@@ -78,23 +80,23 @@ export function createCiV10Cases(fixtureDirectory) {
     function check(phase,ownership,identity,subscriptionStatus="ready"){return runInNewContext(js,{window:{$chatwoot:{user:{custom_attributes:{payment_context_status:"stale",subscription_context_status:subscriptionStatus}}},__cleanPayChatwootBoundaryCalls:[],cleanPayChatwootPendingIdentity:phase?{phase}:undefined},localStorage:{getItem:key=>key.includes("ownership")?(ownership?"proof":null):(identity?"proof":null)}},{timeout:1000})}
     assert.equal(check("ownership_confirmed",true,false),true);for(const input of [[undefined,false,true],["sent",true,false],["waiting_for_frame",true,false],["ownership_confirmed",false,false],["ownership_confirmed",true,true],["ownership_confirmed",true,false,null]])assert.equal(check(...input),false);
   });
-  add("authenticated helpers accept equivalent idempotent Chatwoot call order",()=>{
+  add("authenticated helpers accept equivalent idempotent Chatwoot call order",async()=>{
     const source=readFileSync(path.join(fixtureDirectory,"application.journey.spec.ts"),"utf8");
     const sf=ts.createSourceFile("application.ts",source,ts.ScriptTarget.Latest,true);
     function evaluatedState(functionName,calls){
       const fn=sf.statements.find(n=>ts.isFunctionDeclaration(n)&&n.name?.text===functionName);assert.ok(fn);
       let callback;function find(n){if(ts.isCallExpression(n)&&n.expression.getText(sf)==="page.evaluate")callback=n.arguments[0].getText(sf);ts.forEachChild(n,find)}find(fn);assert.ok(callback);
       const js=ts.transpileModule("const check = "+callback+"; check();",{compilerOptions:{target:ts.ScriptTarget.ES2022}}).outputText;
-      return runInNewContext(js,{window:{__cleanPayChatwootBoundaryCalls:calls,cleanPayChatwootOwnership:{conversation,core:ownership.core,customAttributes:ownership.customAttributes}},document:{cookie:`cw_conversation=${conversation}; ${identityName}=synthetic-chatwoot-user`},location:{pathname:"/cabinet"},localStorage:{getItem:key=>key.includes("ownership")?JSON.stringify(ownership):null}},{timeout:1000});
+      return runInNewContext(js,{crypto:webcrypto,TextEncoder,window:{__cleanPayChatwootBoundaryCalls:calls,cleanPayChatwootOwnership:{conversation,core:ownership.core,customAttributes:ownership.customAttributes}},document:{cookie:`cw_conversation=${conversation}; ${identityName}=synthetic-chatwoot-user`},location:{pathname:"/cabinet"},localStorage:{getItem:key=>key.includes("ownership")?JSON.stringify(ownership):null}},{timeout:1000});
     }
     const fingerprint=value=>{let hash=0x811c9dc5;for(let index=0;index<value.length;index+=1){hash^=value.charCodeAt(index);hash=Math.imul(hash,0x01000193)}return `${value.length}:${(hash>>>0).toString(16)}`};
     const conversation="csyntheticbrowserjourney01";const identityName="cw_user_"+"a".repeat(64);const ownership={conversation:fingerprint(conversation),core:"1:a",customAttributes:"1:b"};
-    const equivalentCalls=[{method:"run",baseUrl:"https://chatwoot.browser.clean-pay.dev",websiteTokenBytes:64},{method:"frame.loaded"},{method:"toggleBubbleVisibility",value:"show"},{method:"setUser",identifierBytes:25,attributeKeys:["custom_attributes","email","identifier_hash","name"]},{method:"toggleBubbleVisibility",value:"show"},{method:"removeLabel",label:"subscription_expired"},{method:"identity.confirmed"},{method:"toggleBubbleVisibility",value:"show"},{method:"removeLabel",label:"subscription_expired"}];
+    const equivalentCalls=[{method:"run",baseUrl:"https://chatwoot.browser.clean-pay.dev",websiteTokenBytes:64},{method:"frame.loaded"},{method:"toggleBubbleVisibility",value:"hide"},{method:"setUser",identifierBytes:25,attributeKeys:["custom_attributes","email","identifier_hash","name"]},{method:"toggleBubbleVisibility",value:"hide"},{method:"removeLabel",label:"subscription_expired"},{method:"identity.confirmed"},{method:"toggleBubbleVisibility",value:"hide"},{method:"removeLabel",label:"subscription_expired"}];
     const badCalls=[{method:"run",baseUrl:"https://chatwoot.browser.clean-pay.dev",websiteTokenBytes:64},{method:"reset"}];
     for(const functionName of ["waitForAuthenticatedChatwootFixture","waitForFreshAuthenticatedChatwootFixture"]){
-      const equivalent=evaluatedState(functionName,equivalentCalls);
-      assert.deepEqual(JSON.parse(JSON.stringify(equivalent.callContract)),{startsWithRun:true,runCount:1,hasFrameLoaded:true,hasValidSetUser:true,identityConfirmedAfterSetUser:true,hasSubscriptionExpiredRemove:true,unexpectedCalls:[]});
-      assert.equal(evaluatedState(functionName,badCalls).callContract.unexpectedCalls.length,1);
+      const equivalent=await evaluatedState(functionName,equivalentCalls);
+      assert.deepEqual(JSON.parse(JSON.stringify(equivalent.callContract)),{startsWithRun:true,runCount:1,hasFrameLoaded:true,hasValidSetUser:true,identityConfirmedAfterSetUser:true,hasSubscriptionExpiredRemove:true,officialLauncherAlwaysHidden:true,unexpectedCalls:[]});
+      assert.equal((await evaluatedState(functionName,badCalls)).callContract.unexpectedCalls.length,1);
     }
   });
   add("simple CSS whitespace normalizes without sorting declarations",()=>{

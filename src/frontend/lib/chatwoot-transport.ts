@@ -16,7 +16,7 @@ export function loadChatwootSdk(baseUrl: string) {
     const loaded = () => {
       if (!window.chatwootSDK) {
         document.getElementById(scriptId)?.remove();
-        reject(new Error("Chatwoot SDK did not initialize"));
+        reject(new Error("Support chat did not initialize"));
         return;
       }
 
@@ -24,7 +24,7 @@ export function loadChatwootSdk(baseUrl: string) {
     };
     const failed = () => {
       document.getElementById(scriptId)?.remove();
-      reject(new Error("Chatwoot SDK failed to load"));
+      reject(new Error("Support chat failed to load"));
     };
     const existing = document.getElementById(scriptId) as HTMLScriptElement | null;
 

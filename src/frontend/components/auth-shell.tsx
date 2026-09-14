@@ -3,7 +3,7 @@ import Link from "next/link";
 
 import { APP_VERSION } from "@/shared/app-version";
 import { getBranding } from "@/shared/branding";
-import { ChatwootGuestBoundary } from "@/frontend/components/chatwoot-widget";
+import { SupportChatGuestBoundary } from "@/frontend/components/chatwoot-widget";
 import { AuthLogo } from "@/frontend/components/auth-logo";
 
 const AUTH_LOGO_RENDERING = {
@@ -25,7 +25,7 @@ export function AuthShell({
 
   return (
     <>
-      <ChatwootGuestBoundary />
+      <SupportChatGuestBoundary />
       <main className="surface-ground auth-page flex align-items-center justify-content-center w-full overflow-x-hidden">
         <div className="w-full flex justify-content-center">
           <div

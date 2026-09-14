@@ -3,18 +3,24 @@ import type {
   ChatwootOwnershipState,
   StoredChatwootOwnershipState,
 } from "@/frontend/lib/chatwoot-contract";
-import { chatwootFingerprint } from "@/frontend/lib/chatwoot-transitions";
+import { notifyChatwootStateChanged } from "@/frontend/lib/chatwoot-state-events";
+import { chatwootDigest } from "@/frontend/lib/chatwoot-digest";
 
 const identityStorageKey = "clean-pay:chatwoot-identity:v1";
 const ownershipStorageKey = "clean-pay:chatwoot-ownership:v1";
 
-export function storedChatwootIdentity() {
+const sha256Pattern = /^[a-f0-9]{64}$/;
+
+export function storedChatwootIdentity(identity: ChatwootIdentityState) {
   try {
     const value = window.localStorage.getItem(identityStorageKey);
     const parsed = value ? JSON.parse(value) as Partial<ChatwootIdentityState> : null;
 
-    return typeof parsed?.core === "string" && typeof parsed.customAttributes === "string"
-      ? parsed as ChatwootIdentityState
+    return parsed?.core === identity.core
+      && typeof parsed.customAttributes === "string"
+      && sha256Pattern.test(parsed.customAttributes)
+      && parsed.customAttributes === chatwootDigest(identity.customAttributes)
+      ? identity
       : undefined;
   } catch {
     return undefined;
@@ -25,15 +31,19 @@ export function rememberChatwootIdentity(identity: ChatwootIdentityState) {
   window.cleanPayChatwootIdentity = identity;
 
   try {
-    // Persist only non-reversible fingerprints. They let a new page notice a
-    // custom-attribute-only change without retaining the HMAC signature.
-    window.localStorage.setItem(identityStorageKey, JSON.stringify(identity));
+    // The domain-separated server fingerprint is not a Chatwoot credential;
+    // the exact context remains memory-only and is persisted only as SHA-256.
+    window.localStorage.setItem(identityStorageKey, JSON.stringify({
+      core: identity.core,
+      customAttributes: chatwootDigest(identity.customAttributes),
+    } satisfies ChatwootIdentityState));
     // A correlated full-payload success supersedes the weaker ownership-only
     // proof, so the latter must not outlive it as a second source of truth.
     window.localStorage.removeItem(ownershipStorageKey);
   } catch {
     // Identification still works when persistent storage is unavailable.
   }
+  notifyChatwootStateChanged();
 }
 
 function storedChatwootOwnership() {
@@ -45,8 +55,11 @@ function storedChatwootOwnership() {
 
     return (
       typeof parsed?.core === "string"
+      && sha256Pattern.test(parsed.core)
       && typeof parsed.customAttributes === "string"
+      && sha256Pattern.test(parsed.customAttributes)
       && typeof parsed.conversation === "string"
+      && sha256Pattern.test(parsed.conversation)
     )
       ? parsed as StoredChatwootOwnershipState
       : undefined;
@@ -64,6 +77,7 @@ export function rememberChatwootOwnership(
     ...identity,
     conversation,
   };
+  notifyChatwootStateChanged();
 
   if (!persist) {
     return;
@@ -75,7 +89,8 @@ export function rememberChatwootOwnership(
     // same server-provided identity core and the exact current conversation.
     window.localStorage.setItem(ownershipStorageKey, JSON.stringify({
       ...identity,
-      conversation: chatwootFingerprint(conversation),
+      customAttributes: chatwootDigest(identity.customAttributes),
+      conversation: chatwootDigest(conversation),
     } satisfies StoredChatwootOwnershipState));
   } catch {
     // The current page can still use the in-memory ownership proof.
@@ -83,29 +98,34 @@ export function rememberChatwootOwnership(
 }
 
 export function restoreChatwootOwnership(
-  core: string,
+  identity: ChatwootIdentityState,
   conversation: string,
 ) {
   const current = window.cleanPayChatwootOwnership;
 
-  if (current?.core === core && current.conversation === conversation) {
+  if (
+    current?.core === identity.core
+    && current.customAttributes === identity.customAttributes
+    && current.conversation === conversation
+  ) {
     return current;
   }
 
   const stored = storedChatwootOwnership();
   if (
-    stored?.core !== core
-    || stored.conversation !== chatwootFingerprint(conversation)
+    stored?.core !== identity.core
+    || stored.customAttributes !== chatwootDigest(identity.customAttributes)
+    || stored.conversation !== chatwootDigest(conversation)
   ) {
     return undefined;
   }
 
   const restored: ChatwootOwnershipState = {
-    core: stored.core,
-    customAttributes: stored.customAttributes,
+    ...identity,
     conversation,
   };
   window.cleanPayChatwootOwnership = restored;
+  notifyChatwootStateChanged();
   return restored;
 }
 
@@ -162,6 +182,7 @@ export function clearChatwootIdentityState(preserveFailedIdentity = false) {
   } catch {
     // Session cleanup must never block Clean Pay navigation.
   }
+  notifyChatwootStateChanged();
 }
 
 export function expireChatwootCookie(name: string) {
