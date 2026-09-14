@@ -17,7 +17,7 @@
   ],
   "properties": {
     "schemaVersion": { "const": 2 },
-    "providerCausalContractVersion": { "const": 2 },
+    "providerCausalContractVersion": { "const": 3 },
     "kind": { "const": "clean-pay-dual-image-chatwoot-phase-stability-proof" },
     "scenario": { "$ref": "#/$defs/scenario" },
     "execution": { "$ref": "#/$defs/execution" },

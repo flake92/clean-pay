@@ -19,7 +19,7 @@ import {
 export const CHATWOOT_PHASE_PROOF_KIND =
   "clean-pay-dual-image-chatwoot-phase-stability-proof";
 export const CHATWOOT_PHASE_PROOF_SCHEMA_VERSION = 2;
-export const CHATWOOT_PROVIDER_CAUSAL_CONTRACT_VERSION = 2;
+export const CHATWOOT_PROVIDER_CAUSAL_CONTRACT_VERSION = 3;
 export const CHATWOOT_PHASE_PROOF_SCENARIO = "chatwoot-phase-stability-v1";
 export const CHATWOOT_PHASE_PROOF_PAIR_COUNT = 3;
 export const CHATWOOT_PHASE_SCREENSHOT_QUORUM = 2;
