@@ -15,7 +15,10 @@ import {
 } from "./chatwoot-provider-ledger-diagnostic.mjs";
 import { createJourneySanitizedErrorEvidence } from "./journey-error-evidence.mjs";
 import { JOURNEY_FIXTURE_FILENAMES } from "./journey-fixture-manifest.mjs";
-import { CHATWOOT_INITIAL_PROVIDER_EFFECTS } from "./chatwoot-provider-causal-contract.mjs";
+import {
+  CHATWOOT_INITIAL_PROVIDER_EFFECTS,
+  CHATWOOT_RECREATED_PROVIDER_EFFECTS,
+} from "./chatwoot-provider-causal-contract.mjs";
 
 const execute = promisify(execFile);
 const primaryMessage = "Chatwoot provider ledger is incomplete or outside its bound.";
@@ -27,7 +30,20 @@ const initialEffects = [
   "contact_identity_probed",
 ];
 const recreatedEffects = [...initialEffects, ...initialEffects.slice(0, 12), "contact_identity_probed"];
+const initialCausalV2Effects = [
+  "challenge_verified", "authorization_code_issued", "token_exchanged", "jwks_read",
+  "auth_session_issued", "read_profile", "read_notification_preferences", "read_profile",
+  "read_profile", "read_subscription", "contact_identity_probed", "read_profile",
+  "read_profile", "read_referral_program", "read_subscription", "read_offers", "read_devices",
+  "read_user_by_uuid", "read_profile", "read_subscription", "contact_identity_probed",
+];
 const endpointContracts = [
+  ["remnashop", "GET", "/api/v1/public/plans/public", "read_public_plans"],
+  ["remnawave", "GET", "/api/system/metadata", "read_metadata"],
+  ["remnashop", "POST", "/api/v1/public/auth/email/start", "probe_contract"],
+  ["remnashop", "POST", "/api/v1/public/auth/identify", "probe_contract"],
+  ["remnashop", "POST", "/api/v1/public/auth/service-session", "probe_contract"],
+  ["remnashop", "POST", "/api/v1/public/auth/notification-preferences", "probe_contract"],
   ["chatwoot", "GET", "/api/v1/widget/contact", "contact_identity_probed"],
   ["turnstile", "POST", "/turnstile/v0/siteverify", "challenge_verified"],
   ["telegram-oidc", "GET", "/auth", "authorization_code_issued"],
@@ -46,6 +62,7 @@ const endpointContracts = [
 test("binds Chatwoot diagnostic runtime and regression bytes into the fixture manifest", () => {
   const required = ["chatwoot-provider-ledger-diagnostic.contract.spec.ts", "chatwoot-provider-ledger-diagnostic.mjs"];
   expect(JOURNEY_FIXTURE_FILENAMES.filter((entry) => required.includes(entry))).toEqual(required);
+  expect(new Set(JOURNEY_FIXTURE_FILENAMES).size).toBe(JOURNEY_FIXTURE_FILENAMES.length);
 });
 
 test("retains actual counts around the unchanged 15 and 28 event boundaries", () => {
@@ -67,7 +84,7 @@ test("retains actual counts around the unchanged 15 and 28 event boundaries", ()
 
 test("publishes versioned initial 21 counts and uncharacterized recreation without an invented expected count", () => {
   const initial = { ...options(), providerCausalContractVersion: 2,
-    expectedEffects: CHATWOOT_INITIAL_PROVIDER_EFFECTS };
+    expectedEffects: initialCausalV2Effects };
   expect(createChatwootProviderLedgerDiagnostic(initial)).toMatchObject({
     schemaVersion: 2, providerCausalContractVersion: 2,
     expectedEntryCount: 21, actualEntryCount: 15, characterization: "initial-causal-v2",
@@ -90,10 +107,63 @@ test("publishes versioned initial 21 counts and uncharacterized recreation witho
     });
     expect(collectChatwootProviderLedgerMismatchEvidence(wrapper)?.entries[0].diagnostic).toEqual(diagnostic);
   }
-  expect(createChatwootProviderLedgerDiagnostic({ ...initial, providerCausalContractVersion: 3 }))
-    .toMatchObject({ status: "unavailable" });
   expect(createChatwootProviderLedgerDiagnostic({ ...options("recreated"), providerCausalContractVersion: 2 }))
     .toMatchObject({ status: "unavailable" });
+});
+
+test("publishes exact current causal v3 counts and readiness endpoint classes", () => {
+  for (const phase of ["gap", "stable", "recreated"] as const) {
+    const expected = phase === "recreated" ? 42 : 28;
+    for (const count of [expected - 1, expected, expected + 1]) {
+      const diagnostic = snapshot(createChatwootProviderLedgerDiagnostic(causalOptions(phase, count)));
+      expect(diagnostic).toMatchObject({
+        schemaVersion: 3,
+        providerCausalContractVersion: 3,
+        characterization: phase === "recreated" ? "recreated-causal-v3" : "initial-causal-v3",
+        status: "observed",
+        phase,
+        expectedEntryCount: expected,
+        actualEntryCount: count,
+        scannedEntryCount: count,
+        scanTruncated: false,
+      });
+      expect(diagnostic.classCounts).toEqual(expect.arrayContaining([
+        { class: "read_public_plans", expected: 1, actual: count >= 2 ? 1 : 0,
+          missing: count >= 2 ? 0 : 1, excess: 0 },
+        { class: "read_metadata", expected: 1, actual: count >= 3 ? 1 : 0,
+          missing: count >= 3 ? 0 : 1, excess: 0 },
+        { class: "probe_contract", expected: 4, actual: count >= 8 ? 4 : Math.max(count - 4, 0),
+          missing: count >= 8 ? 0 : Math.max(8 - count, 0), excess: 0 },
+      ]));
+      expect(Buffer.byteLength(JSON.stringify(diagnostic))).toBeLessThanOrEqual(16 * 1024);
+    }
+  }
+  const bounded = snapshot(createChatwootProviderLedgerDiagnostic(causalOptions("gap", 257)));
+  expect(bounded).toMatchObject({
+    schemaVersion: 3, expectedEntryCount: 28, actualEntryCount: 257,
+    scannedEntryCount: 256, scanTruncated: true, actualSequenceTruncated: true,
+  });
+  expect(bounded.actualSequence).toHaveLength(64);
+  expect(Buffer.byteLength(JSON.stringify(bounded))).toBeLessThanOrEqual(16 * 1024);
+
+  const privateMarker = "synthetic-v3-provider-secret-must-not-escape";
+  let reads = 0;
+  const safe = causalOptions();
+  Object.defineProperty(safe.value.entries[0], "headers", {
+    get: () => { reads += 1; return privateMarker; },
+  });
+  expect(JSON.stringify(createChatwootProviderLedgerDiagnostic(safe))).not.toContain(privateMarker);
+  const getter = causalOptions();
+  Object.defineProperty(getter.value.entries[0], "effect", {
+    get: () => { reads += 1; return privateMarker; },
+  });
+  const proxied = causalOptions();
+  proxied.value.entries = new Proxy(proxied.value.entries, {
+    get: () => { reads += 1; return privateMarker; },
+  });
+  expect(createChatwootProviderLedgerDiagnostic(getter)).toMatchObject({ status: "unavailable" });
+  expect(createChatwootProviderLedgerDiagnostic(proxied)).toMatchObject({ status: "unavailable" });
+  expect(reads).toBe(0);
 });
 
 test("distinguishes missing and excess endpoint classes from order-only changes", () => {
@@ -279,10 +349,12 @@ test("publishes actual TS-loader oracle annotations through the real MJS failure
     const transform=require(path.join(root,'node_modules/playwright/lib/common/index.js')).transform;
     transform.setSingleTSConfig(path.join(root,'tsconfig.json'));
     const capture=await transform.requireOrImport(path.join(root,'tests/browser/journeys/chatwoot-phase-browser-capture.ts'));
-    const values=${JSON.stringify([options('gap', 20).value, options('gap', 22).value])};
+    const diagnosticOptions=${JSON.stringify([causalOptions('gap', 27), causalOptions('gap', 26)])};
+    const values=diagnosticOptions.map(({value})=>value);
     const errors=values.map((value,index)=>{
       let primary; try {capture.assertChatwootPhaseProviderLedger(value,'gap');} catch(error){primary=error;}
       if(!primary || primary.message!==${JSON.stringify(primaryMessage)}) throw new Error('Real cardinality oracle did not reject');
+      diagnostic.withChatwootProviderLedgerDiagnostic(primary,diagnosticOptions[index]);
       const wrapped=new Error('Chatwoot browser capture failed during gap-snapshot.',{cause:primary});
       return diagnostic.withChatwootProviderCaptureDiagnostic(wrapped,{cause:primary,role:index?'candidate':'baseline',pairIndex:1,captureStage:'gap-snapshot'});
     });
@@ -315,13 +387,14 @@ test("publishes actual TS-loader oracle annotations through the real MJS failure
       messageSha256: "838d7bc290315df9b2f9b2bac376fedcbc9d910cf8f9e9a8f77281d811ee2dda",
       causeEvidenceTruncated: false,
       providerLedgerMismatchEvidence: { entries: [
-        { role: "baseline", diagnostic: { expectedEntryCount: 21, actualEntryCount: 20, checkpoint: "contract-validation", providerCausalContractVersion: 2 } },
-        { role: "candidate", diagnostic: { expectedEntryCount: 21, actualEntryCount: 22, checkpoint: "contract-validation", providerCausalContractVersion: 2 } },
+        { role: "baseline", diagnostic: { expectedEntryCount: 28, actualEntryCount: 27, checkpoint: "first-snapshot-read", providerCausalContractVersion: 3 } },
+        { role: "candidate", diagnostic: { expectedEntryCount: 28, actualEntryCount: 26, checkpoint: "first-snapshot-read", providerCausalContractVersion: 3 } },
       ], truncated: false },
     });
     expect(record.causeEvidence.filter((entry: { messageSha256: string }) => entry.messageSha256 === primaryHash)).toHaveLength(2);
     expect(record.providerLedgerMismatchEvidence.entries.map((entry: { diagnostic: { actualSequence: string[] } }) => entry.diagnostic.actualSequence))
-      .toEqual([options("gap", 20), options("gap", 22)].map(({ value }) => value.entries.map(({ effect }) => effect)));
+      .toEqual([causalOptions("gap", 27), causalOptions("gap", 26)]
+        .map(({ value }) => value.entries.map(({ effect }) => effect)));
     expect(failure?.stderr).not.toContain(repositoryRoot);
     expect(failure?.stderr).not.toContain("/api/");
   } finally { await unlink(planPath); await rmdir(root); }
@@ -333,6 +406,26 @@ function options(phase: "gap" | "stable" | "recreated" = "gap", count?: number) 
   while (actual.length < (count ?? expectedEffects.length)) actual.push("read_profile");
   return { phase, checkpoint: "first-snapshot-read", expectedEffects, endpointContracts,
     value: { database: null, entries: actual.map((effect) => ({ ...endpointContracts.find((entry) => entry.effect === effect)! })) } };
+}
+function causalOptions(phase: "gap" | "stable" | "recreated" = "gap", count?: number) {
+  const expectedEffects = [...(phase === "recreated"
+    ? CHATWOOT_RECREATED_PROVIDER_EFFECTS
+    : CHATWOOT_INITIAL_PROVIDER_EFFECTS)];
+  const actual = expectedEffects.slice(0, count ?? expectedEffects.length);
+  while (actual.length < (count ?? expectedEffects.length)) actual.push("read_profile");
+  return {
+    phase,
+    checkpoint: "first-snapshot-read",
+    expectedEffects,
+    endpointContracts,
+    providerCausalContractVersion: 3,
+    value: {
+      database: null,
+      entries: actual.map((effect) => ({
+        ...endpointContracts.find((entry) => entry.effect === effect)!,
+      })),
+    },
+  };
 }
 function captured(role: "baseline" | "candidate", count: number) {
   const cause = withChatwootProviderLedgerDiagnostic(new Error(primaryMessage), options("gap", count));

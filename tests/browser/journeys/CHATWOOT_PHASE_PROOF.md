@@ -1,14 +1,14 @@
 # Dual-image Chatwoot phase stability proof
 
-Proof schema 2 adds provider causal contract version 2. The original f5 tests
-and immutable journey baseline are unchanged. This explicitly corrects a
-characterization introduced by this task: its 15-event initial expectation
-omitted six existing cold-auth/profile effects, and its total arrival-order
-comparison treated concurrent cabinet reads as sequential application actions.
-The exact initial contract now has 21 events. The complete raw ledger remains
-role-scoped evidence; a separate causal ledger is compared across all six runs.
-The recreated provider suffix must be independently characterized before this
-version can produce a complete accepted proof; an unknown suffix fails closed.
+Proof schema 2 uses provider causal contract version 3. The immutable journey
+baseline is unchanged. Gap and Stable each retain the exact normalized
+28-entry provider ledger; Recreated retains the same prefix plus its exact
+14-entry second-login suffix, for 42 entries total. The complete raw arrival
+ledger remains role-scoped evidence. A separate causal ledger canonicalizes
+only the concurrency allowed by the source-derived readiness, authentication,
+profile, and cabinet dependency model before comparison across all six runs.
+Every endpoint, body, credential, idempotency field, and digest remains in that
+projection; unknown counts, suffixes, and dependency violations fail closed.
 
 This additive sidecar proves the asynchronous Chatwoot cookie lifecycle without
 changing production code, the immutable journey baseline, the Caddy fixture,
