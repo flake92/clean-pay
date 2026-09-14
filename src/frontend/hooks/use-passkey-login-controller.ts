@@ -12,10 +12,11 @@ import {
   selectPasskeyLoginView,
 } from "@/frontend/components/passkey-login-transitions";
 import { passkeyLoginErrorMessage } from "@/frontend/components/passkey-presentation";
+import { useWebAuthnSupport } from "@/frontend/hooks/use-webauthn-support";
 import { navigateTo } from "@/frontend/lib/browser-navigation";
 import { executePasskeyLogin } from "@/frontend/lib/passkey-login-orchestrator";
 import { safeRedirectPath } from "@/shared/auth/redirect-policy";
-import { useWebAuthnSupport } from "@/frontend/hooks/use-webauthn-support";
+import { securityCheckRequiredMessage } from "@/application/models/security-check-messages";
 
 type PasskeyLoginDependencies = {
   beginLogin: typeof beginPasskeyLoginAction;
@@ -66,7 +67,7 @@ export function usePasskeyLoginController({
     if (turnstileEnabled && !turnstileToken) {
       dispatch({
         type: "failed",
-        message: "Пройдите единую проверку безопасности.",
+        message: securityCheckRequiredMessage,
       });
       return;
     }

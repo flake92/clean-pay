@@ -137,10 +137,10 @@ describe("auth form controller transitions", () => {
     expect(authPasswordsMatch("resetConfirm", "same", "same")).toBe(true);
     expect(normalizeAuthCode("a1 2-3b456789")).toBe("123456");
     expect(missingAuthTurnstileTokenMessage("site-key")).toBe(
-      "Пройдите единую проверку безопасности.",
+      "Завершите проверку Cloudflare Turnstile в блоке ниже и повторите действие.",
     );
     expect(missingAuthTurnstileTokenMessage(null)).toBe(
-      "Проверка безопасности временно недоступна.",
+      "Cloudflare Turnstile временно недоступен. Обновите страницу или попробуйте позже.",
     );
   });
 

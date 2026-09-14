@@ -11,6 +11,10 @@ import {
 } from "@/backend/integrations/referral/referral-attribution";
 import { createProductionChatwootIdentityGateway } from "@/backend/integrations/support/chatwoot-identity-gateway";
 import {
+  ChatwootSupportContextCapacityError,
+  createChatwootSupportContextRequestCache,
+} from "@/backend/integrations/support/chatwoot-context-request-cache";
+import {
   ChatwootIdentityCapacityError,
   createChatwootIdentityRequestGuard,
 } from "@/backend/integrations/support/chatwoot-identity-request-guard";
@@ -20,6 +24,13 @@ export const productionPasskeyManagementGateway =
   createProductionPasskeyManagementGateway();
 export const productionChatwootIdentityRequestGuard =
   createChatwootIdentityRequestGuard();
+export const productionChatwootSupportContextRequestGuard =
+  createChatwootIdentityRequestGuard({
+    actionName: "chatwoot_support_context",
+    metricPrefix: "chatwoot_support_context",
+  });
+export const productionChatwootSupportContextRequestCache =
+  createChatwootSupportContextRequestCache();
 export const productionChatwootIdentityGateway =
   createProductionChatwootIdentityGateway(
     productionChatwootIdentityRequestGuard,
@@ -29,6 +40,7 @@ export const productionChatwootIdentityGateway =
 // construction and process-scoped singletons never leak into action modules.
 export {
   ChatwootIdentityCapacityError,
+  ChatwootSupportContextCapacityError,
   clearReferralAttributionCookie,
   productionLinkAccountCommands,
   productionPaymentMaintenanceRunner,

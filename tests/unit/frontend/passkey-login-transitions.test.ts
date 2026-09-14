@@ -54,11 +54,11 @@ describe("passkey login transitions", () => {
   it("records a preflight failure without entering loading", () => {
     const failed = reducePasskeyLogin(initialPasskeyLoginState, {
       type: "failed",
-      message: "Пройдите единую проверку безопасности.",
+      message: "Завершите проверку Cloudflare Turnstile в блоке ниже и повторите действие.",
     });
 
     expect(selectPasskeyLoginView(failed)).toEqual({
-      error: "Пройдите единую проверку безопасности.",
+      error: "Завершите проверку Cloudflare Turnstile в блоке ниже и повторите действие.",
       loading: false,
     });
   });

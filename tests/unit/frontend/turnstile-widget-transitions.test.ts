@@ -27,13 +27,13 @@ describe("Turnstile widget transitions", () => {
       type: "challenge-failed",
     });
     expect(challengeFailure).toEqual({
-      error: "Не удалось пройти проверку Cloudflare Turnstile.",
+      error: "Cloudflare Turnstile не подтвердил проверку. Выполните её ещё раз и повторите действие.",
       loading: true,
     });
     expect(turnstileWidgetReducer(challengeFailure, {
       type: "script-loaded",
     })).toEqual({
-      error: "Не удалось пройти проверку Cloudflare Turnstile.",
+      error: "Cloudflare Turnstile не подтвердил проверку. Выполните её ещё раз и повторите действие.",
       loading: false,
     });
     expect(turnstileWidgetReducer(challengeFailure, {
@@ -45,7 +45,7 @@ describe("Turnstile widget transitions", () => {
     expect(turnstileWidgetReducer(loading, {
       type: "script-load-failed",
     })).toEqual({
-      error: "Не удалось загрузить Cloudflare Turnstile.",
+      error: "Не удалось загрузить Cloudflare Turnstile. Проверьте подключение и блокировщик рекламы, затем обновите страницу.",
       loading: false,
     });
   });

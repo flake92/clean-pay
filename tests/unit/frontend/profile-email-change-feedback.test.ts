@@ -289,6 +289,37 @@ describe("profile e-mail change feedback", () => {
     expect(container.textContent).toContain("Напоминания включены.");
   });
 
+  it("explains an unavailable opt-in without exposing provider brands", async () => {
+    await act(async () => {
+      root.render(createElement(ProfilePanel, {
+        model: {
+          status: "ready",
+          user: {
+            authType: "email",
+            email: "old@example.com",
+            emailVerified: false,
+            pendingEmail: null,
+            telegramId: null,
+          },
+          emailReminders: {
+            status: "ready",
+            enabled: false,
+            emailEligible: false,
+            senderEmail: "no-reply@example.com",
+            daysBefore: [7, 3, 1],
+          },
+        },
+      }));
+    });
+
+    expect(container.textContent).toContain(
+      "Нельзя включить напоминания: e-mail не подтверждён или отправка на этот адрес отключена.",
+    );
+    expect(container.textContent).not.toContain("попробуйте позже");
+    expect(container.textContent).not.toMatch(/Remnashop|Remnawave/i);
+    expect(container.querySelector<HTMLInputElement>('[role="switch"]')?.disabled).toBe(true);
+  });
+
   it("synchronizes reminder preferences received by a soft server refresh", async () => {
     const user = {
       authType: "email",

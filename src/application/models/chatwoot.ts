@@ -8,6 +8,7 @@ type ChatwootWidgetUser = {
 
 export type ChatwootWidgetConfig = {
   baseUrl: string;
+  identityFingerprint: string;
   websiteToken: string;
   user: ChatwootWidgetUser;
 };

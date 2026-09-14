@@ -267,21 +267,20 @@ function exactAuthenticatedChatwootBoundaryRetry(manifest: Record<string, unknow
     return null;
   }
   const hide = { method: "toggleBubbleVisibility", value: "hide" };
-  const show = { method: "toggleBubbleVisibility", value: "show" };
   const frameLoaded = { method: "frame.loaded" };
   const removeLabel = { method: "removeLabel", label: "subscription_expired" };
   const identityConfirmed = { method: "identity.confirmed" };
-  const canonical = [run, hide, setUser, frameLoaded, show, removeLabel, identityConfirmed];
+  const canonical = [run, hide, setUser, frameLoaded, hide, removeLabel, identityConfirmed];
   const retried = [
     run,
     hide,
     setUser,
     frameLoaded,
-    show,
-    show,
+    hide,
+    hide,
     setUser,
     frameLoaded,
-    show,
+    hide,
     removeLabel,
     identityConfirmed,
   ];

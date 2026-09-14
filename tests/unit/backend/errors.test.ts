@@ -14,6 +14,7 @@ describe("Remnashop service errors", () => {
       "AUTH_FAILED",
       "CURRENT_PASSWORD_INVALID",
       "FORBIDDEN",
+      "SECURITY_CHECK_FAILED",
       "NOT_FOUND",
       "VALIDATION_ERROR",
       "EMAIL_REQUIRED",

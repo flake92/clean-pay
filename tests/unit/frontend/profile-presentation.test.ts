@@ -35,7 +35,7 @@ describe("profile presentation selectors", () => {
       hasEmail: true,
       isEmailVerified: true,
       isTelegramOnly: false,
-      canManageRemnashopEmail: true,
+      canManageEmail: true,
       canChangePassword: true,
     });
   });

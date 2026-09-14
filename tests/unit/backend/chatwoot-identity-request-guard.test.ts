@@ -291,6 +291,28 @@ describe("Chatwoot identity request guard", () => {
     ]);
   });
 
+  it("isolates the support-context action in its own distributed capacity scope", async () => {
+    const redis = vi.fn()
+      .mockResolvedValueOnce(1)
+      .mockResolvedValueOnce(1);
+    const guard = createChatwootIdentityRequestGuard({
+      actionName: "chatwoot_support_context",
+      distributedCommand: redis,
+      limits: defaultLimits,
+      metricPrefix: "chatwoot_support_context",
+      now: () => 1_000,
+      token: () => "support-lease-token",
+    });
+
+    await expect(guard.runAction(async () => "context"))
+      .resolves.toBe("context");
+
+    expect(redis.mock.calls[0]?.[0]?.slice(3, 5)).toEqual([
+      "clean-pay:rate-limit:v4:auth:chatwoot_support_context:capacity",
+      "clean-pay:rate-limit:v4:auth:chatwoot_support_context:capacity:concurrency",
+    ]);
+  });
+
   it("honors a distributed rate or concurrency rejection", async () => {
     const rateLimited = createChatwootIdentityRequestGuard({
       distributedCommand: vi.fn(async () => -1),

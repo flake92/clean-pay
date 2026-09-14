@@ -4,15 +4,12 @@ import type {
   ChatwootPendingIdentityState,
 } from "@/frontend/lib/chatwoot-contract";
 
-export function chatwootFingerprint(value: string) {
-  let hash = 0x811c9dc5;
-
-  for (let index = 0; index < value.length; index += 1) {
-    hash ^= value.charCodeAt(index);
-    hash = Math.imul(hash, 0x01000193);
-  }
-
-  return `${value.length}:${(hash >>> 0).toString(16)}`;
+export function serializeChatwootAttributes(
+  attributes: Record<string, string>,
+) {
+  return JSON.stringify(Object.entries(attributes).sort(([left], [right]) => (
+    left < right ? -1 : Number(left !== right)
+  )));
 }
 
 export function projectChatwootIdentity(
@@ -23,20 +20,14 @@ export function projectChatwootIdentity(
     ...config.user.customAttributes,
     ...supportAttributes,
   };
-  const core = chatwootFingerprint(JSON.stringify([
-    config.baseUrl,
-    config.websiteToken,
-    config.user.identifier,
-    config.user.identifierHash,
-    config.user.name,
-    config.user.email,
-  ]));
 
   return {
     customAttributes,
     identity: {
-      core,
-      customAttributes: chatwootFingerprint(JSON.stringify(customAttributes)),
+      core: config.identityFingerprint,
+      // Keep the exact canonical value in memory. Persistence uses SHA-256,
+      // so no finite-width non-cryptographic hash remains a trust boundary.
+      customAttributes: serializeChatwootAttributes(customAttributes),
     },
   };
 }
