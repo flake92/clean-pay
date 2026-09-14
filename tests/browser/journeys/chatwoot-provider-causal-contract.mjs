@@ -1,49 +1,13 @@
 import { types } from "node:util";
 
-export const CHATWOOT_PROVIDER_CAUSAL_CONTRACT_VERSION = 2;
+import {
+  canonicalizeChatwootProviderArrivalOrder,
+  chatwootProviderExpectedEffects,
+} from "./chatwoot-provider-ledger-order.mjs";
 
-// This characterization belongs to the task-added profile -> cabinet Chatwoot
-// scenario. The original journey-v5 fixtures and arrival ledgers are unchanged.
-const initialNodes = Object.freeze([
-  ["auth.challenge", "challenge_verified"],
-  ["auth.authorize", "authorization_code_issued"],
-  ["auth.token", "token_exchanged"],
-  ["auth.jwks", "jwks_read"],
-  ["auth.session", "auth_session_issued"],
-  ["profile.authorize", "read_profile"],
-  ["profile.notification-preferences", "read_notification_preferences"],
-  ["profile.model", "read_profile"],
-  ["profile.support-authorize", "read_profile"],
-  ["profile.support-subscription", "read_subscription"],
-  ["profile.contact", "contact_identity_probed"],
-  ["cabinet.profile", "read_profile"],
-  ["cabinet.authorize", "read_profile"],
-  ["cabinet.referral", "read_referral_program"],
-  ["cabinet.subscription", "read_subscription"],
-  ["cabinet.offers", "read_offers"],
-  ["cabinet.devices", "read_devices"],
-  ["cabinet.subscription-user", "read_user_by_uuid"],
-  ["cabinet.support-authorize", "read_profile"],
-  ["cabinet.support-subscription", "read_subscription"],
-  ["cabinet.contact", "contact_identity_probed"],
-].map(([id, effect]) => Object.freeze({ id, effect })));
-
-export const CHATWOOT_INITIAL_PROVIDER_EFFECTS = Object.freeze(initialNodes.map(({ effect }) => effect));
-
-// loadCabinetViewModel starts subscription/offers/devices with Promise.allSettled;
-// CabinetReferralContent is a separate Suspense branch. Only subscription's
-// awaited response precedes getLiveRemnawaveSubscriptionUrl. Arrival order among
-// the four independent GETs, or between their siblings and that child, is not a
-// semantic ordering. All other anchors deliberately remain exact.
-const fanout = initialNodes.slice(13, 18);
-const initialEdges = Object.freeze([
-  ...initialNodes.slice(0, 12).map(({ id }, index) => [id, initialNodes[index + 1].id]),
-  ...fanout.map(({ id }) => [initialNodes[12].id, id]),
-  ["cabinet.subscription", "cabinet.subscription-user"],
-  ...fanout.map(({ id }) => [id, initialNodes[18].id]),
-  [initialNodes[18].id, initialNodes[19].id],
-  [initialNodes[19].id, initialNodes[20].id],
-].map((edge) => Object.freeze(edge)));
+export const CHATWOOT_PROVIDER_CAUSAL_CONTRACT_VERSION = 3;
+export const CHATWOOT_INITIAL_PROVIDER_EFFECTS = chatwootProviderExpectedEffects("gap");
+export const CHATWOOT_RECREATED_PROVIDER_EFFECTS = chatwootProviderExpectedEffects("recreated");
 
 const entryKeys = Object.freeze([
   "body_bytes", "body_contract", "body_sha256", "credential_contract", "effect",
@@ -52,25 +16,9 @@ const entryKeys = Object.freeze([
 ]);
 
 export function assertChatwootProviderCausalLedger(entries, phase) {
-  if (phase === "recreated") {
-    throw new Error("Chatwoot recreated provider causal contract is uncharacterized.");
-  }
-  if (phase !== "gap" && phase !== "stable") fail();
-  const raw = denseArray(entries, initialNodes.length);
-  if (raw.length !== initialNodes.length) fail();
-  const semanticNodeIds = raw.map((entry, index) => {
-    if (ownData(entry, "sequence") !== index + 1) fail();
-    const effect = ownData(entry, "effect");
-    const node = index >= 13 && index <= 17
-      ? fanout.find((candidate) => candidate.effect === effect)
-      : initialNodes[index];
-    if (!node || node.effect !== effect) fail();
-    return node.id;
-  });
-  if (new Set(semanticNodeIds).size !== initialNodes.length) fail();
-  for (const [before, after] of initialEdges) {
-    if (semanticNodeIds.indexOf(before) >= semanticNodeIds.indexOf(after)) fail();
-  }
+  const canonicalEntries = validatedCanonicalEntries(entries, phase);
+  const semanticNodeIds = canonicalEntries.map(causalNodeId);
+  if (new Set(semanticNodeIds).size !== canonicalEntries.length) fail();
   return Object.freeze({
     contractVersion: CHATWOOT_PROVIDER_CAUSAL_CONTRACT_VERSION,
     semanticNodeIds: Object.freeze(semanticNodeIds),
@@ -82,22 +30,78 @@ export function assertChatwootProviderCausalLedger(entries, phase) {
  * causal category. The original ordered entry is retained in the raw category.
  */
 export function projectChatwootProviderCausalEntries(entries, phase) {
-  const contract = assertChatwootProviderCausalLedger(entries, phase);
-  const nodes = initialNodes.map(({ id }) => {
-    const entryIndex = contract.semanticNodeIds.indexOf(id);
-    const entry = ownData(entries, String(entryIndex));
+  const canonicalEntries = validatedCanonicalEntries(entries, phase);
+  const semanticNodeIds = canonicalEntries.map(causalNodeId);
+  const nodes = canonicalEntries.map((entry, index) => {
+    const budget = { nodes: 0, bytes: 0 };
+    return Object.freeze({
+      nodeId: semanticNodeIds[index],
+      value: Object.freeze(Object.fromEntries(entryKeys
+        .filter((key) => key !== "sequence")
+        .map((key) => [key, copyData(ownData(entry, key), budget, 0)]))),
+    });
+  });
+  return Object.freeze({
+    contractVersion: CHATWOOT_PROVIDER_CAUSAL_CONTRACT_VERSION,
+    nodes: Object.freeze(nodes),
+    edges: causalDependencyEdges(semanticNodeIds, phase),
+  });
+}
+
+function validatedCanonicalEntries(entries, phase) {
+  let expectedEffects;
+  try {
+    expectedEffects = chatwootProviderExpectedEffects(phase);
+  } catch {
+    fail();
+  }
+  const raw = denseArray(entries, 64);
+  if (raw.length !== expectedEffects.length) fail();
+  const safeEntries = raw.map((entry, index) => {
     if (types.isProxy(entry) || Reflect.ownKeys(entry).length !== entryKeys.length
       || entryKeys.some((key) => !Object.hasOwn(entry, key))) fail();
     const budget = { nodes: 0, bytes: 0 };
-    const value = Object.fromEntries(entryKeys.filter((key) => key !== "sequence")
-      .map((key) => [key, copyData(ownData(entry, key), budget, 0)]));
-    return Object.freeze({ nodeId: id, value: Object.freeze(value) });
+    const value = Object.freeze(Object.fromEntries(entryKeys.map((key) => [
+      key,
+      copyData(ownData(entry, key), budget, 0),
+    ])));
+    if (ownData(value, "sequence") !== index + 1) fail();
+    return value;
   });
-  return Object.freeze({
-    contractVersion: contract.contractVersion,
-    nodes: Object.freeze(nodes),
-    edges: initialEdges,
-  });
+  try {
+    const canonical = canonicalizeChatwootProviderArrivalOrder(safeEntries, phase);
+    if (canonical.length !== expectedEffects.length) fail();
+    return Object.freeze(canonical.map((entry) => Object.freeze(entry)));
+  } catch {
+    fail();
+  }
+}
+
+function causalNodeId(entry, index) {
+  const ordinal = String(index + 1).padStart(2, "0");
+  return `${ordinal}:${ownData(entry, "service")}:${ownData(entry, "effect")}:${ownData(entry, "pathname")}`;
+}
+
+// These are the explicit cross-request dependencies whose content is bound into
+// the proof. The complete accepted partial order is validated by the single
+// source of truth in chatwoot-provider-ledger-order.mjs before this projection.
+function causalDependencyEdges(nodeIds, phase) {
+  const initial = [
+    [1, 4], [4, 5], [5, 6], [6, 7],
+    [0, 8], [8, 9], [9, 10], [10, 11], [11, 12],
+    [12, 13], [12, 14], [13, 15], [14, 15], [15, 16], [16, 17],
+    [17, 18], [18, 19], [18, 20], [19, 21], [19, 22], [19, 23], [19, 24],
+    [21, 24], [20, 25], [21, 25], [22, 25], [23, 25], [24, 25], [25, 26], [26, 27],
+  ];
+  const recreated = phase === "recreated" ? [
+    [27, 28], [28, 29], [29, 30], [30, 31], [31, 32], [32, 33],
+    [33, 34], [33, 35], [34, 36], [34, 37], [34, 38], [34, 39],
+    [36, 39], [35, 40], [36, 40], [37, 40], [38, 40], [39, 40], [40, 41],
+  ] : [];
+  return Object.freeze([...initial, ...recreated].map(([before, after]) => Object.freeze([
+    nodeIds[before],
+    nodeIds[after],
+  ])));
 }
 
 function copyData(value, budget, depth) {

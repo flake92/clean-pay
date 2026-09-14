@@ -1,4 +1,3 @@
-import { canonicalizeChatwootProviderArrivalOrder } from "./chatwoot-provider-ledger-order.mjs";
 import { projectExactJourneyGeneratedValues } from "../journey-comparison-projection";
 import { projectChatwootProviderCausalEntries } from "./chatwoot-provider-causal-contract.mjs";
 
@@ -33,10 +32,7 @@ type ExactPhaseEvidenceInput = {
  * for the proof-scoped HMAC sealer. Raw provider occurrence order is retained
  * separately from the versioned, source-derived causal read projection.
  */
-export function canonicalChatwootPhaseEvidence(
-  input: ExactPhaseEvidenceInput,
-  providerPhase?: "gap" | "stable" | "recreated",
-) {
+export function canonicalChatwootPhaseEvidence(input: ExactPhaseEvidenceInput) {
   assertExactInput(input);
   const manifest: Record<string, unknown> = {
     schemaVersion: 2,
@@ -57,10 +53,6 @@ export function canonicalChatwootPhaseEvidence(
     network: structuredClone(input.network),
     providerEffects: structuredClone(input.providerEffects),
   };
-  if (providerPhase !== undefined) {
-    const provider = manifest.providerEffects as { database: unknown; entries: unknown[] };
-    provider.entries = canonicalizeChatwootProviderArrivalOrder(provider.entries, providerPhase);
-  }
   projectExactJourneyGeneratedValues(manifest);
 
   const network = exactRecord(manifest.network, "projected phase network");

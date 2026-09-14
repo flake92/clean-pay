@@ -5,6 +5,7 @@ const ledgerAnnotation = Symbol.for("clean-pay.chatwoot-provider-ledger-diagnost
 const captureAnnotation = Symbol.for("clean-pay.chatwoot-provider-capture-diagnostic.v1");
 const normalizedAnnotation = Symbol.for("clean-pay.chatwoot-provider-normalized-diagnostic.v1");
 const maximumEntries = 256;
+const maximumExpectedEntries = 42;
 const maximumSequenceEntries = 64;
 const maximumSamples = 8;
 const maximumBytes = 16 * 1024;
@@ -12,7 +13,8 @@ const classes = new Set([
   "contact_identity_probed", "challenge_verified", "authorization_code_issued",
   "token_exchanged", "jwks_read", "auth_session_issued", "read_profile",
   "read_referral_program", "read_subscription", "read_offers", "read_devices",
-  "read_notification_preferences", "read_user_by_uuid",
+  "read_notification_preferences", "read_user_by_uuid", "read_public_plans",
+  "read_metadata", "probe_contract",
 ]);
 const phases = new Set(["gap", "stable", "recreated"]);
 const checkpoints = new Set([
@@ -66,7 +68,7 @@ function normalizeOptions(options) {
     const providerCausalContractVersion = optionalData(options, "providerCausalContractVersion") ?? 1;
     const expectedEntryCount = diagnosticExpectedCount(providerCausalContractVersion, phase);
     const expected = expectedEntryCount === null && expectedEffects === null ? null
-      : safeArray(expectedEffects, 28).map((entry) => {
+      : safeArray(expectedEffects, maximumExpectedEntries).map((entry) => {
       if (!classes.has(entry)) throw new Error("Invalid expected class.");
       return entry;
     });
@@ -128,9 +130,11 @@ function renderDiagnostic(input) {
       kind: "chatwoot-provider-ledger-mismatch-diagnostic",
       status: "observed", phase, checkpoint, expectedEntryCount: expected?.length ?? null,
       actualEntryCount, entriesAreArray,
-      ...(providerCausalContractVersion === 2 ? {
+      ...(providerCausalContractVersion >= 2 ? {
         providerCausalContractVersion,
-        characterization: expected === null ? "uncharacterized-recreated" : "initial-causal-v2",
+        characterization: providerCausalContractVersion === 2
+          ? (expected === null ? "uncharacterized-recreated" : "initial-causal-v2")
+          : (phase === "recreated" ? "recreated-causal-v3" : "initial-causal-v3"),
       } : {}),
       scannedEntryCount: actual.length,
       scanTruncated: (actualEntryCount ?? 0) > maximumEntries,
@@ -176,7 +180,9 @@ function readNormalized(value) {
   const providerCausalContractVersion = requiredData(value, "providerCausalContractVersion");
   const expectedEntryCount = diagnosticExpectedCount(providerCausalContractVersion, phase);
   const rawExpected = requiredData(value, "expected");
-  const expected = expectedEntryCount === null && rawExpected === null ? null : safeArray(rawExpected, 28);
+  const expected = expectedEntryCount === null && rawExpected === null
+    ? null
+    : safeArray(rawExpected, maximumExpectedEntries);
   const actual = safeArray(requiredData(value, "actual"), maximumEntries);
   if ((expected?.length ?? null) !== expectedEntryCount
     || expected?.some((entry) => !classes.has(entry))
@@ -192,6 +198,7 @@ function readNormalized(value) {
 function diagnosticExpectedCount(version, phase) {
   if (version === 1) return phase === "recreated" ? 28 : 15;
   if (version === 2) return phase === "recreated" ? null : 21;
+  if (version === 3) return phase === "recreated" ? 42 : 28;
   throw new Error("Invalid diagnostic characterization version.");
 }
 

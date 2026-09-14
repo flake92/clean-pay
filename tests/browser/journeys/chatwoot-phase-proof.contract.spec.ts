@@ -192,7 +192,8 @@ test("requires three independent A/B pairs and exact cross-image PNG quorums", (
   const proof = createChatwootPhaseProof(pairReports());
 
   expect(proof).toMatchObject({
-    schemaVersion: 1,
+    schemaVersion: 2,
+    providerCausalContractVersion: 3,
     kind: CHATWOOT_PHASE_PROOF_KIND,
     scenario: {
       label: CHATWOOT_PHASE_PROOF_SCENARIO,
@@ -228,7 +229,9 @@ test("requires three independent A/B pairs and exact cross-image PNG quorums", (
       distinctSourceRevisions: true,
       sameProofHmacScope: true,
       allPhaseSemanticsExact: true,
-      allCanonicalPhaseEvidenceExact: true,
+      allComparableCanonicalPhaseEvidenceExact: true,
+      providerCausalEvidenceExact: true,
+      rawProviderArrivalOrderCompared: false,
       allScreenshotsCrossImageByteExact: true,
     },
     lifecycle: {
@@ -449,11 +452,15 @@ test("fails closed on phase, clearing, recreation, and browser near misses", () 
       value[0].stacks.baseline.phases.stable.evidenceRanges.requestSequence.lastHmacSha256 =
         "2".repeat(64);
     }],
-    ["changed provider order", (value) => {
-      value[0].stacks.baseline.phases.recreated.hashes.providerLedgerHmacSha256 = "0".repeat(64);
+    ["changed causal provider values or dependency order", (value) => {
+      value[0].stacks.baseline.phases.recreated.hashes.providerCausalLedgerHmacSha256 =
+        "0".repeat(64);
     }],
-    ["changed provider effects", (value) => {
-      value[0].stacks.baseline.phases.recreated.hashes.providerEffectsHmacSha256 = "1".repeat(64);
+    ["malformed raw provider ledger provenance", (value) => {
+      value[0].stacks.baseline.phases.recreated.hashes.providerLedgerHmacSha256 = "invalid";
+    }],
+    ["malformed raw provider effects provenance", (value) => {
+      value[0].stacks.baseline.phases.recreated.hashes.providerEffectsHmacSha256 = "invalid";
     }],
   ];
 
@@ -1320,43 +1327,51 @@ test("uses only the exact journey-v5 referential projection before ordered HMAC 
   const baselineDynamic = "1".repeat(64);
   const candidateDynamic = "2".repeat(64);
   const baseline = canonicalChatwootPhaseEvidence(
-    canonicalEvidenceInput(baselineDynamic),
+    canonicalEvidenceInput(baselineDynamic, "gap"),
   );
   const candidate = canonicalChatwootPhaseEvidence(
-    canonicalEvidenceInput(candidateDynamic),
+    canonicalEvidenceInput(candidateDynamic, "gap"),
   );
   expect(candidate).toEqual(baseline);
   expect(JSON.stringify(baseline)).not.toContain(baselineDynamic);
   expect(JSON.stringify(candidate)).not.toContain(candidateDynamic);
 
-  const reorderedInput = canonicalEvidenceInput(candidateDynamic);
-  reorderedInput.providerEffects.entries.reverse();
+  const reorderedInput = canonicalEvidenceInput(candidateDynamic, "gap");
+  [reorderedInput.providerEffects.entries[22], reorderedInput.providerEffects.entries[23]] =
+    [reorderedInput.providerEffects.entries[23], reorderedInput.providerEffects.entries[22]];
+  reorderedInput.providerEffects.entries.forEach((entry, index) => { entry.sequence = index + 1; });
   const reordered = canonicalChatwootPhaseEvidence(reorderedInput);
   expect(reordered.providerLedger).not.toEqual(candidate.providerLedger);
   expect(reordered.providerEffects).not.toEqual(candidate.providerEffects);
+  expect(reordered.providerCausalLedger).toEqual(candidate.providerCausalLedger);
 
-  const changedBrowserSemantics = canonicalEvidenceInput(candidateDynamic);
+  const reversedCausalOrder = canonicalEvidenceInput(candidateDynamic, "gap");
+  reversedCausalOrder.providerEffects.entries.reverse();
+  reversedCausalOrder.providerEffects.entries.forEach((entry, index) => { entry.sequence = index + 1; });
+  expect(() => canonicalChatwootPhaseEvidence(reversedCausalOrder)).toThrow();
+
+  const changedBrowserSemantics = canonicalEvidenceInput(candidateDynamic, "gap");
   (changedBrowserSemantics.browserRequests[0] as Record<string, unknown>)
     .responseStatus = 500;
   expect(canonicalChatwootPhaseEvidence(changedBrowserSemantics).requestSequence)
     .not.toEqual(candidate.requestSequence);
 
-  const missingAction = canonicalEvidenceInput(candidateDynamic);
+  const missingAction = canonicalEvidenceInput(candidateDynamic, "gap");
   missingAction.network.serverActions = [];
   missingAction.network.serverActionCount = 0;
   expect(() => canonicalChatwootPhaseEvidence(missingAction)).toThrow(/network is incomplete/);
 
-  const sparseTopLevel = canonicalEvidenceInput(candidateDynamic);
+  const sparseTopLevel = canonicalEvidenceInput(candidateDynamic, "gap");
   delete sparseTopLevel.browserRequests[0];
   expect(() => canonicalChatwootPhaseEvidence(sparseTopLevel))
     .toThrow(/strict browser requests must be a dense own-index array/);
 
-  const sparseNestedDom = canonicalEvidenceInput(candidateDynamic);
+  const sparseNestedDom = canonicalEvidenceInput(candidateDynamic, "gap");
   sparseNestedDom.dom.children = new Array(1) as never;
   expect(() => canonicalChatwootPhaseEvidence(sparseNestedDom))
     .toThrow(/nested canonical evidence must be a dense own-index array/);
 
-  const sparseNestedStorage = canonicalEvidenceInput(candidateDynamic);
+  const sparseNestedStorage = canonicalEvidenceInput(candidateDynamic, "gap");
   sparseNestedStorage.storage.local = new Array(1) as never;
   expect(() => canonicalChatwootPhaseEvidence(sparseNestedStorage))
     .toThrow(/nested canonical evidence must be a dense own-index array/);
@@ -2537,12 +2552,34 @@ for (const [label, left, right] of [
     const second = canonicalizeChatwootProviderArrivalOrder(changed.entries, "gap");
     expect(second).toEqual(first);
     expect(changed).toEqual(before);
-    const a = canonicalEvidenceInput("1".repeat(64));
-    const b = canonicalEvidenceInput("1".repeat(64));
+    const a = canonicalEvidenceInput("1".repeat(64), "gap");
+    const b = canonicalEvidenceInput("1".repeat(64), "gap");
     a.providerEffects = original as never;
     b.providerEffects = changed as never;
-    expect(canonicalChatwootPhaseEvidence(a, "gap"))
-      .toEqual(canonicalChatwootPhaseEvidence(b, "gap"));
+    const firstEvidence = canonicalChatwootPhaseEvidence(a);
+    const secondEvidence = canonicalChatwootPhaseEvidence(b);
+    expect(secondEvidence.providerLedger).not.toEqual(firstEvidence.providerLedger);
+    expect(secondEvidence.providerEffects).not.toEqual(firstEvidence.providerEffects);
+    expect(secondEvidence.providerCausalLedger).toEqual(firstEvidence.providerCausalLedger);
+    const {
+      providerCausalLedger: _firstCausal,
+      providerEffects: _firstEffects,
+      providerLedger: _firstLedger,
+      ...firstNonProviderEvidence
+    } = firstEvidence;
+    const {
+      providerCausalLedger: _secondCausal,
+      providerEffects: _secondEffects,
+      providerLedger: _secondLedger,
+      ...secondNonProviderEvidence
+    } = secondEvidence;
+    void _firstCausal;
+    void _firstEffects;
+    void _firstLedger;
+    void _secondCausal;
+    void _secondEffects;
+    void _secondLedger;
+    expect(secondNonProviderEvidence).toEqual(firstNonProviderEvidence);
   });
 }
 
@@ -2969,11 +3006,34 @@ for (const [observation, order] of observedReadinessInterleavings.entries()) {
       expect(assertChatwootPhaseProviderLedger(changed, phase)).toEqual(changed);
       expect(canonicalizeChatwootProviderArrivalOrder(changed.entries, phase))
         .toEqual(canonicalizeChatwootProviderArrivalOrder(original.entries, phase));
-      const a = canonicalEvidenceInput("1".repeat(64));
-      const b = canonicalEvidenceInput("1".repeat(64));
+      const a = canonicalEvidenceInput("1".repeat(64), phase);
+      const b = canonicalEvidenceInput("1".repeat(64), phase);
       a.providerEffects = original as never;
       b.providerEffects = changed as never;
-      expect(canonicalChatwootPhaseEvidence(a, phase)).toEqual(canonicalChatwootPhaseEvidence(b, phase));
+      const firstEvidence = canonicalChatwootPhaseEvidence(a);
+      const secondEvidence = canonicalChatwootPhaseEvidence(b);
+      expect(secondEvidence.providerLedger).not.toEqual(firstEvidence.providerLedger);
+      expect(secondEvidence.providerEffects).not.toEqual(firstEvidence.providerEffects);
+      expect(secondEvidence.providerCausalLedger).toEqual(firstEvidence.providerCausalLedger);
+      const {
+        providerCausalLedger: _firstCausal,
+        providerEffects: _firstEffects,
+        providerLedger: _firstLedger,
+        ...firstNonProviderEvidence
+      } = firstEvidence;
+      const {
+        providerCausalLedger: _secondCausal,
+        providerEffects: _secondEffects,
+        providerLedger: _secondLedger,
+        ...secondNonProviderEvidence
+      } = secondEvidence;
+      void _firstCausal;
+      void _firstEffects;
+      void _firstLedger;
+      void _secondCausal;
+      void _secondEffects;
+      void _secondLedger;
+      expect(secondNonProviderEvidence).toEqual(firstNonProviderEvidence);
       expect(changed).toEqual(before);
     });
   }
@@ -4409,12 +4469,14 @@ test("keeps the sidecar contract separate from baselines, projection, and fixtur
     $schema: "http://json-schema.org/draft-07/schema#",
     additionalProperties: false,
     properties: {
-      schemaVersion: { const: 1 },
+      schemaVersion: { const: 2 },
+      providerCausalContractVersion: { const: 3 },
       kind: { const: CHATWOOT_PHASE_PROOF_KIND },
     },
   });
   expect(schema.required).toEqual([
     "schemaVersion",
+    "providerCausalContractVersion",
     "kind",
     "scenario",
     "execution",
@@ -5451,6 +5513,7 @@ function orderedEvidence(
     computedStyles: entries("styles", 3),
     dom: entries("dom", 3),
     interactive: entries("interactive", 2),
+    providerCausalLedger: entries("provider-causal-ledger", providerLedgerCount),
     providerEffects: entries("provider-effects", providerEffectCount),
     providerLedger: entries("provider-ledger", providerLedgerCount),
     requestSequence: entries("request", 8),
@@ -5471,7 +5534,7 @@ function inputDocument(parent = path.join(path.parse(process.cwd()).root, "exter
   };
 }
 
-function canonicalEvidenceInput(dynamicDigest: string) {
+function canonicalEvidenceInput(dynamicDigest: string, phase: ProviderFixturePhase) {
   const actionIdentifier = { bytes: 64, sha256: dynamicDigest };
   const actionPayload = { bytes: 96, sha256: dynamicDigest };
   const actionUrl = {
@@ -5480,33 +5543,24 @@ function canonicalEvidenceInput(dynamicDigest: string) {
     query: [],
     fragment: null,
   };
-  const providerEntry = (sequence: number, effect: string) => ({
-    sequence,
-    service: "remnashop",
-    method: "POST",
-    pathname: "/api/v1/public/auth/telegram",
-    query_keys: [],
-    body_bytes: 80,
-    body_sha256: dynamicDigest,
-    body_contract: {
-      actor: {
-        kind: "dynamic",
-        format: "telegram-id",
-        bytes: 9,
-        sha256: dynamicDigest,
-      },
-    },
-    idempotency_key_present: false,
-    idempotency_key_sha256: null,
-    idempotency_key_contract: null,
-    credential_contract: {
-      authorization_scheme: "Bearer",
-      cookie_names: [],
-      header_names: ["authorization"],
-    },
-    effect,
-  });
+  const provider = strictProviderFixture(phase);
+  const authorization = provider.entries.find(
+    (entry) => entry.effect === "authorization_code_issued",
+  );
+  if (!authorization) throw new Error("Missing authorization-code provider fixture.");
+  const fields = (authorization.body_contract as {
+    fields: Array<{ name: string; value: unknown }>;
+  }).fields;
+  const codeChallenge = fields.find(({ name }) => name === "code_challenge");
+  if (!codeChallenge) throw new Error("Missing OIDC code-challenge fixture field.");
+  codeChallenge.value = {
+    kind: "dynamic",
+    format: "oidc-code-challenge",
+    bytes: 43,
+    sha256: dynamicDigest,
+  };
   return {
+    phase,
     accessibility: "- document\n  - heading \"Личный кабинет\" [level=1]",
     browserRequests: [{
       classification: { key: "app-cabinet-action", disposition: "continue" },
@@ -5546,13 +5600,7 @@ function canonicalEvidenceInput(dynamicDigest: string) {
         status: 200,
       }],
     },
-    providerEffects: {
-      entries: [
-        providerEntry(1, "session_created"),
-        providerEntry(2, "contact_identity_probed"),
-      ],
-      database: { tableCount: 20, rowCount: 3 },
-    },
+    providerEffects: provider,
     storage: { local: [], session: [], cacheNames: [], serviceWorkerScopes: [] },
   };
 }

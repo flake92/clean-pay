@@ -1179,6 +1179,7 @@ async function captureVisiblePhase(input: CaptureVisiblePhaseInput) {
     throw new Error(`Chatwoot ${input.phase} phase has no user cookie.`);
   }
   const orderedEvidence = canonicalChatwootPhaseEvidence({
+    phase: input.phase,
     accessibility: sanitizeAriaUrls(
       ariaSnapshot,
       SYNTHETIC_APPLICATION_ORIGIN,
@@ -1193,7 +1194,7 @@ async function captureVisiblePhase(input: CaptureVisiblePhaseInput) {
     network: input.network,
     providerEffects: provider,
     storage,
-  }, input.phase);
+  });
   const sealed = input.input.sealer.sealPhase({
     cookies,
     phase: input.phase,
