@@ -11,6 +11,8 @@ import {
   DATABASE_ENUM_TYPES,
   DATABASE_FUNCTIONS,
   DATABASE_INTERNAL_TABLES,
+  DATABASE_REVIEWED_CATALOG_STATE_ALTERNATES,
+  DATABASE_REVIEWED_CATALOG_STATES,
   DATABASE_TABLE_COLUMNS,
   DATABASE_TABLES,
   DATABASE_TRIGGERS,
@@ -22,6 +24,7 @@ import {
   RETENTION_TABLE_PRIVILEGES,
 } from "../../../deploy/prod/database-privilege-manifest.mjs";
 import {
+  canonicalCatalogFingerprint,
   parseDatabaseRoleConfiguration,
   quoteLiteral,
   runProvisioningTransaction,
@@ -81,6 +84,82 @@ function roleEnvironment(overrides: Record<string, string> = {}) {
 }
 
 describe("production database least-privilege contract", () => {
+  it("fingerprints logical columns independently of dump/restore storage history", () => {
+    const reference = {
+      columns: [
+        {
+          table_name: "WebUser",
+          position: 8,
+          name: "telegramId",
+          data_type: "text",
+          not_null: false,
+          has_missing: true,
+          default_expression: null,
+        },
+        {
+          table_name: "WebUser",
+          position: 9,
+          name: "fullName",
+          data_type: "text",
+          not_null: false,
+          has_missing: false,
+          default_expression: null,
+        },
+      ],
+      constraints: [{ name: "WebUser_pkey" }],
+    };
+    const restored = {
+      ...reference,
+      columns: [
+        { ...reference.columns[0], position: 1, has_missing: false },
+        { ...reference.columns[1], position: 2 },
+      ],
+    };
+
+    expect(canonicalCatalogFingerprint(restored)).toBe(
+      canonicalCatalogFingerprint(reference),
+    );
+    expect(canonicalCatalogFingerprint({
+      ...restored,
+      columns: [...restored.columns].reverse(),
+    })).not.toBe(canonicalCatalogFingerprint(reference));
+    const logicalChanges = [
+      { data_type: "bigint" },
+      { not_null: true },
+      { default_expression: "'enabled'::text" },
+      { name: "telegramIdentity" },
+    ];
+    for (const change of logicalChanges) {
+      expect(canonicalCatalogFingerprint({
+        ...restored,
+        columns: restored.columns.map((column) =>
+          column.name === "telegramId" ? { ...column, ...change } : column),
+      })).not.toBe(canonicalCatalogFingerprint(reference));
+    }
+  });
+
+  it("admits only the exact reviewed production column-order lineage", () => {
+    expect(Object.keys(DATABASE_REVIEWED_CATALOG_STATE_ALTERNATES)).toEqual([
+      "20260813091000_add_remnashop_refresh_recovery",
+      "20260825010000_add_durable_telegram_callback",
+      "20260825210000_add_payment_sensitive_retention",
+      "20260825220000_add_payment_retention_hold_lifecycle",
+      "20260825230000_guard_retention_mutations",
+    ]);
+    for (const [state, fingerprints] of Object.entries(
+      DATABASE_REVIEWED_CATALOG_STATE_ALTERNATES,
+    )) {
+      expect(DATABASE_REVIEWED_CATALOG_STATES).toHaveProperty(state);
+      expect(fingerprints).toHaveLength(1);
+      expect(fingerprints[0]).toMatch(/^[0-9a-f]{64}$/);
+      expect(fingerprints[0]).not.toBe(
+        DATABASE_REVIEWED_CATALOG_STATES[
+          state as keyof typeof DATABASE_REVIEWED_CATALOG_STATES
+        ],
+      );
+    }
+  });
+
   it("generates Prisma Client before the CI runtime privilege probe", () => {
     const job = ci.slice(
       ci.indexOf("  database-least-privilege:"),
