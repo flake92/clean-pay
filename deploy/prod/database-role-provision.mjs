@@ -55,8 +55,37 @@ const REVIEWED_ROLLBACK_MIGRATIONS = new Set([
   "20260825230000_guard_retention_mutations",
 ]);
 const REVIEWED_ALTERNATE_MIGRATION_CHECKSUMS = Object.freeze({
+  // These exact checksums belong to the already-deployed production ledger.
+  // The packaged files were later normalized to LF or hardened to preserve
+  // legacy data while producing the same final catalog. An alternate checksum
+  // only admits the ledger row here; assertReviewedCatalogState still requires
+  // the exact reviewed catalog fingerprint before provisioning can continue.
+  "20260619145932_init": Object.freeze([
+    "1c95123450bb01cc241328005c23ad5f7ede1342b7193822010829f3c2414293",
+  ]),
+  "20260619153000_add_auth_cache_models": Object.freeze([
+    "51bd33df188c6434ab7d57f0de9b050fe2da22424b6b3180b350af85d0b40625",
+  ]),
+  "20260619154500_add_telegram_oidc": Object.freeze([
+    "63e11f0d035511b1fb738f8ceba4615df364c4c525105b20b62405afb539d599",
+  ]),
+  "20260619161000_add_remnashop_session_tokens": Object.freeze([
+    "7b95bddb17aaf5215f69fc36a97432071fe537d553e766676fb22cf33c2686ca",
+  ]),
+  "20260619202616_add_payment_records": Object.freeze([
+    "d481337a411e7fab09d7d701bfcc19fd06c29442c11d317674f87cea6344db35",
+  ]),
+  "20260623214000_store_telegram_id_as_text": Object.freeze([
+    "c85148348e1c6bdd089a9139b83eb7d96343cdec6925aa12fa7d8a43d2300a99",
+  ]),
+  "20260623222500_add_web_session_auth_method": Object.freeze([
+    "6fd854f94d97de82dd7448485ccb9c281a8ba1a4df34aa75a03b48d3c22e1b8d",
+  ]),
   "20260718141000_drop_redundant_indexes": Object.freeze([
     "d7857cdbea5de7e559d305697e25fa7e2eeab37f4c207f940d7d06368bd629d6",
+  ]),
+  "20260719003000_add_account_merge_confirmation": Object.freeze([
+    "b6a7ed53e3c95d0e0ca4e03ecb43ab1f06c3a7fd5eb0fa1443144afa624af2be",
   ]),
 });
 const ROLE_URLS = Object.freeze({
