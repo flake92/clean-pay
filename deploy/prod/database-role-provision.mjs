@@ -24,6 +24,7 @@ import {
   DATABASE_INTERNAL_TABLES,
   DATABASE_PG17_SYSTEM_PUBLIC_ACL_SHA256,
   DATABASE_PRIVILEGE_MANIFEST_VERSION,
+  DATABASE_REVIEWED_CATALOG_STATE_ALTERNATES,
   DATABASE_RECOVERY_PREDECESSOR_STATES,
   DATABASE_REVIEWED_CATALOG_STATES,
   DATABASE_SECURITY_CONSTRAINTS,
@@ -478,9 +479,27 @@ function stableCatalogValue(value) {
   return value;
 }
 
+function semanticCatalogSnapshot(snapshot) {
+  if (!snapshot || typeof snapshot !== "object" || !Array.isArray(snapshot.columns)) {
+    return snapshot;
+  }
+  const columns = snapshot.columns
+    .map((column) => Object.fromEntries(
+      Object.entries(column).filter(([key]) =>
+        key !== "position" && key !== "has_missing"),
+    ));
+  return { ...snapshot, columns };
+}
+
 export function canonicalCatalogFingerprint(snapshot) {
+  // attnum positions and atthasmissing are physical storage history rather
+  // than logical schema: pg_dump/restore compacts dropped-column slots and
+  // materializes fast-default values. Keep every semantic column property and
+  // the query's relative attnum order so a verified restore matches its live
+  // source without making genuine column reordering invisible.
+  const semanticSnapshot = semanticCatalogSnapshot(snapshot);
   return createHash("sha256")
-    .update(JSON.stringify(stableCatalogValue(snapshot)))
+    .update(JSON.stringify(stableCatalogValue(semanticSnapshot)))
     .digest("hex");
 }
 
@@ -1057,12 +1076,21 @@ async function reviewedLedgerState(client, configuration) {
   return state.lastSuccess ?? "LEDGER_ONLY";
 }
 
+function reviewedCatalogFingerprints(ledgerState) {
+  const primary = DATABASE_REVIEWED_CATALOG_STATES[ledgerState];
+  if (!primary) return null;
+  return new Set([
+    primary,
+    ...(DATABASE_REVIEWED_CATALOG_STATE_ALTERNATES[ledgerState] ?? []),
+  ]);
+}
+
 async function assertReviewedCatalogState(client, configuration, { postOnly = false } = {}) {
   const ledgerState = await reviewedLedgerState(client, configuration);
-  const expectedFingerprint = DATABASE_REVIEWED_CATALOG_STATES[ledgerState];
+  const expectedFingerprints = reviewedCatalogFingerprints(ledgerState);
   const postState = reviewedMigrationPlan().at(-1).name;
   if (
-    !expectedFingerprint
+    !expectedFingerprints
     || (postOnly && ledgerState !== postState)
   ) {
     throw new Error(`Prisma ledger state ${ledgerState} is not an approved deployment boundary`);
@@ -1072,9 +1100,10 @@ async function assertReviewedCatalogState(client, configuration, { postOnly = fa
     configuration.bootstrap.schema,
   );
   const fingerprint = canonicalCatalogFingerprint(snapshot);
-  if (fingerprint !== expectedFingerprint) {
+  if (!expectedFingerprints.has(fingerprint)) {
+    const expected = [...expectedFingerprints].join(" or ");
     throw new Error(
-      `database catalog does not match reviewed ${ledgerState} state for privilege manifest ${DATABASE_PRIVILEGE_MANIFEST_VERSION}: expected ${expectedFingerprint}, received ${fingerprint}`,
+      `database catalog does not match reviewed ${ledgerState} state for privilege manifest ${DATABASE_PRIVILEGE_MANIFEST_VERSION}: expected ${expected}, received ${fingerprint}`,
     );
   }
   return ledgerState;
@@ -1091,10 +1120,13 @@ export async function assertReviewedRecoveryPredecessor(
   }
   const migrationPlan = reviewedMigrationPlan();
   const targetIndex = migrationPlan.findIndex(({ name }) => name === migrationName);
+  const expectedFingerprints = reviewedCatalogFingerprints(recoveryState.predecessor);
   if (
     targetIndex < 1
     || migrationPlan[targetIndex - 1].name !== recoveryState.predecessor
+    || recoveryState.fingerprint !== DATABASE_REVIEWED_CATALOG_STATES[recoveryState.predecessor]
     || !/^[0-9a-f]{64}$/.test(recoveryState.fingerprint)
+    || !expectedFingerprints
   ) {
     throw new Error(`migration ${migrationName} recovery manifest is invalid`);
   }
@@ -1129,7 +1161,7 @@ export async function assertReviewedRecoveryPredecessor(
   const fingerprint = canonicalCatalogFingerprint(
     await buildCanonicalCatalogSnapshot(client, configuration.bootstrap.schema),
   );
-  if (fingerprint !== recoveryState.fingerprint) {
+  if (!expectedFingerprints.has(fingerprint)) {
     throw new Error(`database catalog does not match recovery predecessor ${recoveryState.predecessor}`);
   }
 }
