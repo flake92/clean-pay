@@ -486,19 +486,44 @@ export const DATABASE_SECURITY_INDEXES = Object.freeze([
   Object.freeze({ table: "PaymentRetentionHold", name: "PaymentRetentionHold_status_reviewAt_idx", unique: false, primary: false, definitionSha256: "75bc03401cef88b71714508eafae668ad2012b6971436ab4e0815c4143826407" }),
 ]);
 
-// Canonical PostgreSQL 17 catalog fingerprints for the only supported
-// stopped-maintenance rollout states. The provisioner also requires the exact
-// contiguous Prisma ledger prefix matching the state name. Intermediate or
-// older schemas fail closed instead of being treated as an arbitrary subset.
+// Canonical PostgreSQL 17 logical-catalog fingerprints for the only supported
+// stopped-maintenance rollout states. Absolute column ordinals/gaps and the
+// pg_dump-unstable fast-default storage flag are excluded, while relative
+// column order, names, types, defaults, constraints, indexes, triggers,
+// functions, and all other semantic properties remain exact. The provisioner
+// also requires the exact contiguous Prisma ledger prefix matching the state
+// name. Intermediate or older schemas fail closed instead of being treated as
+// an arbitrary subset.
 export const DATABASE_REVIEWED_CATALOG_STATES = Object.freeze({
   EMPTY: "9f7f35a431e5a131e5491af9f151199ecd07c31d9c9842c5f6cd478609ac5a37",
-  LEDGER_ONLY: "1955b728adc39e2e5552647fbceddfd4b334306436b95c7717c0a293c9c7368d",
-  "20260718000000_add_payment_reconciliation": "ada0de1e528e0f473942c5d6d655238dbd30338ad5404757f13ba12fc5d84a49",
-  "20260813091000_add_remnashop_refresh_recovery": "22cd5e6885b74cb1e17498fccf38e47ef11b2d912fcb6d182dcd301fb8871eae",
-  "20260825010000_add_durable_telegram_callback": "62919eda26c3c27d1b9b2c1cad71b6891796167573a43eda07e018acf49e4132",
-  "20260825210000_add_payment_sensitive_retention": "2e143c73bf74b96b750be2a83480b4abaf14f58e069ad1925cbce9b61d7ee140",
-  "20260825220000_add_payment_retention_hold_lifecycle": "ec5e19d357e70cd943f1cc79d9f39e426dd77990787e2cd80e19c44e9aee872b",
-  "20260825230000_guard_retention_mutations": "bc7d32a97ebdaf57f36bcf61e6535a21313132b58de911caf0d930738fccd509",
+  LEDGER_ONLY: "46a2b8bd62c5557f3a361896ed8c285d2c73a1f5f72284225d20416e390cadce",
+  "20260718000000_add_payment_reconciliation": "6495b88e1fdd21ba7758f89c2e7c06b077c9f1ffce18107397ad14ef15b06153",
+  "20260813091000_add_remnashop_refresh_recovery": "1c8e21cc79656c8efd5d252eb2becf6362bb33bb5e5ef290833ee95136805ee0",
+  "20260825010000_add_durable_telegram_callback": "d65a64e2c3d111af53ad9b38d1a1e240db48b6bc697f987d50fa45d8c0463cd7",
+  "20260825210000_add_payment_sensitive_retention": "8ebdde16b0117ee7d11ce810ac67a0d4148e5131da40e29a4c6e82514ac01fd2",
+  "20260825220000_add_payment_retention_hold_lifecycle": "ff5e897f65aed16752a55047dedff399edfb71f9468086a0a157b7a2d2906745",
+  "20260825230000_guard_retention_mutations": "11e7e5b8d1f6cdc6aa9494be927365dfe596aa27a8988baf5df34158fb208605",
+});
+
+// Exact historical production column order, proven first against the live
+// 18-migration catalog and its restored dump, then replayed through every new
+// migration boundary. These do not admit any other ordering or schema drift.
+export const DATABASE_REVIEWED_CATALOG_STATE_ALTERNATES = Object.freeze({
+  "20260813091000_add_remnashop_refresh_recovery": Object.freeze([
+    "08f9c2e30df18c797fbcc4b88683207eda1e4662f484e38025f6b214dc08e87e",
+  ]),
+  "20260825010000_add_durable_telegram_callback": Object.freeze([
+    "6b9511e2a8317ef3b7fc5187c4d86489e6a7649df6bf4756ba0aa495c1ee4a23",
+  ]),
+  "20260825210000_add_payment_sensitive_retention": Object.freeze([
+    "ee368db015f469c22401a7adfcf933e35b5ca789b981e493436b66af49e8941a",
+  ]),
+  "20260825220000_add_payment_retention_hold_lifecycle": Object.freeze([
+    "971ad6bb71ec1a3b271b721c71c7ca785a031119677ce5651b28e86ca264c531",
+  ]),
+  "20260825230000_guard_retention_mutations": Object.freeze([
+    "c38536cfcac173226f49e40864151d682d20bb34059a62e92426ca4ab247994d",
+  ]),
 });
 
 export const DATABASE_RECOVERY_PREDECESSOR_STATES = Object.freeze({
