@@ -53,11 +53,27 @@ esac
 # This metadata-only guard deliberately runs before the first Docker access.
 # It rejects a missing, symlinked, non-regular, broadly readable or wrongly
 # owned host credential source without ever printing or reading its contents.
-command -v node >/dev/null 2>&1 || fail "node is required for credential metadata preflight"
-node "$script_dir/remnashop-env-preflight.mjs" \
-  "$remnashop_env_file" \
-  "$remnashop_env_expected_uid" \
-  "$remnashop_env_expected_gid" \
+# Production hosts do not otherwise need a host Node.js installation, so use
+# the equivalent descriptor-bound Python guard when Node.js is unavailable.
+run_remnashop_env_preflight() {
+  if command -v node >/dev/null 2>&1; then
+    node "$script_dir/remnashop-env-preflight.mjs" \
+      "$remnashop_env_file" \
+      "$remnashop_env_expected_uid" \
+      "$remnashop_env_expected_gid"
+    return
+  fi
+  if command -v python3 >/dev/null 2>&1; then
+    python3 "$script_dir/remnashop-env-preflight.py" \
+      "$remnashop_env_file" \
+      "$remnashop_env_expected_uid" \
+      "$remnashop_env_expected_gid"
+    return
+  fi
+  fail "node or python3 is required for credential metadata preflight"
+}
+
+run_remnashop_env_preflight \
   || fail "Remnashop environment-file metadata is unsafe"
 
 command -v docker >/dev/null 2>&1 || fail "docker is not installed or is not available in PATH"

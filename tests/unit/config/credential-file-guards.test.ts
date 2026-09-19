@@ -191,6 +191,44 @@ describe("credential-file metadata guards", () => {
     },
   );
 
+  it.skipIf(process.platform === "win32")(
+    "provides an equivalent Python metadata guard for production hosts without Node.js",
+    () => {
+      const root = temporaryRoot();
+      const directory = path.join(root, "remnashop-python");
+      const file = path.join(directory, ".env");
+      const canary = "SYNTHETIC_CANARY=must-not-be-read-or-printed\n";
+      mkdirSync(directory, { mode: 0o700 });
+      writeFileSync(file, canary, { mode: 0o600 });
+      chmodSync(directory, 0o700);
+      chmodSync(file, 0o600);
+      const identity = currentIdentity(file);
+      const script = path.resolve("deploy/prod/remnashop-env-preflight.py");
+
+      const accepted = spawnSync("python3", [
+        script,
+        file,
+        String(identity.expectedUid),
+        String(identity.expectedGid),
+      ], { encoding: "utf8", shell: false });
+      expect(accepted.error).toBeUndefined();
+      expect(accepted.status).toBe(0);
+      expect(accepted.stdout).toContain("metadata passed");
+      expect(accepted.stdout).not.toContain("SYNTHETIC_CANARY");
+
+      chmodSync(file, 0o644);
+      const rejected = spawnSync("python3", [
+        script,
+        file,
+        String(identity.expectedUid),
+        String(identity.expectedGid),
+      ], { encoding: "utf8", shell: false });
+      expect(rejected.status).toBe(1);
+      expect(rejected.stderr).toContain("actual mode is 644");
+      expect(rejected.stderr).not.toContain("SYNTHETIC_CANARY");
+    },
+  );
+
   it("rejects a prohibited Windows plaintext source by metadata only", () => {
     const root = temporaryRoot();
     const source = path.join(root, "legacy-credential-source.txt");
