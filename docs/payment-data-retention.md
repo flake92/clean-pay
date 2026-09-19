@@ -4,6 +4,32 @@ Clean Pay keeps the minimum ledger fields required to explain a payment
 (`paymentId`, status, amount, currency, plan and timestamps) but does not keep
 provider redirect material and diagnostic snapshots indefinitely.
 
+## Explicit activation and legacy upgrades
+
+`PAYMENT_DATA_RETENTION_ENABLED` is a required production decision. New
+installations use `true`. A prepared `0.1.1` upgrade receives `false` so that
+historical payment URLs and provider snapshots are not scrubbed immediately
+after the migration backfills their first terminal-observation timestamp.
+
+When the switch is `false`, the worker still performs non-payment retention
+(authentication state, sessions, callbacks, audit data, and rate-limit data),
+but it does not dispose payment holds or call either payment scrub function.
+Missing worker configuration also defaults to the safe disabled state; the
+authoritative production environment validator rejects a missing value instead
+of silently choosing a policy.
+
+After a verified backup, retention-policy review, and a controlled sample of
+legacy payment ages, enable it atomically and recreate the scoped runtimes:
+
+```sh
+printf '%s' true | node deploy/prod/credential-file-guard.mjs env-set deploy/prod/.env PAYMENT_DATA_RETENTION_ENABLED
+./deploy.sh restart
+```
+
+Turning the switch on may create an immediate bounded backlog for records older
+than the configured windows. Monitor aggregate cleanup counts; never inspect or
+log retained URLs/snapshots as part of that observation.
+
 ## Automated policy
 
 - After `PAYMENT_SENSITIVE_RETENTION_DAYS` (default 30), a terminal

@@ -252,10 +252,10 @@ process.exit(originalExitCode);
       expect(source).toContain('"$operation_name" "$$"');
     }
     expect(deploy).toMatch(
-      /setup\|configure\|config\|init\|compose\|check\|build\|migrate\|resolve-rolled-back\|install\|up\|restart\|down\)[\s\S]{0,100}acquire_production_operation_lock/,
+      /setup\|configure\|config\|init\|prepare-v0\.1\.1-upgrade\|compose\|check\|build\|migrate\|resolve-rolled-back\|install\|up\|restart\|down\)[\s\S]{0,100}acquire_production_operation_lock/,
     );
     expect(start).toMatch(
-      /start\|up\|stop\|down\|restart\|build\)[\s\S]{0,100}acquire_production_operation_lock/,
+      /start\|up\|stop\|down\|restart\|build\|prepare-v0\.1\.1-upgrade\)[\s\S]{0,100}acquire_production_operation_lock/,
     );
     expect(prod).toContain('./production-operation-lock.mjs');
     expect(prod).toContain('path.join(prodDir, ".production-operation.lock")');

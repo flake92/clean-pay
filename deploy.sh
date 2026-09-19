@@ -12,8 +12,10 @@ BUILD_PROVENANCE_SCRIPT="$ROOT_DIR/deploy/prod/build-provenance.sh"
 ROLE_ENV_SCRIPT="$ROOT_DIR/deploy/prod/role-env.mjs"
 CREDENTIAL_INIT_SCRIPT="$ROOT_DIR/deploy/prod/database-credential-init.mjs"
 CREDENTIAL_ADOPTION_SCRIPT="$ROOT_DIR/deploy/prod/database-adoption-state.mjs"
+CREDENTIAL_UPGRADE_SCRIPT="$ROOT_DIR/deploy/prod/production-environment-upgrade.mjs"
 CREDENTIAL_FILE_GUARD_SCRIPT="$ROOT_DIR/deploy/prod/credential-file-guard.mjs"
 OPERATION_LOCK_SCRIPT="$ROOT_DIR/deploy/prod/production-operation-lock.mjs"
+COMPOSE_CAPABILITY_SCRIPT="$ROOT_DIR/deploy/prod/docker-compose-capability-preflight.sh"
 OPERATION_LOCK_PATH="$ROOT_DIR/deploy/prod/.production-operation.lock"
 NODE_TOOLING_IMAGE="node:24.18.0-bookworm-slim@sha256:6f7b03f7c2c8e2e784dcf9295400527b9b1270fd37b7e9a7285cf83b6951452d"
 APP_ENV_FILE="${ENV_FILE}.app"
@@ -60,6 +62,11 @@ confirm() {
 need_docker() {
   command -v docker >/dev/null 2>&1 || die "Docker is not installed. Install it with: curl -fsSL https://get.docker.com | sh"
   docker compose version >/dev/null 2>&1 || die "Docker Compose v2 plugin is not installed."
+}
+
+need_deployment_compose_capabilities() {
+  sh "$COMPOSE_CAPABILITY_SCRIPT" \
+    || die "Docker or Docker Compose lacks a required production capability."
 }
 
 assert_private_env_file() {
@@ -204,11 +211,24 @@ replace_env() {
   assert_private_env_file
 }
 
+generate_internal_secret() {
+  if command -v openssl >/dev/null 2>&1; then
+    openssl rand -hex 32
+    return
+  fi
+  if [ -r /dev/urandom ] && command -v od >/dev/null 2>&1; then
+    od -An -N32 -tx1 /dev/urandom | tr -d ' \n'
+    printf '\n'
+    return
+  fi
+  die "openssl or /dev/urandom with od is required to generate a missing internal secret."
+}
+
 ensure_generated_secret() {
   name=$1
   value=$(env_value "$name")
   case "$value" in
-    ''|*change-me*) replace_env "$name" "$(openssl rand -hex 32)" ;;
+    ''|*change-me*) replace_env "$name" "$(generate_internal_secret)" ;;
   esac
 }
 
@@ -243,6 +263,64 @@ initialize_database_credentials() {
     node deploy/prod/database-credential-init.mjs init deploy/prod/.env
 }
 
+assert_v011_upgrade_prepared() {
+  if command -v node >/dev/null 2>&1; then
+    node "$CREDENTIAL_UPGRADE_SCRIPT" check "$ENV_FILE"
+    return
+  fi
+
+  need_docker
+  docker run --rm --read-only --network none \
+    --cap-drop ALL \
+    --security-opt no-new-privileges \
+    --pids-limit 64 \
+    --memory 256m \
+    --cpus 0.5 \
+    --tmpfs /tmp:rw,noexec,nosuid,nodev,size=16m,mode=1777 \
+    --user "$(id -u):$(id -g)" \
+    --mount "type=bind,source=$ROOT_DIR,target=/workspace,readonly" \
+    --workdir /workspace \
+    "$NODE_TOOLING_IMAGE" \
+    node deploy/prod/production-environment-upgrade.mjs check deploy/prod/.env
+}
+
+prepare_v011_upgrade() {
+  [ "$#" -eq 2 ] \
+    || die 'Usage: ./deploy.sh prepare-v0.1.1-upgrade REMNAWAVE_SUBSCRIPTION_ORIGINS PAYMENT_REDIRECT_ORIGINS'
+  require_env
+  subscription_origins=$1
+  payment_redirect_origins=$2
+
+  if command -v node >/dev/null 2>&1; then
+    node "$CREDENTIAL_UPGRADE_SCRIPT" prepare-v0.1.1 \
+      "$ENV_FILE" "$subscription_origins" "$payment_redirect_origins" \
+      clean-pay-prod-migration:local
+  else
+    need_docker
+    docker run --rm --read-only --network none \
+      --cap-drop ALL \
+      --security-opt no-new-privileges \
+      --pids-limit 64 \
+      --memory 256m \
+      --cpus 0.5 \
+      --tmpfs /tmp:rw,noexec,nosuid,nodev,size=16m,mode=1777 \
+      --user "$(id -u):$(id -g)" \
+      --mount "type=bind,source=$ROOT_DIR,target=/workspace" \
+      --workdir /workspace \
+      "$NODE_TOOLING_IMAGE" \
+      node deploy/prod/production-environment-upgrade.mjs prepare-v0.1.1 \
+        deploy/prod/.env "$subscription_origins" "$payment_redirect_origins" \
+        clean-pay-prod-migration:local
+  fi
+
+  initialize_database_credentials
+  ensure_internal_secrets
+  validate_env_file
+  materialize_role_env_files
+  printf '%s\n' 'Clean Pay 0.1.1 configuration is prepared for 0.2.0.'
+  printf '%s\n' 'Payment-data retention remains disabled until the operator explicitly enables it.'
+}
+
 clear_database_adoption_authorization() {
   if command -v node >/dev/null 2>&1; then
     node "$CREDENTIAL_ADOPTION_SCRIPT" clear "$ENV_FILE" || return 1
@@ -266,9 +344,9 @@ clear_database_adoption_authorization() {
 }
 
 init() {
-  command -v openssl >/dev/null 2>&1 || die "openssl is required to generate secrets."
   if [ -e "$ENV_FILE" ] || [ -L "$ENV_FILE" ]; then
     assert_private_env_file
+    assert_v011_upgrade_prepared
     initialize_database_credentials
     ensure_internal_secrets
     printf 'Configuration already exists: %s\nExisting values were preserved; missing internal secrets were generated.\n' "$ENV_FILE"
@@ -367,7 +445,7 @@ configure() {
 
   auth_service_key=$(env_value REMNASHOP_AUTH_SERVICE_KEY)
   case "$auth_service_key" in
-    ''|*change-me*) replace_env REMNASHOP_AUTH_SERVICE_KEY "$(openssl rand -hex 32)" ;;
+    ''|*change-me*) replace_env REMNASHOP_AUTH_SERVICE_KEY "$(generate_internal_secret)" ;;
   esac
 
   prompt_value REMNAWAVE_API_BASE_URL 'Публичный HTTPS-адрес Remnawave, без пути' 'https://panel.example.com'
@@ -467,6 +545,7 @@ materialize_role_env_files() {
 prepare_compose() {
   init
   need_docker
+  need_deployment_compose_capabilities
   assert_required_env
   info '[2/3] Подготовка Docker Compose'
   [ -f "$COMPOSE_PATH" ] || die "Compose file is missing: $COMPOSE_PATH"
@@ -771,6 +850,8 @@ restart_runtime_services() {
     || die 'Database role credential reconciliation failed; runtimes remain stopped.'
   sync_database_privileges \
     || die 'Database privilege verification failed; runtimes remain stopped.'
+  clear_database_adoption_authorization \
+    || die 'One-time database adoption authorization could not be cleared; runtimes remain stopped.'
 
   # A plain Compose restart preserves the old container configuration and does
   # not apply env_file changes. Remove only the stateless Clean
@@ -986,6 +1067,8 @@ Usage: ./deploy.sh <command>
   setup     интерактивно пройти все три этапа первой установки
   configure интерактивно создать или обновить deploy/prod/.env
   init      создать deploy/prod/.env и сгенерировать внутренние секреты
+  prepare-v0.1.1-upgrade SUBSCRIPTION_ORIGINS PAYMENT_ORIGINS
+            безопасно подготовить существующий .env 0.1.1 к обновлению на 0.2.0
   compose   проверить .env, Compose-файл и подготовить Docker-сеть
   build     подготовить и проверить образы без остановки runtime и миграции БД
   migrate   проверить migration image и применить миграции, оставив runtime остановленным
@@ -1006,7 +1089,7 @@ else
   command=${1:-help}
 fi
 case "$command" in
-  setup|configure|config|init|compose|check|build|migrate|resolve-rolled-back|install|up|restart|down)
+  setup|configure|config|init|prepare-v0.1.1-upgrade|compose|check|build|migrate|resolve-rolled-back|install|up|restart|down)
     acquire_production_operation_lock "$command"
     ;;
 esac
@@ -1014,6 +1097,10 @@ case "$command" in
   setup) setup ;;
   configure|config) configure ;;
   init) init ;;
+  prepare-v0.1.1-upgrade)
+    shift
+    prepare_v011_upgrade "$@"
+    ;;
   compose|check) prepare_compose ;;
   build) build_images_only ;;
   migrate) migrate_only ;;

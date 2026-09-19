@@ -34,6 +34,12 @@ describe("production role-scoped environment boundary", () => {
     expect(PRODUCTION_ROLE_ENVIRONMENT_NAMES.retention).toEqual(
       expect.arrayContaining(policyNames),
     );
+    expect(PRODUCTION_ROLE_ENVIRONMENT_NAMES.retention).toContain(
+      "PAYMENT_DATA_RETENTION_ENABLED",
+    );
+    expect(PRODUCTION_ROLE_ENVIRONMENT_NAMES.provision).not.toContain(
+      "PAYMENT_DATA_RETENTION_ENABLED",
+    );
     expect(PRODUCTION_ROLE_ENVIRONMENT_NAMES.provision).not.toContain(
       "DATA_RETENTION_INTERVAL_SECONDS",
     );
@@ -152,6 +158,12 @@ describe("production role-scoped environment boundary", () => {
       "compose rm -f -s reconciliation-worker retention-worker app",
     );
     expect(runtimeRestart).toContain("start_verified_runtimes");
+    expect(runtimeRestart.indexOf("clear_database_adoption_authorization")).toBeGreaterThan(
+      runtimeRestart.indexOf("sync_database_privileges"),
+    );
+    expect(runtimeRestart.indexOf("start_verified_runtimes")).toBeGreaterThan(
+      runtimeRestart.indexOf("clear_database_adoption_authorization"),
+    );
     expect(runtimeRestart).toContain("verify_detailed_readiness");
     expect(runtimeRestart).not.toContain("compose restart");
     expect(runtimeRestart).not.toContain("--force-recreate");
@@ -177,6 +189,34 @@ describe("production role-scoped environment boundary", () => {
     );
     expect(deploy).toContain("database-adoption-state.mjs clear");
     expect(deploy).toContain("materialize_role_env_files");
+    const rootStartFlow = rootStart.slice(
+      rootStart.indexOf("start() {"),
+      rootStart.indexOf("verify() {"),
+    );
+    expect(rootStartFlow.indexOf("clear_database_adoption_authorization")).toBeGreaterThan(
+      rootStartFlow.indexOf("run_verified_migration"),
+    );
+    expect(rootStartFlow.indexOf("start_verified_runtimes")).toBeGreaterThan(
+      rootStartFlow.indexOf("clear_database_adoption_authorization"),
+    );
+    const prodUp = prod.slice(prod.indexOf('case "up":'), prod.indexOf('case "down":'));
+    expect(prodUp.indexOf("clearDatabaseAdoptionAuthorizationAfterMigration")).toBeGreaterThan(
+      prodUp.indexOf("runVerifiedMigration"),
+    );
+    expect(prodUp.indexOf("startVerifiedRuntimes")).toBeGreaterThan(
+      prodUp.indexOf("clearDatabaseAdoptionAuthorizationAfterMigration"),
+    );
+  });
+
+  it("finishes explicit v0.1.1 credential preparation before the normal readiness check", () => {
+    const preparation = rootStart.slice(
+      rootStart.indexOf("prepare_v011_upgrade() {"),
+      rootStart.indexOf("validate_env() {"),
+    );
+    expect(preparation.indexOf('node "$CREDENTIAL_UPGRADE_SCRIPT" prepare-v0.1.1'))
+      .toBeLessThan(preparation.indexOf('node "$CREDENTIAL_INIT_SCRIPT" init'));
+    expect(preparation.indexOf('node "$CREDENTIAL_INIT_SCRIPT" init'))
+      .toBeLessThan(preparation.indexOf("ensure_generated_secrets"));
   });
 
   it("shares strict metadata checks across every env-file entry point", () => {

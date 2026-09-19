@@ -8,6 +8,8 @@ const OFFICIAL_TELEGRAM_OIDC_URLS = {
 const OFFICIAL_TURNSTILE_VERIFY_URL =
   "https://challenges.cloudflare.com/turnstile/v0/siteverify";
 
+const MINIMUM_REMNASHOP_ALEMBIC_REVISION = 58n;
+
 const KNOWN_TURNSTILE_TEST_KEYS = new Set([
   "1x00000000000000000000AA",
   "2x00000000000000000000AB",
@@ -80,6 +82,7 @@ export const PRODUCTION_ENVIRONMENT_FILE_NAMES = Object.freeze([
   "CHATWOOT_HMAC_TOKEN",
   "CHATWOOT_WEBSITE_TOKEN",
   "CLEAN_PAY_BIND",
+  "CLEAN_PAY_CONFIG_VERSION",
   "CLEAN_PAY_DATABASE_ADOPTION_BACKUP_CONFIRMED",
   "CLEAN_PAY_DATABASE_ADOPT_EXISTING",
   "CLEAN_PAY_DEPLOY_SOURCE",
@@ -92,6 +95,7 @@ export const PRODUCTION_ENVIRONMENT_FILE_NAMES = Object.freeze([
   "CLEAN_PAY_READINESS_REMNAWAVE_URL",
   "CLEAN_PAY_RELEASE",
   "CLEAN_PAY_REVISION",
+  "CLEAN_PAY_UPGRADE_SOURCE_VERSION",
   "COMPOSE_PROJECT_NAME",
   "COOKIE_SAMESITE",
   "COOKIE_SECURE",
@@ -111,6 +115,7 @@ export const PRODUCTION_ENVIRONMENT_FILE_NAMES = Object.freeze([
   "NEXT_PUBLIC_BRAND_LOGO_URL",
   "NEXT_PUBLIC_BRAND_NAME",
   "PAYMENT_RECONCILIATION_BATCH_SIZE",
+  "PAYMENT_DATA_RETENTION_ENABLED",
   "PAYMENT_RECONCILIATION_ENABLED",
   "PAYMENT_RECONCILIATION_INTERNAL_URL",
   "PAYMENT_RECONCILIATION_INTERVAL_SECONDS",
@@ -271,6 +276,18 @@ export function parseProductionEnvironmentFile(contents, sourceName = ".env") {
   return environment;
 }
 
+export function validateProductionHttpsOriginList(name, value) {
+  if (
+    typeof name !== "string"
+    || !/^[A-Z][A-Z0-9_]*$/.test(name)
+    || typeof value !== "string"
+    || value !== value.trim()
+  ) {
+    fail("HTTPS origin-list validation requires a canonical name and string value");
+  }
+  return Object.freeze(publicHttpsOriginList(name, value));
+}
+
 export function validateProductionPublicBuildConfiguration(environment) {
   const required = (name) => {
     const value = deploymentEnvironmentValue(environment, name, true);
@@ -410,6 +427,14 @@ export function validateProductionEnvironment(environment) {
   };
 
   const deploymentImages = validateDeploymentImageReferences(environment);
+  const configVersion = optional("CLEAN_PAY_CONFIG_VERSION");
+  if (configVersion && configVersion !== "0.2.0") {
+    fail('CLEAN_PAY_CONFIG_VERSION must be "0.2.0" for this release');
+  }
+  const upgradeSourceVersion = optional("CLEAN_PAY_UPGRADE_SOURCE_VERSION");
+  if (upgradeSourceVersion && upgradeSourceVersion !== "0.1.1") {
+    fail('CLEAN_PAY_UPGRADE_SOURCE_VERSION must be "0.1.1" when present');
+  }
   const imageRelease = imageMetadataValue(
     "CLEAN_PAY_RELEASE",
     optional("CLEAN_PAY_RELEASE") ?? "local",
@@ -779,6 +804,10 @@ export function validateProductionEnvironment(environment) {
     optional("PAYMENT_RECONCILIATION_ENABLED"),
     true,
   );
+  bool(
+    "PAYMENT_DATA_RETENTION_ENABLED",
+    required("PAYMENT_DATA_RETENTION_ENABLED"),
+  );
   boundedInteger(
     "PAYMENT_RECONCILIATION_BATCH_SIZE",
     optional("PAYMENT_RECONCILIATION_BATCH_SIZE"),
@@ -1070,6 +1099,12 @@ export function validateProductionEnvironment(environment) {
   if (minimumAlembicRevision && !/^\d{1,18}$/.test(minimumAlembicRevision)) {
     fail("REMNASHOP_MINIMUM_ALEMBIC_REVISION must be a numeric revision of at most 18 digits");
   }
+  if (
+    minimumAlembicRevision
+    && BigInt(minimumAlembicRevision) < MINIMUM_REMNASHOP_ALEMBIC_REVISION
+  ) {
+    fail("REMNASHOP_MINIMUM_ALEMBIC_REVISION must be at least 0058");
+  }
 
   const logLevel = optional("LOG_LEVEL");
   if (logLevel && !/^(?:debug|info|warn|error)$/i.test(logLevel)) {
@@ -1201,6 +1236,8 @@ export function validateProductionApplicationRoleEnvironment(environment) {
   validateProductionEnvironment({
     ...environment,
     ...roleUrls,
+    PAYMENT_DATA_RETENTION_ENABLED:
+      environment.PAYMENT_DATA_RETENTION_ENABLED ?? "true",
     CLEAN_PAY_DATABASE_ADOPTION_BACKUP_CONFIRMED: "false",
     CLEAN_PAY_DATABASE_ADOPT_EXISTING: "false",
     POSTGRES_DB: postgresDatabase,
