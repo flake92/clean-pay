@@ -5,8 +5,15 @@ import { request as httpsRequest } from "node:https";
 
 const upstream = new URL(process.argv[2] ?? "");
 const trustedOrigin = new URL(process.argv[3] ?? "").origin;
-if (!/^https?:$/.test(upstream.protocol) || !/^https:/.test(trustedOrigin)) {
-  throw new Error("usage: verify-server-action-boundary.mjs UPSTREAM_URL TRUSTED_HTTPS_ORIGIN");
+const alternateOrigin = process.argv[4] ? new URL(process.argv[4]).origin : undefined;
+if (
+  !/^https?:$/.test(upstream.protocol)
+  || !/^https:/.test(trustedOrigin)
+  || (alternateOrigin && !/^https:/.test(alternateOrigin))
+) {
+  throw new Error(
+    "usage: verify-server-action-boundary.mjs UPSTREAM_URL TRUSTED_HTTPS_ORIGIN [ALTERNATE_HTTPS_ORIGIN]",
+  );
 }
 const proxyRequest = upstream.protocol === "https:" ? httpsRequest : httpRequest;
 
@@ -80,6 +87,21 @@ async function expectBlockedSource(name, headers) {
   }
 }
 
+async function expectAcceptedSource(name, headers) {
+  const response = await post({ headers });
+  const text = await response.text();
+  if (
+    response.status !== 404
+    || response.headers.get("x-nextjs-action-not-found") !== "1"
+    || text.length > 1_024
+    || !text.includes("Server action not found.")
+  ) {
+    throw new Error(
+      `${name}: expected bounded 404/x-nextjs-action-not-found after both origin gates, received ${response.status}`,
+    );
+  }
+}
+
 async function expectOversized(name, contentType, streamed) {
   const response = await post({
     contentType,
@@ -102,6 +124,11 @@ try {
     "x-forwarded-host": new URL(trustedOrigin).host,
   });
 
+  await expectAcceptedSource("trusted origin", { origin: trustedOrigin });
+  if (alternateOrigin) {
+    await expectAcceptedSource("alternate trusted origin", { origin: alternateOrigin });
+  }
+
   const encodings = [
     "text/plain;charset=UTF-8",
     "application/x-www-form-urlencoded",
@@ -113,8 +140,10 @@ try {
       body: "x".repeat(BODY_LIMIT),
       headers: { origin: trustedOrigin },
     });
-    if (exact.status === 403 || exact.status === 413) {
-      throw new Error(`${contentType}: exact-limit trusted request was blocked with ${exact.status}`);
+    if (exact.status !== 404) {
+      throw new Error(
+        `${contentType}: exact-limit trusted request did not cross both origin gates: ${exact.status}`,
+      );
     }
     await exact.arrayBuffer();
     await expectOversized(`${contentType} declared length`, contentType, false);
@@ -128,10 +157,17 @@ try {
       "x-forwarded-host": "attacker.invalid",
     },
   });
-  if (trustedReferer.status === 403 || trustedReferer.status === 413) {
-    throw new Error("trusted Referer was incorrectly replaced by forged forwarding metadata");
+  const trustedRefererText = await trustedReferer.text();
+  if (
+    trustedReferer.status !== 404
+    || trustedReferer.headers.get("x-nextjs-action-not-found") !== "1"
+    || trustedRefererText.length > 1_024
+    || !trustedRefererText.includes("Server action not found.")
+  ) {
+    throw new Error(
+      `trusted Referer did not cross both origin gates: ${trustedReferer.status}`,
+    );
   }
-  await trustedReferer.arrayBuffer();
 
   process.stdout.write(
     "Live reverse-proxy Server Action origin and 64 KiB boundary matrix passed.\n",
