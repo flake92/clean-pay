@@ -296,6 +296,38 @@ describe("production container boundary", () => {
     expect(imageRollbackRehearsal).toContain(
       "tests/fixtures/write-synthetic-production-env.mjs",
     );
+    const compatibilityGuardStart = imageRollbackRehearsal.indexOf(
+      'git -C "$ROOT_DIR" diff --quiet "$PREVIOUS_REVISION" HEAD --',
+    );
+    const compatibilityGuardEnd = imageRollbackRehearsal.indexOf(
+      '|| fail "baseline and candidate runtime compatibility inputs differ"',
+      compatibilityGuardStart,
+    );
+    const unchangedCompatibilityInputs = imageRollbackRehearsal.slice(
+      compatibilityGuardStart,
+      compatibilityGuardEnd,
+    );
+    expect(compatibilityGuardStart).toBeGreaterThan(-1);
+    expect(compatibilityGuardEnd).toBeGreaterThan(compatibilityGuardStart);
+    expect(unchangedCompatibilityInputs).toContain("prisma");
+    expect(unchangedCompatibilityInputs).not.toContain("deploy/prod/role-env.mjs");
+    expect(imageRollbackRehearsal).toContain(
+      "--no-ext-diff --summary \"$PREVIOUS_REVISION\" HEAD --",
+    );
+    expect(imageRollbackRehearsal).toContain(
+      "--no-ext-diff --unified=0 \"$PREVIOUS_REVISION\" HEAD --",
+    );
+    expect(imageRollbackRehearsal).toContain(
+      "readonly EXPECTED_ROLE_ENV_COMPATIBILITY_DELTA="
+        + "'+    \"PAYMENT_DATA_RETENTION_ENABLED\",'",
+    );
+    expect(imageRollbackRehearsal).toContain(
+      '[[ "$ROLE_ENV_COMPATIBILITY_DELTA" == '
+        + '"$EXPECTED_ROLE_ENV_COMPATIBILITY_DELTA" ]]',
+    );
+    expect(imageRollbackRehearsal).toContain(
+      '|| fail "baseline and candidate role environment delta is not the reviewed additive change"',
+    );
     expect(imageRollbackRehearsal).toContain(
       "CLEAN_PAY_FIXTURE_DEPLOY_SOURCE=build",
     );
