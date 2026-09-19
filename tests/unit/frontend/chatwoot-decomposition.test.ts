@@ -2,7 +2,7 @@
 
 import { createElement } from "react";
 import { render } from "@testing-library/react";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { ChatwootWidgetConfig } from "@/application/models/chatwoot";
 import { SupportChatGuestBoundary } from "@/frontend/components/chatwoot-widget";
@@ -55,6 +55,10 @@ describe("Chatwoot decomposition contracts", () => {
     document.cookie = "cw_conversation=; Path=/; Max-Age=0";
     document.cookie = `cw_user_${config.websiteToken}=; Path=/; Max-Age=0`;
     vi.clearAllMocks();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
   });
 
   it("preserves the exact runtime facade exports", () => {
@@ -177,25 +181,80 @@ describe("Chatwoot decomposition contracts", () => {
     );
   });
 
-  it("characterizes the stale resolved loader after an SDK restart", async () => {
+  it("reloads the SDK after an already-open cabinet loses its Chatwoot global", async () => {
     const uninitialized = chatwoot.loadChatwootSdk(config.baseUrl);
-    document.getElementById("clean-pay-chatwoot-sdk")
-      ?.dispatchEvent(new Event("load"));
+    const uninitializedScript = document.getElementById("clean-pay-chatwoot-sdk");
+    const replacementDuringFailure = document.createElement("script");
+    replacementDuringFailure.id = "clean-pay-chatwoot-sdk";
+    document.head.appendChild(replacementDuringFailure);
+    uninitializedScript?.dispatchEvent(new Event("load"));
     await expect(uninitialized).rejects.toThrow("Support chat did not initialize");
+    expect(replacementDuringFailure.isConnected).toBe(true);
 
     const loaded = chatwoot.loadChatwootSdk(config.baseUrl);
+    const concurrentLoad = chatwoot.loadChatwootSdk(config.baseUrl);
     const script = document.getElementById("clean-pay-chatwoot-sdk");
+    expect(concurrentLoad).toBe(loaded);
+    expect(document.querySelectorAll("#clean-pay-chatwoot-sdk")).toHaveLength(1);
+
     window.chatwootSDK = { run: vi.fn() };
     script?.dispatchEvent(new Event("load"));
     await expect(loaded).resolves.toBeUndefined();
+    await expect(concurrentLoad).resolves.toBeUndefined();
+
+    script?.dispatchEvent(new Event("error"));
+    expect(script?.isConnected).toBe(true);
 
     window.chatwootSDK = undefined;
-    script?.remove();
-    const staleRestart = chatwoot.loadChatwootSdk(config.baseUrl);
+    const recovered = chatwoot.loadChatwootSdk(config.baseUrl);
+    const replacement = document.getElementById("clean-pay-chatwoot-sdk");
 
-    expect(staleRestart).toBe(loaded);
-    await expect(staleRestart).resolves.toBeUndefined();
-    expect(document.getElementById("clean-pay-chatwoot-sdk")).toBeNull();
+    expect(recovered).not.toBe(loaded);
+    expect(replacement).not.toBe(script);
+    expect(replacement?.getAttribute("data-clean-pay-load-state")).toBe("loading");
+    await expect(chatwoot.loadChatwootSdk("https://other-chat.example.com"))
+      .rejects.toThrow("already loading from a different address");
+    expect(document.querySelectorAll("#clean-pay-chatwoot-sdk")).toHaveLength(1);
+
+    window.chatwootSDK = { run: vi.fn() };
+    replacement?.dispatchEvent(new Event("load"));
+
+    await expect(recovered).resolves.toBeUndefined();
+    expect(replacement?.getAttribute("data-clean-pay-load-state")).toBe("loaded");
+    expect(document.querySelectorAll("#clean-pay-chatwoot-sdk")).toHaveLength(1);
+    await expect(chatwoot.loadChatwootSdk("https://other-chat.example.com"))
+      .rejects.toThrow("reload the page before reconnecting");
+  });
+
+  it("bounds an SDK script that is removed without a load or error event", async () => {
+    vi.useFakeTimers();
+    const interrupted = chatwoot.loadChatwootSdk(config.baseUrl);
+    const interruptedRejection = expect(interrupted).rejects.toThrow(
+      "Support chat loading was interrupted",
+    );
+    document.getElementById("clean-pay-chatwoot-sdk")?.remove();
+    const retry = chatwoot.loadChatwootSdk(config.baseUrl);
+    await interruptedRejection;
+    document.getElementById("clean-pay-chatwoot-sdk")
+      ?.dispatchEvent(new Event("error"));
+    await expect(retry).rejects.toThrow("Support chat failed to load");
+
+    const abandoned = chatwoot.loadChatwootSdk(config.baseUrl);
+    const rejected = expect(abandoned).rejects.toThrow(
+      "Support chat loading timed out",
+    );
+    document.getElementById("clean-pay-chatwoot-sdk")?.remove();
+
+    await vi.advanceTimersByTimeAsync(15_000);
+    await rejected;
+
+    const recovered = chatwoot.loadChatwootSdk(config.baseUrl);
+    const replacement = document.getElementById("clean-pay-chatwoot-sdk");
+    window.chatwootSDK = { run: vi.fn() };
+    replacement?.dispatchEvent(new Event("load"));
+
+    await expect(recovered).resolves.toBeUndefined();
+    vi.useRealTimers();
   });
 
   it("characterizes logout cleanup failures as swallowed without a retry", () => {
