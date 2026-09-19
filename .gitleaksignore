@@ -5,6 +5,17 @@ b388ef7fd76e1478c7f48db6acad5fca676f8cd0:tests/unit/backend/chatwoot-identity-re
 # Exact synthetic UUIDv7 idempotency fixture introduced by the hardening commit.
 5b7d42a733147c85a810d31b4827d325e3d04462:tests/unit/backend/server-action-runtime-validation.test.ts:generic-api-key:46
 
+# Exact synthetic production-upgrade fixtures introduced by the v0.1.1
+# rehearsal tests. Keep these fingerprint-scoped so the generic API-key rule,
+# the rest of the file, and every future edit remain fully scanned.
+2a65ab86c1183a47271bbae23cc241a05d286b08:tests/unit/config/production-environment-upgrade.test.ts:generic-api-key:27
+2a65ab86c1183a47271bbae23cc241a05d286b08:tests/unit/config/production-environment-upgrade.test.ts:generic-api-key:61
+2a65ab86c1183a47271bbae23cc241a05d286b08:tests/unit/config/production-environment-upgrade.test.ts:generic-api-key:67
+2a65ab86c1183a47271bbae23cc241a05d286b08:tests/unit/config/production-environment-upgrade.test.ts:generic-api-key:71
+2a65ab86c1183a47271bbae23cc241a05d286b08:tests/unit/config/production-environment-upgrade.test.ts:generic-api-key:78
+2a65ab86c1183a47271bbae23cc241a05d286b08:tests/unit/config/production-environment-upgrade.test.ts:generic-api-key:82
+2a65ab86c1183a47271bbae23cc241a05d286b08:tests/unit/config/production-environment-upgrade.test.ts:generic-api-key:234
+
 # Immutable browser evidence stores only SHA-256 digests of synthetic
 # idempotency keys. These exact fingerprints avoid mutating the captured bytes.
 5b7d42a733147c85a810d31b4827d325e3d04462:tests/browser/baselines/f5cb6f543d85256e7733a1ade6a4f451d86cf378-journey-v5/journey-1440x900/tariffs-payment-returns-extend-idempotency/network.har.json:generic-api-key:70016

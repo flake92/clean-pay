@@ -62,13 +62,33 @@ readonly CANDIDATE_SOURCE_REVISION
   || fail "candidate source revision is invalid"
 git -C "$ROOT_DIR" diff --quiet "$PREVIOUS_REVISION" HEAD -- \
   prisma \
-  deploy/prod/role-env.mjs \
   deploy/prod/validate-env.mjs \
   deploy/prod/image-preflight.sh \
   deploy/prod/zero-downtime-env.mjs \
   tests/fixtures/write-synthetic-production-env.mjs \
   scripts/security/compute-public-build-contract.mjs \
   || fail "baseline and candidate runtime compatibility inputs differ"
+ROLE_ENV_COMPATIBILITY_SUMMARY=$(
+  git -C "$ROOT_DIR" -c color.ui=false --no-pager diff \
+    --no-ext-diff --summary "$PREVIOUS_REVISION" HEAD -- \
+    deploy/prod/role-env.mjs
+) || fail "baseline and candidate role environment metadata could not be compared"
+readonly ROLE_ENV_COMPATIBILITY_SUMMARY
+[[ -z "$ROLE_ENV_COMPATIBILITY_SUMMARY" ]] \
+  || fail "baseline and candidate role environment metadata differ"
+ROLE_ENV_COMPATIBILITY_DELTA=$(
+  git -C "$ROOT_DIR" -c color.ui=false --no-pager diff \
+    --no-ext-diff --unified=0 "$PREVIOUS_REVISION" HEAD -- \
+    deploy/prod/role-env.mjs \
+    | awk '
+        /^\+\+\+ / || /^--- / { next }
+        /^[+-]/ { print }
+      '
+) || fail "baseline and candidate role environment delta could not be compared"
+readonly ROLE_ENV_COMPATIBILITY_DELTA
+readonly EXPECTED_ROLE_ENV_COMPATIBILITY_DELTA='+    "PAYMENT_DATA_RETENTION_ENABLED",'
+[[ "$ROLE_ENV_COMPATIBILITY_DELTA" == "$EXPECTED_ROLE_ENV_COMPATIBILITY_DELTA" ]] \
+  || fail "baseline and candidate role environment delta is not the reviewed additive change"
 [[ ! -e "$OPERATION_LOCK_PATH" && ! -L "$OPERATION_LOCK_PATH" ]] \
   || fail "the production operation lock is already present"
 
