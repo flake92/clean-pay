@@ -340,6 +340,55 @@ describe("proxy session refresh navigation", () => {
   });
 
   it.each([
+    "https://cleanvpn.edge-connect.uk",
+    "https://oplata.clear-vpn.org",
+  ])("accepts a Server Action from the owned public origin %s behind the standalone adapter", async (origin) => {
+    process.env.NEXT_PUBLIC_APP_URL = "https://cleanvpn.edge-connect.uk";
+    const response = await proxy(new NextRequest(
+      "https://0.0.0.0:4000/support",
+      {
+        method: "POST",
+        headers: {
+          "content-type": "text/plain;charset=UTF-8",
+          "next-action": "synthetic-action-id",
+          host: "0.0.0.0:4000",
+          "x-forwarded-host": new URL(origin).host,
+          "x-forwarded-proto": "https",
+          origin,
+        },
+        body: "[null]",
+      },
+    ));
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("x-middleware-next")).toBe("1");
+  });
+
+  it("does not let forged forwarding metadata expand the public-origin trust group", async () => {
+    process.env.NEXT_PUBLIC_APP_URL = "https://cleanvpn.edge-connect.uk";
+    const response = await proxy(new NextRequest(
+      "https://0.0.0.0:4000/support",
+      {
+        method: "POST",
+        headers: {
+          "content-type": "text/plain;charset=UTF-8",
+          "next-action": "synthetic-action-id",
+          host: "0.0.0.0:4000",
+          "x-forwarded-host": "oplata.clear-vpn.org",
+          "x-forwarded-proto": "https",
+          origin: "https://attacker.example",
+        },
+        body: "[null]",
+      },
+    ));
+
+    expect(response.status).toBe(403);
+    await expect(response.json()).resolves.toMatchObject({
+      error: { code: "FORBIDDEN" },
+    });
+  });
+
+  it.each([
     ["text/plain;charset=UTF-8", true],
     ["application/x-www-form-urlencoded", false],
     ["multipart/form-data; boundary=synthetic", false],
