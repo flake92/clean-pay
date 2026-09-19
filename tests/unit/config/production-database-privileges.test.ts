@@ -8,11 +8,13 @@ import {
   APPLICATION_COLUMN_SELECTS,
   APPLICATION_COLUMN_UPDATES,
   APPLICATION_TABLE_PRIVILEGES,
+  DATABASE_ENVIRONMENT_CONTRACT,
   DATABASE_ENUM_TYPES,
   DATABASE_FUNCTIONS,
   DATABASE_INTERNAL_TABLES,
   DATABASE_REVIEWED_CATALOG_STATE_ALTERNATES,
   DATABASE_REVIEWED_CATALOG_STATES,
+  DATABASE_REVIEWED_ENVIRONMENT_CONTRACT_ALTERNATES,
   DATABASE_TABLE_COLUMNS,
   DATABASE_TABLES,
   DATABASE_TRIGGERS,
@@ -84,6 +86,29 @@ function roleEnvironment(overrides: Record<string, string> = {}) {
 }
 
 describe("production database least-privilege contract", () => {
+  it("admits only the fresh-install locale and the reviewed production lineage", () => {
+    expect(DATABASE_ENVIRONMENT_CONTRACT).toEqual({
+      serverMajor: 17,
+      serverVersionNumber: 170011,
+      encoding: "UTF8",
+      localeProvider: "c",
+      collate: "C",
+      ctype: "C.UTF-8",
+      locale: null,
+      icuRules: null,
+      collationVersion: null,
+    });
+    expect(DATABASE_REVIEWED_ENVIRONMENT_CONTRACT_ALTERNATES).toEqual([
+      {
+        ...DATABASE_ENVIRONMENT_CONTRACT,
+        collate: "en_US.utf8",
+        ctype: "en_US.utf8",
+      },
+    ]);
+    expect(Object.isFrozen(DATABASE_REVIEWED_ENVIRONMENT_CONTRACT_ALTERNATES)).toBe(true);
+    expect(Object.isFrozen(DATABASE_REVIEWED_ENVIRONMENT_CONTRACT_ALTERNATES[0])).toBe(true);
+  });
+
   it("fingerprints logical columns independently of dump/restore storage history", () => {
     const reference = {
       columns: [

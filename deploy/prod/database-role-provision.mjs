@@ -25,6 +25,7 @@ import {
   DATABASE_PG17_SYSTEM_PUBLIC_ACL_SHA256,
   DATABASE_PRIVILEGE_MANIFEST_VERSION,
   DATABASE_REVIEWED_CATALOG_STATE_ALTERNATES,
+  DATABASE_REVIEWED_ENVIRONMENT_CONTRACT_ALTERNATES,
   DATABASE_RECOVERY_PREDECESSOR_STATES,
   DATABASE_REVIEWED_CATALOG_STATES,
   DATABASE_SECURITY_CONSTRAINTS,
@@ -1230,17 +1231,24 @@ async function assertDatabaseEnvironmentContract(client, configuration) {
      WHERE database.datname = current_database()
   `);
   const row = result.rows[0];
-  const contract = DATABASE_ENVIRONMENT_CONTRACT;
+  const contracts = [
+    DATABASE_ENVIRONMENT_CONTRACT,
+    ...DATABASE_REVIEWED_ENVIRONMENT_CONTRACT_ALTERNATES,
+  ];
+  const contract = contracts.find((candidate) => (
+    row
+    && row.server_version_num === candidate.serverVersionNumber
+    && row.encoding === candidate.encoding
+    && row.locale_provider === candidate.localeProvider
+    && row.collate === candidate.collate
+    && row.ctype === candidate.ctype
+    && row.locale === candidate.locale
+    && row.icu_rules === candidate.icuRules
+    && row.collation_version === candidate.collationVersion
+  ));
   if (
     !row
-    || row.server_version_num !== contract.serverVersionNumber
-    || row.encoding !== contract.encoding
-    || row.locale_provider !== contract.localeProvider
-    || row.collate !== contract.collate
-    || row.ctype !== contract.ctype
-    || row.locale !== contract.locale
-    || row.icu_rules !== contract.icuRules
-    || row.collation_version !== contract.collationVersion
+    || !contract
     || row.actual_collation_version !== row.collation_version
     || row.is_template
     || !row.allow_connections
@@ -1249,7 +1257,7 @@ async function assertDatabaseEnvironmentContract(client, configuration) {
     || row.session_replication_role !== "origin"
   ) {
     throw new Error(
-      `database environment does not match the pinned PostgreSQL ${contract.serverMajor} UTF-8 libc locale contract`,
+      `database environment does not match any reviewed PostgreSQL ${DATABASE_ENVIRONMENT_CONTRACT.serverMajor} UTF-8 libc locale contract`,
     );
   }
   const prepared = await client.query("SELECT count(*)::int AS count FROM pg_prepared_xacts");

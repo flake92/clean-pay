@@ -22,6 +22,20 @@ export const DATABASE_ENVIRONMENT_CONTRACT = Object.freeze({
   collationVersion: null,
 });
 
+// Existing installations created by the earlier Alpine PostgreSQL 17 image
+// use musl's exact en_US.utf8 libc locale. PostgreSQL stores that locale in
+// the data directory, so a minor-version image upgrade must preserve it rather
+// than pretending that POSTGRES_INITDB_ARGS can rewrite an existing cluster.
+// Keep this list fail-closed: every admitted lineage must be captured from a
+// reviewed production cluster and reproduced with the pinned image.
+export const DATABASE_REVIEWED_ENVIRONMENT_CONTRACT_ALTERNATES = Object.freeze([
+  Object.freeze({
+    ...DATABASE_ENVIRONMENT_CONTRACT,
+    collate: "en_US.utf8",
+    ctype: "en_US.utf8",
+  }),
+]);
+
 export const PAYMENT_RECORD_COLUMNS = Object.freeze([
   "id",
   "userId",
