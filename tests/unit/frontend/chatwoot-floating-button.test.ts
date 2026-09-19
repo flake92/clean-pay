@@ -7,6 +7,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ChatwootWidgetConfig } from "@/application/models/chatwoot";
 import { SupportChatFloatingButton } from "@/frontend/components/chatwoot-open-button";
 import { SupportChatSessionBoundary } from "@/frontend/components/chatwoot-session-context";
+import { notifyChatwootStateChanged } from "@/frontend/lib/chatwoot-state-events";
 import { projectChatwootIdentity } from "@/frontend/lib/chatwoot-transitions";
 
 const chatwootConfig: ChatwootWidgetConfig = {
@@ -22,6 +23,21 @@ const chatwootConfig: ChatwootWidgetConfig = {
   },
 };
 const expectedCore = projectChatwootIdentity(chatwootConfig, {}).identity.core;
+const otherChatwootConfig: ChatwootWidgetConfig = {
+  ...chatwootConfig,
+  identityFingerprint: "2222222222222222222222222222222222222222222222222222222222222222",
+  websiteToken: "other-token",
+  user: {
+    ...chatwootConfig.user,
+    identifier: "user-456",
+    identifierHash: "signed-user-456",
+    email: "other@example.com",
+  },
+};
+const otherExpectedCore = projectChatwootIdentity(
+  otherChatwootConfig,
+  {},
+).identity.core;
 
 function renderFloatingButton(
   authenticated: boolean,
@@ -67,6 +83,7 @@ describe("SupportChatFloatingButton", () => {
     delete window.cleanPayChatwootFailedIdentity;
     document.cookie = "cw_conversation=; Path=/; Max-Age=0";
     document.cookie = `cw_user_${chatwootConfig.websiteToken}=; Path=/; Max-Age=0`;
+    document.cookie = `cw_user_${otherChatwootConfig.websiteToken}=; Path=/; Max-Age=0`;
   });
 
   it("opens and closes only the verified current user's conversation", async () => {
@@ -101,7 +118,7 @@ describe("SupportChatFloatingButton", () => {
     expect(toggle.mock.calls).toEqual([["open"], ["close"]]);
   });
 
-  it("shows a disabled connection state until identity ownership is verified", () => {
+  it("queues a connecting click and opens exactly once after identity verification", async () => {
     const toggle = installChatwoot();
     window.cleanPayChatwootAuthorized = true;
     renderFloatingButton(true);
@@ -109,9 +126,110 @@ describe("SupportChatFloatingButton", () => {
     const button = screen.getByRole("button", {
       name: "Подключаем чат поддержки",
     });
-    expect(button.hasAttribute("disabled")).toBe(true);
+    expect(button.hasAttribute("disabled")).toBe(false);
     expect(button.getAttribute("aria-busy")).toBe("true");
     fireEvent.click(button);
+    fireEvent.click(button);
+    expect(toggle).not.toHaveBeenCalled();
+
+    expect(screen.getByRole("button", {
+      name: "Чат откроется после подключения",
+    })).toBeTruthy();
+
+    act(() => {
+      confirmCurrentIdentity();
+      notifyChatwootStateChanged();
+    });
+
+    await waitFor(() => expect(toggle).toHaveBeenCalledOnce());
+    expect(toggle).toHaveBeenCalledWith("open");
+
+    act(() => {
+      notifyChatwootStateChanged();
+      notifyChatwootStateChanged();
+    });
+    expect(toggle).toHaveBeenCalledOnce();
+  });
+
+  it("discards a queued click after a failed identity even if Chatwoot recovers", async () => {
+    const toggle = installChatwoot();
+    window.cleanPayChatwootAuthorized = true;
+    renderFloatingButton(true);
+
+    fireEvent.click(screen.getByRole("button", {
+      name: "Подключаем чат поддержки",
+    }));
+    act(() => {
+      window.cleanPayChatwootFailedIdentity = {
+        core: expectedCore,
+        customAttributes: "context",
+      };
+      notifyChatwootStateChanged();
+    });
+    await waitFor(() => {
+      expect(screen.queryByRole("button")).toBeNull();
+    });
+
+    act(() => {
+      delete window.cleanPayChatwootFailedIdentity;
+      confirmCurrentIdentity();
+      notifyChatwootStateChanged();
+    });
+    await screen.findByRole("button", { name: "Открыть чат поддержки" });
+    expect(toggle).not.toHaveBeenCalled();
+  });
+
+  it("discards a queued click when the launcher unmounts", () => {
+    const toggle = installChatwoot();
+    window.cleanPayChatwootAuthorized = true;
+    const view = renderFloatingButton(true);
+
+    fireEvent.click(screen.getByRole("button", {
+      name: "Подключаем чат поддержки",
+    }));
+    view.unmount();
+    act(() => {
+      confirmCurrentIdentity();
+      notifyChatwootStateChanged();
+    });
+
+    expect(toggle).not.toHaveBeenCalled();
+  });
+
+  it("never carries a queued click into another account", async () => {
+    const toggle = installChatwoot();
+    window.cleanPayChatwootAuthorized = true;
+    const view = renderFloatingButton(true);
+
+    fireEvent.click(screen.getByRole("button", {
+      name: "Подключаем чат поддержки",
+    }));
+    view.rerender(createElement(
+      SupportChatSessionBoundary,
+      { authenticated: true, chatwootConfig: otherChatwootConfig },
+      createElement(SupportChatFloatingButton),
+    ));
+
+    act(() => {
+      window.$chatwoot = {
+        baseUrl: otherChatwootConfig.baseUrl,
+        websiteToken: otherChatwootConfig.websiteToken,
+        hasLoaded: true,
+        setUser: vi.fn(),
+        toggle,
+        toggleBubbleVisibility: vi.fn(),
+        reset: vi.fn(),
+      };
+      window.cleanPayChatwootIdentity = {
+        core: otherExpectedCore,
+        customAttributes: "other-context",
+      };
+      document.cookie = "cw_conversation=conversation-2; Path=/";
+      document.cookie = `cw_user_${otherChatwootConfig.websiteToken}=identified; Path=/`;
+      notifyChatwootStateChanged();
+    });
+
+    await screen.findByRole("button", { name: "Открыть чат поддержки" });
     expect(toggle).not.toHaveBeenCalled();
   });
 

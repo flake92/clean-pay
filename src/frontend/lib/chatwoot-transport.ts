@@ -1,53 +1,133 @@
 import type { ChatwootSupportContext } from "@/application/models/chatwoot";
 
 const scriptId = "clean-pay-chatwoot-sdk";
-let sdkPromise: Promise<void> | null = null;
+const scriptStateAttribute = "data-clean-pay-load-state";
+const sdkLoadTimeoutMs = 15_000;
+
+type ActiveSdkLoad = {
+  abort: (error: Error) => void;
+  promise: Promise<void>;
+  script: HTMLScriptElement;
+  source: string;
+};
+
+let activeSdkLoad: ActiveSdkLoad | null = null;
+let loadedSdkSource: string | null = null;
 
 export function loadChatwootSdk(baseUrl: string) {
-  if (typeof window === "undefined" || window.chatwootSDK) {
+  if (typeof window === "undefined") {
     return Promise.resolve();
   }
 
-  if (sdkPromise) {
-    return sdkPromise;
+  const source = new URL(
+    `${baseUrl.replace(/\/+$/, "")}/packs/js/sdk.js`,
+    document.baseURI,
+  ).href;
+
+  if (activeSdkLoad && !activeSdkLoad.script.isConnected) {
+    activeSdkLoad.abort(new Error("Support chat loading was interrupted"));
   }
 
-  sdkPromise = new Promise<void>((resolve, reject) => {
-    const loaded = () => {
-      if (!window.chatwootSDK) {
-        document.getElementById(scriptId)?.remove();
-        reject(new Error("Support chat did not initialize"));
-        return;
-      }
+  if (activeSdkLoad) {
+    if (activeSdkLoad.source === source) {
+      return activeSdkLoad.promise;
+    }
 
-      resolve();
-    };
-    const failed = () => {
-      document.getElementById(scriptId)?.remove();
-      reject(new Error("Support chat failed to load"));
-    };
-    const existing = document.getElementById(scriptId) as HTMLScriptElement | null;
+    return Promise.reject(new Error(
+      "Support chat is already loading from a different address",
+    ));
+  }
 
-    if (existing) {
-      existing.addEventListener("load", loaded, { once: true });
-      existing.addEventListener("error", failed, { once: true });
+  if (loadedSdkSource && loadedSdkSource !== source) {
+    return Promise.reject(new Error(
+      "Support chat address changed; reload the page before reconnecting",
+    ));
+  }
+
+  if (window.chatwootSDK) {
+    loadedSdkSource = source;
+    return Promise.resolve();
+  }
+
+  // Without an active in-memory load, an element using our reserved id has
+  // already completed or belongs to an older module instance. Its load event
+  // cannot be trusted to fire again, so it must not be reused.
+  document.getElementById(scriptId)?.remove();
+
+  const script = document.createElement("script");
+  let resolveLoad!: () => void;
+  let rejectLoad!: (error: Error) => void;
+  const promise = new Promise<void>((resolve, reject) => {
+    resolveLoad = resolve;
+    rejectLoad = reject;
+  });
+  let loadTimer: ReturnType<typeof setTimeout> | null = null;
+
+  let settled = false;
+  const finish = (result: "loaded" | "failed", error?: Error) => {
+    if (settled) {
       return;
     }
 
-    const script = document.createElement("script");
-    script.id = scriptId;
-    script.async = true;
-    script.defer = true;
-    script.src = `${baseUrl}/packs/js/sdk.js`;
-    script.addEventListener("load", loaded, { once: true });
-    script.addEventListener("error", failed, { once: true });
-    document.head.appendChild(script);
-  }).catch((error) => {
-    sdkPromise = null;
-    throw error;
-  });
+    settled = true;
+    if (loadTimer !== null) {
+      clearTimeout(loadTimer);
+      loadTimer = null;
+    }
+    script.removeEventListener("load", loaded);
+    script.removeEventListener("error", failed);
+    if (activeSdkLoad === load) {
+      activeSdkLoad = null;
+    }
 
-  return sdkPromise;
+    if (result === "failed") {
+      script.remove();
+      rejectLoad(error ?? new Error("Support chat failed to load"));
+      return;
+    }
+
+    loadedSdkSource = source;
+    script.setAttribute(scriptStateAttribute, "loaded");
+    resolveLoad();
+  };
+  const loaded = () => {
+    if (!window.chatwootSDK) {
+      finish("failed", new Error("Support chat did not initialize"));
+      return;
+    }
+
+    finish("loaded");
+  };
+  const failed = () => {
+    finish("failed", new Error("Support chat failed to load"));
+  };
+
+  const load: ActiveSdkLoad = {
+    abort: (error) => finish("failed", error),
+    promise,
+    script,
+    source,
+  };
+  activeSdkLoad = load;
+
+  script.id = scriptId;
+  script.async = true;
+  script.defer = true;
+  script.src = source;
+  script.setAttribute(scriptStateAttribute, "loading");
+  script.addEventListener("load", loaded, { once: true });
+  script.addEventListener("error", failed, { once: true });
+  loadTimer = setTimeout(() => {
+    finish("failed", new Error("Support chat loading timed out"));
+  }, sdkLoadTimeoutMs);
+
+  try {
+    document.head.appendChild(script);
+  } catch {
+    failed();
+  }
+
+  return promise;
 }
 
 function chatwootFrameMessage(event: MessageEvent, baseUrl: string) {
