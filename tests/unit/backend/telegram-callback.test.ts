@@ -30,6 +30,7 @@ const mocks = vi.hoisted(() => ({
   synchronizeProviderAccountIdentity: vi.fn(),
   mergeLocalUsersIntoTarget: vi.fn(),
   assertUserMergeFinalOwner: vi.fn(),
+  publicAppUrl: "https://clean-pay.example.com",
   prisma: {
     webUser: { findUnique: vi.fn(), findUniqueOrThrow: vi.fn(), update: vi.fn(), upsert: vi.fn() },
     telegramAuthState: { update: vi.fn() },
@@ -50,7 +51,7 @@ vi.mock("@/backend/limits/rate-limit", () => ({ assertRateLimit: mocks.assertRat
 
 vi.mock("@/backend/config/env", () => ({
   getEnv: () => ({
-    publicAppUrl: "https://clean-pay.example.com",
+    publicAppUrl: mocks.publicAppUrl,
     cookieSecure: true,
     cookieSameSite: "lax",
     webJwtSecret: "test-web-jwt-secret-with-enough-entropy",
@@ -136,6 +137,7 @@ import { GET, POST } from "@/app/auth/telegram/callback/route";
 describe("Telegram callback payment-owner fence", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.publicAppUrl = "https://clean-pay.example.com";
     mocks.withPaymentOwnerChangeFence.mockImplementation(
       async ({ work }: { work: () => Promise<unknown> }) => work(),
     );
@@ -223,6 +225,44 @@ describe("Telegram callback payment-owner fence", () => {
       paymentOwnerFenceHeld: true,
       verifiedProfile: expect.any(Object),
     }));
+  });
+
+  it("accepts the owned public alias for the Telegram popup callback", async () => {
+    mocks.publicAppUrl = "https://cleanvpn.edge-connect.uk";
+
+    const response = await POST(new Request(
+      "https://oplata.clear-vpn.org/auth/telegram/callback",
+      {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          origin: "https://oplata.clear-vpn.org",
+        },
+        body: JSON.stringify({ idToken: "telegram-id-token" }),
+      },
+    ));
+
+    expect(response.status).toBe(200);
+    expect(mocks.consumeTelegramPopupToken).toHaveBeenCalledOnce();
+  });
+
+  it("rejects an unowned Origin even when the callback URL uses the public alias", async () => {
+    mocks.publicAppUrl = "https://cleanvpn.edge-connect.uk";
+
+    const response = await POST(new Request(
+      "https://oplata.clear-vpn.org/auth/telegram/callback",
+      {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          origin: "https://attacker.example",
+        },
+        body: JSON.stringify({ idToken: "telegram-id-token" }),
+      },
+    ));
+
+    expect(response.status).toBe(403);
+    expect(mocks.consumeTelegramPopupToken).not.toHaveBeenCalled();
   });
 
   it("returns generic failures without exposing a mismatched link-state owner", async () => {
