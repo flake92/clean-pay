@@ -137,7 +137,7 @@ services:
     tmpfs:
       - /tmp:rw,noexec,nosuid,nodev,size=64m,mode=1777
     stop_grace_period: 2m
-    restart: "on-failure"
+    restart: unless-stopped
     command: ["node", "deploy/prod/reconcile-loop.mjs"]
     env_file:
       - ${CLEAN_PAY_RECONCILIATION_ENV_FILE:-.env.reconciliation}
