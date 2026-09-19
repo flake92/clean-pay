@@ -157,6 +157,28 @@ describe("production role-scoped environment boundary", () => {
     expect(runtimeRestart).not.toContain("--force-recreate");
   });
 
+  it("clears one-time database adoption authorization before runtime starts", () => {
+    const install = deploy.slice(
+      deploy.indexOf("install_services() {"),
+      deploy.indexOf("build_images_only() {"),
+    );
+    const migrate = deploy.slice(
+      deploy.indexOf("migrate_only() {"),
+      deploy.indexOf("resolve_rolled_back_migration() {"),
+    );
+    const migration = install.indexOf("run_verified_migration");
+    const clear = install.indexOf("clear_database_adoption_authorization");
+    const start = install.indexOf("start_verified_runtimes");
+
+    expect(clear).toBeGreaterThan(migration);
+    expect(start).toBeGreaterThan(clear);
+    expect(migrate.indexOf("clear_database_adoption_authorization")).toBeGreaterThan(
+      migrate.indexOf("run_verified_migration"),
+    );
+    expect(deploy).toContain("database-adoption-state.mjs clear");
+    expect(deploy).toContain("materialize_role_env_files");
+  });
+
   it("shares strict metadata checks across every env-file entry point", () => {
     expect(prod).toContain("readPrivateCredentialFile(");
     expect(validator).toContain("readPrivateCredentialFile(");

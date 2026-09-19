@@ -31,6 +31,61 @@ afterEach(() => {
 });
 
 describe("production database credential initialization", () => {
+  it("upgrades the v0.1.1 single-role database environment without changing its bootstrap credential", () => {
+    const bootstrapPassword = "a".repeat(48);
+    const path = privateEnvironment([
+      "POSTGRES_DB=clean_pay",
+      "POSTGRES_USER=clean_pay",
+      `POSTGRES_PASSWORD=${bootstrapPassword}`,
+      `DATABASE_URL=postgresql://clean_pay:${bootstrapPassword}@postgres:5432/clean_pay?schema=public`,
+      "",
+    ].join("\n"));
+
+    const result = initializeDatabaseCredentials(path);
+    const environment = Object.fromEntries(
+      readFileSync(path, "utf8")
+        .trim()
+        .split("\n")
+        .map((line) => line.split(/=(.*)/s).slice(0, 2)),
+    );
+    expect(result.updatedNames).toEqual([
+      "DATABASE_URL",
+      "HOLD_OPERATOR_DATABASE_URL",
+      "MIGRATION_DATABASE_URL",
+      "RETENTION_DATABASE_URL",
+    ]);
+    expect(environment.POSTGRES_USER).toBe("clean_pay");
+    expect(environment.POSTGRES_PASSWORD).toBe(bootstrapPassword);
+
+    const roleUrls = [
+      environment.DATABASE_URL,
+      environment.MIGRATION_DATABASE_URL,
+      environment.RETENTION_DATABASE_URL,
+      environment.HOLD_OPERATOR_DATABASE_URL,
+    ].map((value) => new URL(value));
+    expect(new Set(roleUrls.map((url) => decodeURIComponent(url.username))).size).toBe(4);
+    expect(roleUrls.every((url) => url.hostname === "postgres")).toBe(true);
+    expect(roleUrls.every((url) => url.pathname === "/clean_pay")).toBe(true);
+    expect(roleUrls.every((url) => decodeURIComponent(url.username) !== "clean_pay")).toBe(true);
+    expect(roleUrls.every((url) => decodeURIComponent(url.password) !== bootstrapPassword)).toBe(true);
+  });
+
+  it("rejects an ambiguous bootstrap-role URL instead of guessing its password", () => {
+    const path = privateEnvironment([
+      "POSTGRES_DB=clean_pay",
+      "POSTGRES_USER=clean_pay",
+      `POSTGRES_PASSWORD=${"a".repeat(64)}`,
+      `DATABASE_URL=postgresql://clean_pay:${"b".repeat(64)}@postgres:5432/clean_pay?schema=public`,
+      "",
+    ].join("\n"));
+    const before = readFileSync(path, "utf8");
+
+    expect(() => initializeDatabaseCredentials(path)).toThrow(
+      "DATABASE_URL reuses POSTGRES_USER without the exact legacy bootstrap credential",
+    );
+    expect(readFileSync(path, "utf8")).toBe(before);
+  });
+
   it("fails without mutating a malformed nonempty deployment target", () => {
     const path = privateEnvironment([
       "POSTGRES_DB=clean_pay",

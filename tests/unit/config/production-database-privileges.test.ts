@@ -185,6 +185,13 @@ describe("production database least-privilege contract", () => {
     }
   });
 
+  it("admits the exact v0.1.1 catalog boundary for a guarded direct upgrade", () => {
+    expect(DATABASE_REVIEWED_CATALOG_STATES).toHaveProperty(
+      "20260810013000_preserve_account_merge_target_telegram",
+      "e78c0d4eb863fd2ff27938e3a62b8254e8702c3110782a0ce900aac417b376e1",
+    );
+  });
+
   it("generates Prisma Client before the CI runtime privilege probe", () => {
     const job = ci.slice(
       ci.indexOf("  database-least-privilege:"),

@@ -512,6 +512,7 @@ export const DATABASE_REVIEWED_CATALOG_STATES = Object.freeze({
   EMPTY: "9f7f35a431e5a131e5491af9f151199ecd07c31d9c9842c5f6cd478609ac5a37",
   LEDGER_ONLY: "46a2b8bd62c5557f3a361896ed8c285d2c73a1f5f72284225d20416e390cadce",
   "20260718000000_add_payment_reconciliation": "6495b88e1fdd21ba7758f89c2e7c06b077c9f1ffce18107397ad14ef15b06153",
+  "20260810013000_preserve_account_merge_target_telegram": "e78c0d4eb863fd2ff27938e3a62b8254e8702c3110782a0ce900aac417b376e1",
   "20260813091000_add_remnashop_refresh_recovery": "1c8e21cc79656c8efd5d252eb2becf6362bb33bb5e5ef290833ee95136805ee0",
   "20260825010000_add_durable_telegram_callback": "d65a64e2c3d111af53ad9b38d1a1e240db48b6bc697f987d50fa45d8c0463cd7",
   "20260825210000_add_payment_sensitive_retention": "8ebdde16b0117ee7d11ce810ac67a0d4148e5131da40e29a4c6e82514ac01fd2",
