@@ -914,13 +914,10 @@ export function validateProductionEnvironment(environment) {
     }
   }
 
-  const paymentRedirectOrigins = optional("PAYMENT_REDIRECT_ORIGINS");
-  if (paymentRedirectOrigins) {
-    publicHttpsOriginList(
-      "PAYMENT_REDIRECT_ORIGINS",
-      paymentRedirectOrigins,
-    );
-  }
+  publicHttpsOriginList(
+    "PAYMENT_REDIRECT_ORIGINS",
+    required("PAYMENT_REDIRECT_ORIGINS"),
+  );
 
   const turnstileEnabled = bool(
     "TURNSTILE_ENABLED",
