@@ -10,8 +10,11 @@ IMAGE_PREFLIGHT_SCRIPT="$ROOT_DIR/deploy/prod/image-preflight.sh"
 BUILD_PROVENANCE_SCRIPT="$ROOT_DIR/deploy/prod/build-provenance.sh"
 ROLE_ENV_SCRIPT="$ROOT_DIR/deploy/prod/role-env.mjs"
 CREDENTIAL_INIT_SCRIPT="$ROOT_DIR/deploy/prod/database-credential-init.mjs"
+CREDENTIAL_ADOPTION_SCRIPT="$ROOT_DIR/deploy/prod/database-adoption-state.mjs"
+CREDENTIAL_UPGRADE_SCRIPT="$ROOT_DIR/deploy/prod/production-environment-upgrade.mjs"
 CREDENTIAL_FILE_GUARD_SCRIPT="$ROOT_DIR/deploy/prod/credential-file-guard.mjs"
 OPERATION_LOCK_SCRIPT="$ROOT_DIR/deploy/prod/production-operation-lock.mjs"
+COMPOSE_CAPABILITY_SCRIPT="$ROOT_DIR/deploy/prod/docker-compose-capability-preflight.sh"
 OPERATION_LOCK_PATH="$ROOT_DIR/deploy/prod/.production-operation.lock"
 APP_ENV_FILE="${ENV_FILE}.app"
 HOLD_OPERATOR_ENV_FILE="${ENV_FILE}.hold-operator"
@@ -41,6 +44,17 @@ info() {
 
 require_command() {
   command -v "$1" >/dev/null 2>&1 || fail "$1 is not installed or is not available in PATH"
+}
+
+need_docker() {
+  require_command docker
+  docker compose version >/dev/null 2>&1 \
+    || fail "Docker Compose plugin is not available"
+}
+
+need_deployment_compose_capabilities() {
+  sh "$COMPOSE_CAPABILITY_SCRIPT" \
+    || fail "Docker or Docker Compose lacks a required production capability"
 }
 
 assert_private_env_file() {
@@ -134,6 +148,7 @@ ensure_generated_secret() {
 
 ensure_generated_secrets() {
   require_env_file
+  node "$CREDENTIAL_UPGRADE_SCRIPT" check "$ENV_FILE"
   node "$CREDENTIAL_INIT_SCRIPT" init "$ENV_FILE"
   ensure_generated_secret WEB_JWT_SECRET
   ensure_generated_secret WEB_REFRESH_SECRET
@@ -141,6 +156,27 @@ ensure_generated_secrets() {
   ensure_generated_secret RATE_LIMIT_IDENTITY_SECRET
   ensure_generated_secret READINESS_INTERNAL_SECRET
   ensure_generated_secret PAYMENT_RECONCILIATION_SECRET
+}
+
+clear_database_adoption_authorization() {
+  node "$CREDENTIAL_ADOPTION_SCRIPT" clear "$ENV_FILE" \
+    || fail "could not clear one-time database adoption authorization"
+  node "$ROLE_ENV_SCRIPT" materialize "$ENV_FILE" \
+    || fail "could not refresh role environments after clearing database adoption authorization"
+}
+
+prepare_v011_upgrade() {
+  [ "$#" -eq 2 ] \
+    || fail "usage: sh start.sh prepare-v0.1.1-upgrade REMNAWAVE_SUBSCRIPTION_ORIGINS PAYMENT_REDIRECT_ORIGINS"
+  require_command node
+  require_env_file
+  node "$CREDENTIAL_UPGRADE_SCRIPT" prepare-v0.1.1 \
+    "$ENV_FILE" "$1" "$2" clean-pay-migration:local
+  node "$CREDENTIAL_INIT_SCRIPT" init "$ENV_FILE"
+  ensure_generated_secrets
+  node "$ROOT_DIR/deploy/prod/validate-env.mjs" --clean-pay-env-file "$ENV_FILE"
+  node "$ROLE_ENV_SCRIPT" materialize "$ENV_FILE"
+  info "v0.1.1 configuration is prepared; payment-data retention remains disabled"
 }
 
 validate_env() {
@@ -474,8 +510,8 @@ assert_retention_worker() {
 }
 
 start() {
-  require_command docker
-  docker compose version >/dev/null 2>&1 || fail "Docker Compose plugin is not available"
+  need_docker
+  need_deployment_compose_capabilities
   validate_env
   ensure_redis_host_memory_policy
   ensure_network
@@ -488,6 +524,7 @@ start() {
   stop_runtime_services
   info "running the verified one-shot migration before application runtimes"
   run_verified_migration
+  clear_database_adoption_authorization
   start_verified_runtimes
   cleanup_verified_images
   verify
@@ -527,7 +564,7 @@ case "$MODE" in
 esac
 
 case "$COMMAND" in
-  start|up|stop|down|restart|build)
+  start|up|stop|down|restart|build|prepare-v0.1.1-upgrade)
     acquire_production_operation_lock "$COMMAND"
     ;;
 esac
@@ -559,11 +596,15 @@ case "$COMMAND" in
     verify
     ;;
   build)
-    require_command docker
-    docker compose version >/dev/null 2>&1 || fail "Docker Compose plugin is not available"
+    need_docker
+    need_deployment_compose_capabilities
     validate_env
     prepare_images
     preflight_images
+    ;;
+  prepare-v0.1.1-upgrade)
+    shift
+    prepare_v011_upgrade "$@"
     ;;
   *)
     cat <<'EOF'
@@ -576,6 +617,8 @@ Usage:
   sh start.sh status   Show container status
   sh start.sh verify   Check the health endpoint
   sh start.sh build    Build or pull the configured image targets
+  sh start.sh prepare-v0.1.1-upgrade SUBSCRIPTION_ORIGINS PAYMENT_ORIGINS
+                       Prepare an existing v0.1.1 .env for v0.2.0
 EOF
     exit 1
     ;;

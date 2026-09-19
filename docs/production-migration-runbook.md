@@ -31,6 +31,29 @@ row between backfill and constraint enforcement.
 
 ## Before the maintenance window
 
+For a direct `0.1.1` to `0.2.0` update, keep the existing authoritative env
+file and run the explicit configuration-only preparation before this window:
+
+```bash
+./deploy.sh prepare-v0.1.1-upgrade \
+  'https://sub.example.com' \
+  'https://pay.example.com'
+```
+
+The command performs no Docker or database mutation. It preserves existing
+secrets, creates distinct role credentials with guarded idempotent file
+publications, requires the exact subscription and payment redirect origins, raises the stale
+Remnashop floor from `0050` to the repository minimum `0058`, and leaves
+`PAYMENT_DATA_RETENTION_ENABLED=false`. Do not replace the old env with the
+example and do not invent either origin list. Upgrade Remnashop to at least
+revision `0058`, then run `./deploy.sh build`; all of these checks must pass
+while the old Clean Pay runtime is still available.
+
+The already-created `0.1.1` containers retain their original environment, but
+must not be recreated with the old deployment code after preparation. If the
+upgrade is abandoned before any database mutation, restore the authoritative
+`0.1.1` env from the encrypted backup before using its deployment tooling.
+
 1. Pin the exact reviewed Clean Pay commit and previous working image digest.
 2. Confirm the target host, port, database and schema explicitly. Never run the
    commands below against an inferred database name or inherited `search_path`.

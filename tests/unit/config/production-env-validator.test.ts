@@ -108,6 +108,7 @@ const validEnv: Record<string, string> = {
   CHATWOOT_WEBSITE_TOKEN: "",
   CHATWOOT_HMAC_TOKEN: "",
   PAYMENT_RECONCILIATION_ENABLED: "false",
+  PAYMENT_DATA_RETENTION_ENABLED: "true",
   PAYMENT_RECONCILIATION_SECRET: "",
   PAYMENT_RECONCILIATION_BATCH_SIZE: "10",
   PAYMENT_RECONCILIATION_INTERVAL_SECONDS: "30",
@@ -279,6 +280,10 @@ describe("production env validator", () => {
       REMNASHOP_MINIMUM_ALEMBIC_REVISION: "0058",
       LOG_LEVEL: "DEBUG",
     })).not.toThrow();
+    expect(() => validateProductionEnvironment({
+      ...validEnv,
+      REMNASHOP_MINIMUM_ALEMBIC_REVISION: "0050",
+    })).toThrow("must be at least 0058");
   });
 
   it("materializes private role-scoped env sets without unrelated secret families", () => {
@@ -363,6 +368,7 @@ describe("production env validator", () => {
       }
 
       expect(roleEnvironment.retention!.SESSION_RETENTION_DAYS).toBe("91");
+      expect(roleEnvironment.retention!.PAYMENT_DATA_RETENTION_ENABLED).toBe("true");
       expect(roleEnvironment.retention!.PAYMENT_HOLD_DISPOSED_RETENTION_DAYS)
         .toBe("367");
       expect(roleEnvironment.reconciliation!.PAYMENT_RECONCILIATION_SECRET)
@@ -535,6 +541,16 @@ describe("production env validator", () => {
 
     expect(result.status, result.stderr).toBe(0);
     expect(result.stdout).toContain("Production environment validation passed.");
+  });
+
+  it("requires an explicit payment-data retention decision", () => {
+    expect(runValidator({ PAYMENT_DATA_RETENTION_ENABLED: null }).stderr).toContain(
+      "PAYMENT_DATA_RETENTION_ENABLED is required",
+    );
+    expect(runValidator({ PAYMENT_DATA_RETENTION_ENABLED: "false" }).status).toBe(0);
+    expect(runValidator({ PAYMENT_DATA_RETENTION_ENABLED: "yes" }).stderr).toContain(
+      'PAYMENT_DATA_RETENTION_ENABLED must be "true" or "false"',
+    );
   });
 
   it("rejects peer and bootstrap database values from every role-scoped runtime", () => {

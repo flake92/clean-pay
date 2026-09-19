@@ -47,6 +47,7 @@ function stubValidProductionEnv() {
     TELEGRAM_OIDC_CLIENT_SECRET: "oidc-runtime-3Nm8Wp5Kq2Vr7Xs9Lc4D6Hz1",
     TELEGRAM_BOT_TOKEN: "7654321098:RuntimeBotToken_9QvL2xR8mT4pK",
     PAYMENT_RECONCILIATION_ENABLED: "false",
+    PAYMENT_DATA_RETENTION_ENABLED: "true",
     PAYMENT_RECONCILIATION_SECRET: "",
     PAYMENT_RECONCILIATION_INTERNAL_URL: "http://app:4000/api/internal/payments/reconcile",
     PAYMENT_REDIRECT_ORIGINS: "https://yoomoney.ru,https://pay.platega.io",

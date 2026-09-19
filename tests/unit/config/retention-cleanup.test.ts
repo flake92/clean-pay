@@ -87,6 +87,13 @@ function guardedPrisma(responses: Record<string, unknown> = {}) {
   return { $queryRaw: queryRaw, calls };
 }
 
+function enabledRetentionPolicy() {
+  return retentionPolicy({
+    NODE_ENV: "test",
+    PAYMENT_DATA_RETENTION_ENABLED: "true",
+  });
+}
+
 describe("production data retention", () => {
   it("uses conservative bounded defaults and rejects unsafe policy values", () => {
     expect(retentionPolicy({ NODE_ENV: "test" })).toEqual({
@@ -95,6 +102,7 @@ describe("production data retention", () => {
       auditInfoDays: 180,
       auditSecurityDays: 365,
       rateLimitDays: 30,
+      paymentDataRetentionEnabled: false,
       paymentSensitiveDays: 30,
       paymentOperationSnapshotDays: 90,
       paymentHoldDisposedDays: 365,
@@ -112,6 +120,10 @@ describe("production data retention", () => {
       NODE_ENV: "test",
       PAYMENT_SENSITIVE_RETENTION_DAYS: "6",
     })).toThrow("PAYMENT_SENSITIVE_RETENTION_DAYS");
+    expect(() => retentionPolicy({
+      NODE_ENV: "test",
+      PAYMENT_DATA_RETENTION_ENABLED: "yes",
+    })).toThrow("PAYMENT_DATA_RETENTION_ENABLED");
   });
 
   it("dispatches only the reviewed guarded functions and maps their bounded results", async () => {
@@ -136,7 +148,7 @@ describe("production data retention", () => {
 
     await expect(runRetentionCleanup(
       prisma,
-      retentionPolicy({ NODE_ENV: "test" }),
+      enabledRetentionPolicy(),
       new Date("2026-08-26T00:00:00.000Z"),
     )).resolves.toEqual({
       webAuthnChallenges: 3,
@@ -150,6 +162,7 @@ describe("production data retention", () => {
       auditSecurity: 12,
       paymentRetentionHoldsDisposed: 13,
       paymentRetentionHoldBacklog: true,
+      paymentDataRetentionEnabled: true,
       rateLimitEvents: 14,
       paymentRecordsScrubbed: 15,
       paymentOperationsScrubbed: 16,
@@ -175,7 +188,11 @@ describe("production data retention", () => {
     const prisma = guardedPrisma();
     const secretPolicyMarker = "CALLER_POLICY_MUST_NOT_REACH_SQL";
     const secretNow = new Date("2040-03-04T05:06:07.890Z");
-    await runRetentionCleanup(prisma, { marker: secretPolicyMarker }, secretNow);
+    await runRetentionCleanup(
+      prisma,
+      { marker: secretPolicyMarker, paymentDataRetentionEnabled: true },
+      secretNow,
+    );
 
     const serializedCalls = JSON.stringify(prisma.calls);
     expect(serializedCalls).not.toContain(secretPolicyMarker);
@@ -189,7 +206,6 @@ describe("production data retention", () => {
     expect(cleanup).not.toMatch(/\.(?:deleteMany|findMany|updateMany|update|delete)\s*\(/u);
     expect(cleanup).not.toContain("setHours");
     expect(cleanup).not.toContain("setDate");
-    expect(cleanup).toContain("void policy");
     expect(cleanup).toContain("void now");
   });
 
@@ -207,7 +223,7 @@ describe("production data retention", () => {
       const prisma = guardedPrisma({ webAuthnChallengesExpired: invalid });
       await expect(runRetentionCleanup(
         prisma,
-        retentionPolicy({ NODE_ENV: "test" }),
+        enabledRetentionPolicy(),
       )).rejects.toMatchObject({
         name: "RetentionCleanupAggregateError",
         phases: ["webAuthnChallengesExpired"],
@@ -226,7 +242,7 @@ describe("production data retention", () => {
 
     let thrown: unknown;
     try {
-      await runRetentionCleanup(prisma, retentionPolicy({ NODE_ENV: "test" }));
+      await runRetentionCleanup(prisma, enabledRetentionPolicy());
     } catch (error) {
       thrown = error;
     }
@@ -247,7 +263,7 @@ describe("production data retention", () => {
     const onProgress = vi.fn();
     await runRetentionCleanup(
       prisma,
-      retentionPolicy({ NODE_ENV: "test" }),
+      enabledRetentionPolicy(),
       new Date(),
       { onProgress },
     );
@@ -267,7 +283,7 @@ describe("production data retention", () => {
     });
     await expect(runRetentionCleanup(
       fatalPrisma,
-      retentionPolicy({ NODE_ENV: "test" }),
+      enabledRetentionPolicy(),
       new Date(),
       {
         onProgress(event: { stage: string }) {
@@ -293,7 +309,7 @@ describe("production data retention", () => {
     });
     await expect(runRetentionCleanup(
       prisma,
-      retentionPolicy({ NODE_ENV: "test" }),
+      enabledRetentionPolicy(),
     )).resolves.toMatchObject({
       webAuthnChallenges: 1_000,
       genericRetentionBacklogSources: ["webAuthnChallenges"],
@@ -307,6 +323,36 @@ describe("production data retention", () => {
     const loop = readFileSync("deploy/prod/retention-loop.mjs", "utf8");
     expect(loop).toContain("counts.retentionBacklog");
     expect(loop).toContain("await shutdown.sleep(1_000)");
+  });
+
+  it("keeps non-payment retention active while legacy payment cleanup is disabled", async () => {
+    const prisma = guardedPrisma({
+      webSessionsExpired: { selected: 2, affected: 2, backlog: false },
+      paymentRetentionHolds: new Error("must not execute"),
+      paymentRecords: new Error("must not execute"),
+      paymentOperations: new Error("must not execute"),
+    });
+
+    await expect(runRetentionCleanup(
+      prisma,
+      retentionPolicy({
+        NODE_ENV: "test",
+        PAYMENT_DATA_RETENTION_ENABLED: "false",
+      }),
+    )).resolves.toMatchObject({
+      paymentDataRetentionEnabled: false,
+      paymentRetentionHoldsDisposed: 0,
+      paymentRecordsScrubbed: 0,
+      paymentOperationsScrubbed: 0,
+      webSessions: 2,
+    });
+    expect(prisma.calls.map(({ phase }) => phase)).not.toEqual(
+      expect.arrayContaining([
+        "paymentRetentionHolds",
+        "paymentRecords",
+        "paymentOperations",
+      ]),
+    );
   });
 
   it("ships exact policy-bound guarded retention SQL with safe snapshot minimization", () => {

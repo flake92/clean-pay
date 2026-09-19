@@ -16,6 +16,14 @@ function boundedDays(env, name, fallback, min, max) {
   return value;
 }
 
+function booleanFlag(env, name, fallback) {
+  const raw = env[name]?.trim();
+  if (!raw) return fallback;
+  if (raw === "true") return true;
+  if (raw === "false") return false;
+  throw new Error(`${name} must be "true" or "false"`);
+}
+
 export function retentionPolicy(env = process.env) {
   const policy = {
     authStateDays: boundedDays(env, "AUTH_STATE_RETENTION_DAYS", 7, 1, 30),
@@ -23,6 +31,14 @@ export function retentionPolicy(env = process.env) {
     auditInfoDays: boundedDays(env, "AUDIT_INFO_RETENTION_DAYS", 180, 30, 730),
     auditSecurityDays: boundedDays(env, "AUDIT_SECURITY_RETENTION_DAYS", 365, 90, 2_555),
     rateLimitDays: boundedDays(env, "RATE_LIMIT_RETENTION_DAYS", 30, 1, 180),
+    // Missing means disabled. The authoritative production validator requires
+    // an explicit choice, while this safe fallback prevents a directly started
+    // legacy worker from scrubbing payment history by surprise.
+    paymentDataRetentionEnabled: booleanFlag(
+      env,
+      "PAYMENT_DATA_RETENTION_ENABLED",
+      false,
+    ),
     paymentSensitiveDays: boundedDays(
       env,
       "PAYMENT_SENSITIVE_RETENTION_DAYS",
@@ -192,7 +208,6 @@ export async function runRetentionCleanup(
   // The runtime values remain validated by retentionPolicy for configuration
   // parity, but no caller-supplied clock or cutoff reaches a mutation. The
   // guarded database functions use the exact private policy row and server UTC.
-  void policy;
   void now;
   const reportProgress = retentionProgressReporter(options);
   const results = {};
@@ -285,13 +300,23 @@ export async function runRetentionCleanup(
     resultKey: "auditSecurity",
   });
 
-  const disposedHolds = await captureDelete({
-    phase: "paymentRetentionHolds",
-    resultKey: "paymentRetentionHoldsDisposed",
-    backlogSource: null,
-  });
-  if (disposedHolds !== null) {
-    results.paymentRetentionHoldBacklog = disposedHolds.backlog;
+  const paymentDataRetentionEnabled =
+    policy?.paymentDataRetentionEnabled === true;
+  results.paymentDataRetentionEnabled = paymentDataRetentionEnabled;
+
+  let disposedHolds = null;
+  if (paymentDataRetentionEnabled) {
+    disposedHolds = await captureDelete({
+      phase: "paymentRetentionHolds",
+      resultKey: "paymentRetentionHoldsDisposed",
+      backlogSource: null,
+    });
+    if (disposedHolds !== null) {
+      results.paymentRetentionHoldBacklog = disposedHolds.backlog;
+    }
+  } else {
+    results.paymentRetentionHoldsDisposed = 0;
+    results.paymentRetentionHoldBacklog = false;
   }
 
   await captureDelete({
@@ -299,21 +324,28 @@ export async function runRetentionCleanup(
     resultKey: "rateLimitEvents",
   });
 
-  const paymentRecords = await captureRetentionPhase(
-    failures,
-    "paymentRecords",
-    () => scrubPaymentRecords(prisma, reportProgress),
-  );
-  if (paymentRecords !== null) {
-    results.paymentRecordsScrubbed = paymentRecords.scrubbed;
-  }
-  const paymentOperations = await captureRetentionPhase(
-    failures,
-    "paymentOperations",
-    () => scrubPaymentOperationSnapshots(prisma, reportProgress),
-  );
-  if (paymentOperations !== null) {
-    results.paymentOperationsScrubbed = paymentOperations.scrubbed;
+  let paymentRecords = null;
+  let paymentOperations = null;
+  if (paymentDataRetentionEnabled) {
+    paymentRecords = await captureRetentionPhase(
+      failures,
+      "paymentRecords",
+      () => scrubPaymentRecords(prisma, reportProgress),
+    );
+    if (paymentRecords !== null) {
+      results.paymentRecordsScrubbed = paymentRecords.scrubbed;
+    }
+    paymentOperations = await captureRetentionPhase(
+      failures,
+      "paymentOperations",
+      () => scrubPaymentOperationSnapshots(prisma, reportProgress),
+    );
+    if (paymentOperations !== null) {
+      results.paymentOperationsScrubbed = paymentOperations.scrubbed;
+    }
+  } else {
+    results.paymentRecordsScrubbed = 0;
+    results.paymentOperationsScrubbed = 0;
   }
 
   results.paymentRetentionBacklog = Boolean(
