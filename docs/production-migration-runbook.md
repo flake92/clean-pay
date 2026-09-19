@@ -40,14 +40,21 @@ file and run the explicit configuration-only preparation before this window:
   'https://pay.example.com'
 ```
 
-The command performs no Docker or database mutation. It preserves existing
-secrets, creates distinct role credentials with guarded idempotent file
-publications, requires the exact subscription and payment redirect origins, raises the stale
-Remnashop floor from `0050` to the repository minimum `0058`, and leaves
+The command performs no Clean Pay service or database mutation. It preserves
+existing secrets, creates distinct role credentials with guarded idempotent
+file publications, requires the exact subscription and payment redirect
+origins, raises the stale Remnashop floor from `0050` to the legacy-upgrade
+minimum `0058`, and leaves
 `PAYMENT_DATA_RETENTION_ENABLED=false`. Do not replace the old env with the
 example and do not invent either origin list. Upgrade Remnashop to at least
 revision `0058`, then run `./deploy.sh build`; all of these checks must pass
 while the old Clean Pay runtime is still available.
+
+Fresh Clean Pay installations default to Remnashop revision `0059`. A direct
+upgrade from `0.1.1` intentionally remains at `0058`: revision `0059` changes
+the initial e-mail-reminder preferences and therefore requires a separate,
+reviewed decision for existing users rather than an implicit deployment
+backfill.
 
 The already-created `0.1.1` containers retain their original environment, but
 must not be recreated with the old deployment code after preparation. If the
@@ -188,6 +195,19 @@ upgrade is abandoned before any database mutation, restore the authoritative
    post-deploy observation window is complete; never use `PGPASSWORD` here.
 
 ## Upgrade
+
+For a populated `0.1.1` database, keep every writer stopped after the verified
+backup and atomically authorize its one-time least-privilege adoption:
+
+```bash
+./deploy.sh authorize-existing-database --confirm-verified-backup
+```
+
+Do not run this command for an empty database or use the confirmation before
+the backup checksum and object inventory pass. The command changes both guarded
+flags in one compare-and-swap publication; a partial state or concurrent edit
+is rejected. A successful migration and role verification clear both flags
+before any runtime starts.
 
 1. Start the reviewed Compose migration service and require a successful exit
    before any application revision starts:

@@ -252,7 +252,7 @@ process.exit(originalExitCode);
       expect(source).toContain('"$operation_name" "$$"');
     }
     expect(deploy).toMatch(
-      /setup\|configure\|config\|init\|prepare-v0\.1\.1-upgrade\|compose\|check\|build\|migrate\|resolve-rolled-back\|install\|up\|restart\|down\)[\s\S]{0,100}acquire_production_operation_lock/,
+      /setup\|configure\|config\|init\|prepare-v0\.1\.1-upgrade\|authorize-existing-database\|compose\|check\|build\|migrate\|resolve-rolled-back\|install\|up\|restart\|down\)[\s\S]{0,100}acquire_production_operation_lock/,
     );
     expect(start).toMatch(
       /start\|up\|stop\|down\|restart\|build\|prepare-v0\.1\.1-upgrade\)[\s\S]{0,100}acquire_production_operation_lock/,

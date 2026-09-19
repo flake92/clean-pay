@@ -4,6 +4,7 @@ import { describe, expect, it } from "vitest";
 
 const deploy = readFileSync("deploy.sh", "utf8");
 const credentialFileGuard = readFileSync("deploy/prod/credential-file-guard.mjs", "utf8");
+const productionEnvExample = readFileSync("deploy/prod/.env.example", "utf8");
 const readme = readFileSync("README.md", "utf8");
 
 describe("interactive owner deployment", () => {
@@ -16,6 +17,20 @@ describe("interactive owner deployment", () => {
     expect(deploy).toContain("configure|config) configure");
     expect(deploy).toContain("compose|check) prepare_compose");
     expect(deploy).toContain("install) up");
+    expect(deploy).toContain("REMNASHOP_ENV_FILE 'Абсолютный путь к .env Remnashop");
+    expect(deploy).toContain("PAYMENT_REDIRECT_ORIGINS 'HTTPS origins платёжных шлюзов");
+
+    const setup = deploy.slice(deploy.indexOf("setup() {"), deploy.indexOf("usage() {"));
+    expect(setup.indexOf("Ключ синхронизирован")).toBeGreaterThan(
+      setup.indexOf("configure"),
+    );
+    expect(setup.indexOf("DNS и HTTPS reverse proxy")).toBeGreaterThan(
+      setup.indexOf("Ключ синхронизирован"),
+    );
+    expect(setup.indexOf("prepare_compose")).toBeGreaterThan(
+      setup.indexOf("DNS и HTTPS reverse proxy"),
+    );
+    expect(productionEnvExample).toContain("REMNASHOP_MINIMUM_ALEMBIC_REVISION=0059");
   });
 
   it("creates secrets safely and does not require Docker before configuration", () => {
@@ -62,5 +77,10 @@ describe("interactive owner deployment", () => {
     expect(readme).toContain("./deploy.sh configure");
     expect(readme).toContain("./deploy.sh compose");
     expect(readme).toContain("./deploy.sh install");
+    expect(readme).toContain("./deploy.sh authorize-existing-database --confirm-verified-backup");
+    expect(readme).not.toContain("REPLACE_WITH_REVIEWED_40_HEX_SHA");
+    expect(deploy).toContain(
+      'node "$CREDENTIAL_ADOPTION_SCRIPT" authorize "$ENV_FILE" "$1"',
+    );
   });
 });
