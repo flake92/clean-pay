@@ -462,6 +462,7 @@ describe("Chatwoot widget context lifecycle", () => {
     expect(window.cleanPayChatwootAuthorized).toBe(true);
 
     await act(async () => {
+      api.hasLoaded = true;
       window.dispatchEvent(new CustomEvent("chatwoot:ready"));
       await Promise.resolve();
     });
@@ -702,6 +703,93 @@ describe("Chatwoot widget context lifecycle", () => {
       });
     });
     expect(document.getElementById("clean-pay-chatwoot-sdk")).toBeNull();
+  });
+
+  it.each([
+    ["base URL", { baseUrl: "https://stale-chat.example.com" }],
+    ["website token", { websiteToken: "stale_website_token_123456789" }],
+  ])(
+    "never identifies through a runtime with a mismatched %s",
+    async (_label, runtimeOverride) => {
+      let resolveContext: ((value: typeof context) => void) | undefined;
+      mocks.loadContext.mockReturnValue(new Promise((resolve) => {
+        resolveContext = resolve;
+      }));
+      const api = Object.assign(chatwootApi(), runtimeOverride);
+      window.$chatwoot = api;
+
+      render(createElement(ChatwootWidget, { config }));
+      await flushWidgetEffects();
+
+      expect(api.setUser).not.toHaveBeenCalled();
+      expect(window.cleanPayChatwootFailedIdentity).toEqual({
+        core: expect.any(String),
+        customAttributes: expect.any(String),
+      });
+
+      await act(async () => {
+        resolveContext?.(context);
+        await Promise.resolve();
+        window.dispatchEvent(new CustomEvent("chatwoot:ready"));
+        await Promise.resolve();
+      });
+
+      expect(api.setUser).not.toHaveBeenCalled();
+    },
+  );
+
+  it("restarts a matching stalled runtime once and continues after it becomes ready", async () => {
+    vi.useFakeTimers();
+    const api = chatwootApi();
+    api.hasLoaded = false;
+    window.$chatwoot = api;
+
+    render(createElement(ChatwootWidget, { config }));
+    await flushWidgetEffects();
+    expect(api.setUser).not.toHaveBeenCalled();
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(CHATWOOT_IDENTITY_ATTEMPT_TIMEOUT_MS);
+    });
+    expect(api.reset).toHaveBeenCalledOnce();
+    expect(window.cleanPayChatwootAuthorized).toBe(true);
+
+    api.hasLoaded = true;
+    await act(async () => {
+      window.dispatchEvent(new CustomEvent("chatwoot:ready"));
+      await Promise.resolve();
+    });
+    expect(api.setUser).toHaveBeenCalledOnce();
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(CHATWOOT_IDENTITY_ATTEMPT_TIMEOUT_MS * 2);
+    });
+    expect(api.reset).toHaveBeenCalledOnce();
+    expect(window.cleanPayChatwootFailedIdentity).toBeUndefined();
+  });
+
+  it("fails closed after one bounded restart of a runtime that never becomes ready", async () => {
+    vi.useFakeTimers();
+    const api = chatwootApi();
+    api.hasLoaded = false;
+    window.$chatwoot = api;
+
+    render(createElement(ChatwootWidget, { config }));
+    await flushWidgetEffects();
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(CHATWOOT_IDENTITY_ATTEMPT_TIMEOUT_MS);
+    });
+    expect(api.reset).toHaveBeenCalledOnce();
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(CHATWOOT_IDENTITY_ATTEMPT_TIMEOUT_MS);
+    });
+    expect(api.reset).toHaveBeenCalledOnce();
+    expect(window.cleanPayChatwootFailedIdentity).toEqual({
+      core: expect.any(String),
+      customAttributes: expect.any(String),
+    });
+    expect(api.toggleBubbleVisibility).toHaveBeenLastCalledWith("hide");
   });
 
   it("cancels the component timer on unmount without launching a background retry", async () => {

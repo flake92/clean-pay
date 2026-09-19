@@ -44,6 +44,9 @@ import {
 } from "@/frontend/lib/chatwoot";
 import { navigateTo } from "@/frontend/lib/browser-navigation";
 
+const CHATWOOT_RUNTIME_READY_TIMEOUT_MS = 12_000;
+const CHATWOOT_RUNTIME_MAX_RESTARTS = 1;
+
 function loadProductionSupportContext(config: ChatwootWidgetConfig) {
   return loadChatwootSupportContextCached(
     config.user.identifier,
@@ -60,6 +63,8 @@ export function useChatwootWidgetController(
   useEffect(() => {
     let active = true;
     let supportContext: ChatwootSupportContext | null = null;
+    let runtimeReadyTimer: ReturnType<typeof setTimeout> | null = null;
+    let runtimeRestartCount = 0;
     let identityAttemptTimer: ReturnType<typeof setTimeout> | null = null;
     let identityProbeTimer: ReturnType<typeof setTimeout> | null = null;
     const identityProbesInFlight = new Set<string>();
@@ -80,6 +85,12 @@ export function useChatwootWidgetController(
       if (identityAttemptTimer !== null) {
         clearTimeout(identityAttemptTimer);
         identityAttemptTimer = null;
+      }
+    };
+    const cancelRuntimeReadyTimer = () => {
+      if (runtimeReadyTimer !== null) {
+        clearTimeout(runtimeReadyTimer);
+        runtimeReadyTimer = null;
       }
     };
     const cancelIdentityProbeTimer = () => {
@@ -203,6 +214,7 @@ export function useChatwootWidgetController(
 
           if (result === "refresh_required") {
             sessionRefreshRequested = true;
+            cancelRuntimeReadyTimer();
             cancelIdentityAttemptTimer();
             cancelIdentityProbeTimer();
             identityProbeCounts.delete(attemptId);
@@ -263,6 +275,16 @@ export function useChatwootWidgetController(
     };
     const identify = (applyLabels = true) => {
       if (active && !sessionRefreshRequested) {
+        const runtime = window.$chatwoot;
+        if (
+          !runtime
+          || runtime.baseUrl !== config.baseUrl
+          || runtime.websiteToken !== config.websiteToken
+          || !runtime.hasLoaded
+        ) {
+          return "unavailable";
+        }
+
         try {
           const status = identifyChatwootUser(
             config,
@@ -325,6 +347,7 @@ export function useChatwootWidgetController(
         return;
       }
 
+      cancelRuntimeReadyTimer();
       cancelIdentityAttemptTimer();
       cancelIdentityProbeTimer();
       if (attemptId) {
@@ -340,6 +363,92 @@ export function useChatwootWidgetController(
         identityProbeCounts.delete(attemptId);
       }
       hideLauncher();
+    };
+    const runtimeMatchesConfiguration = () => (
+      window.$chatwoot?.baseUrl === config.baseUrl
+      && window.$chatwoot.websiteToken === config.websiteToken
+    );
+    const runtimeIsReady = () => (
+      runtimeMatchesConfiguration() && window.$chatwoot?.hasLoaded === true
+    );
+    const runtimeFailed = () => {
+      cancelRuntimeReadyTimer();
+      failChatwootIdentity(config, supportContext?.customAttributes);
+      hideLauncher();
+    };
+    const scheduleRuntimeReadyTimeout = () => {
+      cancelRuntimeReadyTimer();
+      runtimeReadyTimer = setTimeout(() => {
+        runtimeReadyTimer = null;
+
+        if (!active || sessionRefreshRequested) {
+          return;
+        }
+        if (runtimeIsReady()) {
+          runtimeRestartCount = 0;
+          identifyWithCurrentContext();
+          return;
+        }
+        if (window.$chatwoot && !runtimeMatchesConfiguration()) {
+          runtimeFailed();
+          return;
+        }
+        if (runtimeRestartCount >= CHATWOOT_RUNTIME_MAX_RESTARTS) {
+          runtimeFailed();
+          return;
+        }
+
+        runtimeRestartCount += 1;
+        resetChatwootSession();
+        enterChatwootAuthenticatedMode();
+        try {
+          if (!window.$chatwoot) {
+            window.chatwootSDK?.run({
+              baseUrl: config.baseUrl,
+              websiteToken: config.websiteToken,
+            });
+          }
+        } catch {
+          runtimeFailed();
+          return;
+        }
+        scheduleRuntimeReadyTimeout();
+      }, CHATWOOT_RUNTIME_READY_TIMEOUT_MS);
+    };
+    const startRuntime = () => {
+      if (!active || !window.cleanPayChatwootAuthorized) {
+        return;
+      }
+
+      if (!window.$chatwoot) {
+        try {
+          window.chatwootSDK?.run({
+            baseUrl: config.baseUrl,
+            websiteToken: config.websiteToken,
+          });
+        } catch {
+          runtimeFailed();
+          return;
+        }
+        scheduleRuntimeReadyTimeout();
+        return;
+      }
+
+      if (!runtimeMatchesConfiguration()) {
+        // A running SDK cannot switch inboxes safely without reloading the
+        // document. Hide a stale deployment instead of mixing conversations.
+        enterChatwootGuestMode();
+        failChatwootIdentity(config, supportContext?.customAttributes);
+        return;
+      }
+
+      if (runtimeIsReady()) {
+        cancelRuntimeReadyTimer();
+        runtimeRestartCount = 0;
+        identifyWithCurrentContext();
+      } else {
+        scheduleRuntimeReadyTimeout();
+      }
     };
     const identityTransportFailed = () => {
       if (!active || sessionRefreshRequested) {
@@ -419,9 +528,27 @@ export function useChatwootWidgetController(
         });
       }
     };
+    const chatwootReady = () => {
+      queueMicrotask(() => {
+        if (!active) {
+          return;
+        }
+        if (!runtimeMatchesConfiguration()) {
+          runtimeFailed();
+          return;
+        }
+        if (!runtimeIsReady()) {
+          return;
+        }
+
+        cancelRuntimeReadyTimer();
+        runtimeRestartCount = 0;
+        identifyWithCurrentContext();
+      });
+    };
 
     window.addEventListener("message", chatwootMessage, { capture: true });
-    window.addEventListener("chatwoot:ready", identifyWithCurrentContext);
+    window.addEventListener("chatwoot:ready", chatwootReady);
     window.addEventListener("chatwoot:error", identityTransportFailed);
     window.addEventListener("chatwoot:opened", identifyAndRefresh);
     window.addEventListener("chatwoot:closed", hideLauncher);
@@ -433,47 +560,21 @@ export function useChatwootWidgetController(
 
     refreshSupportContext();
 
-    void loadChatwootSdk(config.baseUrl).then(() => {
-      if (!active || !window.cleanPayChatwootAuthorized) {
-        return;
-      }
-
-      if (!window.$chatwoot) {
-        window.chatwootSDK?.run({
-          baseUrl: config.baseUrl,
-          websiteToken: config.websiteToken,
-        });
-        return;
-      }
-
-      if (
-        window.$chatwoot.baseUrl !== config.baseUrl ||
-        window.$chatwoot.websiteToken !== config.websiteToken
-      ) {
-        // A running SDK cannot switch inboxes safely without reloading the
-        // document. Hide a stale deployment instead of mixing conversations.
-        enterChatwootGuestMode();
-        failChatwootIdentity(config, supportContext?.customAttributes);
-        return;
-      }
-
-      if (window.$chatwoot.hasLoaded) {
-        identifyWithCurrentContext();
-      }
-    }).catch(() => {
+    void loadChatwootSdk(config.baseUrl).then(startRuntime).catch(() => {
       if (active) {
-        failChatwootIdentity(config, supportContext?.customAttributes);
+        runtimeFailed();
       }
     });
 
     return () => {
       active = false;
+      cancelRuntimeReadyTimer();
       cancelIdentityAttemptTimer();
       cancelIdentityProbeTimer();
       identityProbesInFlight.clear();
       identityProbeCounts.clear();
       window.removeEventListener("message", chatwootMessage, { capture: true });
-      window.removeEventListener("chatwoot:ready", identifyWithCurrentContext);
+      window.removeEventListener("chatwoot:ready", chatwootReady);
       window.removeEventListener("chatwoot:error", identityTransportFailed);
       window.removeEventListener("chatwoot:opened", identifyAndRefresh);
       window.removeEventListener("chatwoot:closed", hideLauncher);
