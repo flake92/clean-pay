@@ -159,6 +159,165 @@ describe("Chatwoot widget context lifecycle", () => {
     expect(api.toggle).toHaveBeenCalledWith("open");
   });
 
+  it("opens a queued support action after a cold SDK start and server-confirmed identity", async () => {
+    vi.useFakeTimers();
+    mocks.loadContext.mockResolvedValue(null);
+    mocks.verifyIdentity.mockResolvedValue("confirmed");
+    delete window.$chatwoot;
+
+    const api = chatwootApi();
+    api.hasLoaded = false;
+    api.setUser.mockImplementation(() => {
+      document.cookie = `cw_user_${config.websiteToken}=identified; Path=/`;
+    });
+    const run = vi.fn(() => {
+      window.$chatwoot = api;
+    });
+    window.chatwootSDK = { run };
+
+    expect(document.cookie).not.toContain("cw_conversation=");
+    expect(document.cookie).not.toContain(`cw_user_${config.websiteToken}=`);
+
+    render(createElement(
+      SupportChatSessionBoundary,
+      { authenticated: true, chatwootConfig: config },
+      createElement(SupportPanel, {
+        support: {
+          enabled: false,
+          email: null,
+          faqUrl: null,
+          liveChatEnabled: true,
+          telegramUsername: null,
+        },
+      }),
+      createElement(ChatwootWidget, { config }),
+    ));
+    await flushWidgetEffects();
+
+    expect(run).toHaveBeenCalledWith({
+      baseUrl: config.baseUrl,
+      websiteToken: config.websiteToken,
+    });
+    expect(window.$chatwoot).toBe(api);
+    expect(api.hasLoaded).toBe(false);
+    expect(api.setUser).not.toHaveBeenCalled();
+
+    const connectingButton = screen.getByRole("button", {
+      name: /Подключаем чат поддержки/i,
+    });
+    fireEvent.click(connectingButton);
+    expect(screen.getByRole("button", {
+      name: /Чат откроется после подключения/i,
+    })).toBeTruthy();
+    expect(api.toggle).not.toHaveBeenCalledWith("open");
+
+    const frame = document.getElementById(
+      "chatwoot_live_chat_widget",
+    ) as HTMLIFrameElement;
+    act(() => {
+      // The real SDK establishes its conversation cookie during the iframe
+      // loaded handshake, before setUser() creates the identity cookie.
+      document.cookie = "cw_conversation=authenticated; Path=/";
+      window.dispatchEvent(new MessageEvent("message", {
+        origin: config.baseUrl,
+        source: frame.contentWindow,
+        data: 'chatwoot-widget:{"event":"loaded"}',
+      }));
+      api.hasLoaded = true;
+      window.dispatchEvent(new CustomEvent("chatwoot:ready"));
+    });
+    await flushWidgetEffects();
+
+    expect(api.setUser).toHaveBeenCalledOnce();
+    expect(document.cookie).toContain(`cw_user_${config.websiteToken}=identified`);
+    expect(document.cookie).toContain("cw_conversation=authenticated");
+    expect(mocks.verifyIdentity).not.toHaveBeenCalled();
+    expect(api.toggle).not.toHaveBeenCalledWith("open");
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(750);
+    });
+
+    expect(mocks.verifyIdentity).toHaveBeenCalledOnce();
+    expect(mocks.verifyIdentity).toHaveBeenCalledWith(config.user.identifier);
+    expect(screen.getByRole("button", {
+      name: /Открыть чат поддержки/i,
+    }).getAttribute("data-state")).toBe("ready");
+    expect(api.toggle).toHaveBeenCalledTimes(1);
+    expect(api.toggle).toHaveBeenCalledWith("open");
+  });
+
+  it("keeps a queued cold-start support action closed when identity is rejected", async () => {
+    vi.useFakeTimers();
+    mocks.loadContext.mockResolvedValue(null);
+    mocks.verifyIdentity.mockResolvedValue("rejected");
+    delete window.$chatwoot;
+
+    const api = chatwootApi();
+    api.hasLoaded = false;
+    api.setUser.mockImplementation(() => {
+      document.cookie = `cw_user_${config.websiteToken}=identified; Path=/`;
+    });
+    window.chatwootSDK = {
+      run: vi.fn(() => {
+        window.$chatwoot = api;
+      }),
+    };
+
+    expect(document.cookie).not.toContain("cw_conversation=");
+    expect(document.cookie).not.toContain(`cw_user_${config.websiteToken}=`);
+
+    render(createElement(
+      SupportChatSessionBoundary,
+      { authenticated: true, chatwootConfig: config },
+      createElement(SupportPanel, {
+        support: {
+          enabled: false,
+          email: null,
+          faqUrl: null,
+          liveChatEnabled: true,
+          telegramUsername: null,
+        },
+      }),
+      createElement(ChatwootWidget, { config }),
+    ));
+    await flushWidgetEffects();
+
+    fireEvent.click(screen.getByRole("button", {
+      name: /Подключаем чат поддержки/i,
+    }));
+
+    const frame = document.getElementById(
+      "chatwoot_live_chat_widget",
+    ) as HTMLIFrameElement;
+    act(() => {
+      document.cookie = "cw_conversation=authenticated; Path=/";
+      window.dispatchEvent(new MessageEvent("message", {
+        origin: config.baseUrl,
+        source: frame.contentWindow,
+        data: 'chatwoot-widget:{"event":"loaded"}',
+      }));
+      api.hasLoaded = true;
+      window.dispatchEvent(new CustomEvent("chatwoot:ready"));
+    });
+    await flushWidgetEffects();
+
+    expect(api.setUser).toHaveBeenCalledOnce();
+    expect(document.cookie).toContain(`cw_user_${config.websiteToken}=identified`);
+    expect(document.cookie).toContain("cw_conversation=authenticated");
+    expect(api.toggle).not.toHaveBeenCalledWith("open");
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(750);
+    });
+
+    expect(mocks.verifyIdentity).toHaveBeenCalledOnce();
+    expect(mocks.verifyIdentity).toHaveBeenCalledWith(config.user.identifier);
+    expect(screen.getByText(/Чат временно недоступен/i)).toBeTruthy();
+    expect(api.toggle).not.toHaveBeenCalledWith("open");
+    expect(document.cookie).not.toContain(`cw_user_${config.websiteToken}=`);
+  });
+
   it("keeps the official launcher hidden after verified identity setup", async () => {
     vi.useFakeTimers();
     mocks.loadContext.mockResolvedValue(null);

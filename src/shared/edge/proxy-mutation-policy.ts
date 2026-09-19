@@ -16,6 +16,17 @@ export type BrowserMutationPolicyResult =
       status: 413;
     };
 
+// These two HTTPS origins are public entry points for the same Clean Pay
+// deployment. Keep this trust relationship explicit: the Next.js standalone
+// adapter exposes an internal container origin to middleware, while Host and
+// forwarding headers are ingress metadata and must not expand the CSRF trust
+// boundary. Installations with any other configured origin remain exact-match
+// only.
+const cleanPayPublicOrigins = new Set([
+  "https://cleanvpn.edge-connect.uk",
+  "https://oplata.clear-vpn.org",
+]);
+
 function parseOrigin(value: string | null | undefined) {
   if (!value || value === "null") {
     return null;
@@ -34,6 +45,18 @@ function parseOrigin(value: string | null | undefined) {
   }
 }
 
+function isTrustedRequestOrigin(
+  requestOrigin: string,
+  configuredOrigin: string,
+) {
+  if (requestOrigin === configuredOrigin) {
+    return true;
+  }
+
+  return cleanPayPublicOrigins.has(configuredOrigin)
+    && cleanPayPublicOrigins.has(requestOrigin);
+}
+
 export function validateRequestSource({
   headers,
   trustedAppUrl,
@@ -47,7 +70,11 @@ export function validateRequestSource({
     ? parseOrigin(headers.get("referer"))
     : parseOrigin(originHeader);
 
-  if (!trustedOrigin || requestOrigin !== trustedOrigin) {
+  if (
+    !trustedOrigin
+    || !requestOrigin
+    || !isTrustedRequestOrigin(requestOrigin, trustedOrigin)
+  ) {
     return { ok: false, reason: "untrusted_origin", status: 403 };
   }
 
