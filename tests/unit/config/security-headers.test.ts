@@ -10,6 +10,14 @@ describe("application security headers", () => {
     expect(nextConfig.poweredByHeader).toBe(false);
   });
 
+  it("keeps Next's Server Action origin gate aligned with the exact public aliases", () => {
+    expect(nextConfig.experimental?.serverActions?.allowedOrigins).toEqual([
+      "localhost:8080",
+      "cleanvpn.edge-connect.uk",
+      "oplata.clear-vpn.org",
+    ]);
+  });
+
   it("keeps transport security headers on every response", async () => {
     const rules = await nextConfig.headers?.();
     const headers = Object.fromEntries(
@@ -65,6 +73,9 @@ describe("application security headers", () => {
     expect(liveBoundary).toContain("BODY_LIMIT = 64 * 1_024");
     expect(liveBoundary).toContain("PAYLOAD_TOO_LARGE");
     expect(liveBoundary).toContain("FORBIDDEN");
+    expect(liveBoundary).toContain('response.status !== 404');
+    expect(liveBoundary).toContain('x-nextjs-action-not-found');
+    expect(liveBoundary).toContain("Server action not found.");
     expect(liveBoundary).toContain("application/x-www-form-urlencoded");
     expect(liveBoundary).toContain("multipart/form-data");
     expect(liveBoundary).toContain('"x-forwarded-host"');
