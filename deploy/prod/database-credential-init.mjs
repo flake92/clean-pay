@@ -113,16 +113,30 @@ export function initializeDatabaseCredentials(path, options = {}) {
     const password = decoded(url.password);
     if (
       !/^[A-Za-z_][A-Za-z0-9_]{0,62}$/.test(role)
-      || role === bootstrapRole
       || placeholder(password)
       || /[^\x20-\x7e]/.test(password)
     ) {
       throw new Error(`${name} contains an invalid non-placeholder role credential`);
     }
+    if (role === bootstrapRole) {
+      if (name !== "DATABASE_URL" || password !== environment.POSTGRES_PASSWORD) {
+        throw new Error(
+          `${name} reuses POSTGRES_USER without the exact legacy bootstrap credential`,
+        );
+      }
+      return {
+        name,
+        password,
+        role,
+        state: "legacy-bootstrap",
+        suffix,
+        url,
+      };
+    }
     return { name, password, role, state: "configured", suffix, url };
   });
   const configuredTargets = roleStates
-    .filter(({ state }) => state === "configured")
+    .filter(({ state }) => ["configured", "legacy-bootstrap"].includes(state))
     .map(({ url }) => JSON.stringify({
       host: url.hostname.toLowerCase(),
       port: url.port || "5432",
@@ -134,6 +148,7 @@ export function initializeDatabaseCredentials(path, options = {}) {
     throw new Error("configured role URLs must target the same database endpoint");
   }
   const baseUrl = roleStates.find(({ state }) => state === "configured")?.url
+    ?? roleStates.find(({ state }) => state === "legacy-bootstrap")?.url
     ?? roleStates.find(({ state }) => state === "placeholder")?.url
     ?? new URL(
       `postgresql://placeholder:placeholder@postgres:5432/${encodeURIComponent(database)}?schema=public`,

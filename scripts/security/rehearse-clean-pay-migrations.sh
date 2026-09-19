@@ -41,8 +41,11 @@ readonly PAYMENT_RECORD_REVISION="20260624213935_add_auth_pending"
 readonly PAYMENT_OPERATION_REVISION="20260717223000_add_payment_idempotency"
 readonly PAYMENT_RECONCILIATION_REVISION="20260718000000_add_payment_reconciliation"
 readonly REFRESH_ROTATION_REVISION="20260720233000_add_refresh_token_rotation"
+readonly V011_REVISION="20260810013000_preserve_account_merge_target_telegram"
+readonly V011_MIGRATION_COUNT=16
 readonly OWNER_FENCE_REVISION="20260813090000_add_payment_owner_change_fence"
 readonly REFRESH_RECOVERY_REVISION="20260813091000_add_remnashop_refresh_recovery"
+readonly V020_MIGRATION_COUNT=22
 CLEAN_PAY_HEAD="$(find "$ROOT_DIR/prisma/migrations" -mindepth 1 -maxdepth 1 -type d -printf '%f\n' | LC_ALL=C sort | tail -n 1)"
 readonly CLEAN_PAY_HEAD
 encrypted_fixture_file=""
@@ -302,6 +305,8 @@ test "$(revision "$EMPTY_DATABASE_NAME")" = "$CLEAN_PAY_HEAD" ||
 grep -q "event=production_environment_validated" "$REHEARSAL_OUTPUT_DIR/clean-pay-empty-migration-image.log" ||
   fail "exact migration image did not run its production environment guard"
 expected_migration_count=$(find "$ROOT_DIR/prisma/migrations" -mindepth 1 -maxdepth 1 -type d | wc -l | tr -d '[:space:]')
+test "$expected_migration_count" = "$V020_MIGRATION_COUNT" ||
+  fail "v0.2.0 migration plan must contain exactly $V020_MIGRATION_COUNT migrations"
 test "$(query_database "$EMPTY_DATABASE_NAME" 'SELECT count(*) FROM "_prisma_migrations" WHERE finished_at IS NOT NULL AND rolled_back_at IS NULL;')" = "$expected_migration_count" ||
   fail "empty database did not record every Prisma migration"
 
@@ -466,6 +471,12 @@ query \
   "INSERT INTO \"WebRefreshToken\" (id, \"sessionId\", \"tokenHash\", \"successorTokenEncrypted\", \"graceExpiresAt\", \"consumedAt\", \"createdAt\") VALUES ('fixture-refresh-token', 'fixture-session', repeat('6', 64), '$encrypted_successor', '2035-03-01T00:00:00Z', '2026-02-04T00:00:00Z', '2026-02-04T00:00:00Z');" \
   >/dev/null
 
+apply_through "$V011_REVISION" \
+  >"$REHEARSAL_OUTPUT_DIR/clean-pay-forward-to-v0.1.1.log" 2>&1
+test "$(revision)" = "$V011_REVISION" || fail "Clean Pay chain did not reach the v0.1.1 boundary"
+test "$(query 'SELECT count(*) FROM "_prisma_migrations" WHERE finished_at IS NOT NULL AND rolled_back_at IS NULL;')" = "$V011_MIGRATION_COUNT" ||
+  fail "v0.1.1 boundary must contain exactly $V011_MIGRATION_COUNT applied migrations"
+
 apply_through "$OWNER_FENCE_REVISION" \
   >"$REHEARSAL_OUTPUT_DIR/clean-pay-forward-to-owner-fence.log" 2>&1
 query \
@@ -483,6 +494,8 @@ pre_head_encrypted_state=$(encrypted_session_state)
 apply_through "$CLEAN_PAY_HEAD" \
   >"$REHEARSAL_OUTPUT_DIR/clean-pay-forward-to-head.log" 2>&1
 test "$(revision)" = "$CLEAN_PAY_HEAD" || fail "Clean Pay chain did not reach head"
+test "$(query 'SELECT count(*) FROM "_prisma_migrations" WHERE finished_at IS NOT NULL AND rolled_back_at IS NULL;')" = "$V020_MIGRATION_COUNT" ||
+  fail "v0.2.0 head must contain exactly $V020_MIGRATION_COUNT applied migrations"
 test "$(encrypted_session_state)" = "$pre_head_encrypted_state" ||
   fail "encrypted session/successor/recovery bundle changed before head"
 test "$(query "SELECT count(*) FROM \"PaymentOperation\" WHERE id = 'fixture-payment-operation' AND \"userId\" = 'fixture-user' AND \"upstreamOwnerHash\" = repeat('4', 64);")" = "1" ||
@@ -517,8 +530,9 @@ test "$(query_database "$RESTORE_DATABASE_NAME" "SELECT concat_ws('|', \"accessT
   fail "restored session expiry was not preserved through the exact migration image"
 
 fixture_hash=${pre_head_encrypted_state#*|}
-printf '{\n  "schemaVersion": 2,\n  "cleanPayRevision": "%s",\n  "migrationImage": "exact Dockerfile migration target",\n  "migrationHead": "%s",\n  "emptyDatabaseRevision": "%s",\n  "fixtureUsers": 1,\n  "fixtureSessions": 1,\n  "fixtureRefreshSuccessors": 1,\n  "fixturePaymentRecords": 1,\n  "fixturePaymentOperations": 1,\n  "encryptedFixtureHash": "%s",\n  "sessionRowLockFailureRevision": "%s",\n  "sessionRowLockTimeoutMilliseconds": %s,\n  "invalidTelegramFailureRevision": "%s",\n  "restoreSourceRevision": "%s",\n  "restoreTargetRevision": "%s",\n  "resumeRevision": "%s",\n  "noOpRevision": "%s",\n  "migrationStatus": "up-to-date"\n}\n' \
-  "$CLEAN_PAY_REVISION" "$CLEAN_PAY_HEAD" "$CLEAN_PAY_HEAD" "$fixture_hash" "$INITIAL_REVISION" \
+printf '{\n  "schemaVersion": 2,\n  "cleanPayRevision": "%s",\n  "migrationImage": "exact Dockerfile migration target",\n  "migrationHead": "%s",\n  "emptyDatabaseRevision": "%s",\n  "v011Revision": "%s",\n  "v011MigrationCount": %s,\n  "v020MigrationCount": %s,\n  "fixtureUsers": 1,\n  "fixtureSessions": 1,\n  "fixtureRefreshSuccessors": 1,\n  "fixturePaymentRecords": 1,\n  "fixturePaymentOperations": 1,\n  "encryptedFixtureHash": "%s",\n  "sessionRowLockFailureRevision": "%s",\n  "sessionRowLockTimeoutMilliseconds": %s,\n  "invalidTelegramFailureRevision": "%s",\n  "restoreSourceRevision": "%s",\n  "restoreTargetRevision": "%s",\n  "resumeRevision": "%s",\n  "noOpRevision": "%s",\n  "migrationStatus": "up-to-date"\n}\n' \
+  "$CLEAN_PAY_REVISION" "$CLEAN_PAY_HEAD" "$CLEAN_PAY_HEAD" "$V011_REVISION" \
+  "$V011_MIGRATION_COUNT" "$V020_MIGRATION_COUNT" "$fixture_hash" "$INITIAL_REVISION" \
   "$session_lock_elapsed_ms" "$SESSION_REWRITE_REVISION" "$INITIAL_REVISION" "$CLEAN_PAY_HEAD" \
   "$CLEAN_PAY_HEAD" "$CLEAN_PAY_HEAD" \
   >"$REHEARSAL_OUTPUT_DIR/clean-pay-report.json"

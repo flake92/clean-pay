@@ -164,6 +164,7 @@ describe("production migration safety", () => {
     expect(cleanPayRehearsal).toContain("20260619161000_add_remnashop_session_tokens");
     expect(cleanPayRehearsal).toContain("20260717223000_add_payment_idempotency");
     expect(cleanPayRehearsal).toContain("20260718000000_add_payment_reconciliation");
+    expect(cleanPayRehearsal).toContain("20260810013000_preserve_account_merge_target_telegram");
     expect(cleanPayRehearsal).toContain("20260813090000_add_payment_owner_change_fence");
     expect(cleanPayRehearsal).toContain("20260813091000_add_remnashop_refresh_recovery");
     expect(cleanPayRehearsal).toContain("docker build --pull --target migration");
@@ -228,6 +229,10 @@ describe("production migration safety", () => {
     expect(cleanPayRehearsal).toContain("populated payment operation did not receive its reconciliation backfill");
     expect(cleanPayRehearsal).toContain("owner-fencing fixture changed before head");
     expect(cleanPayRehearsal).toContain('apply_through "$CLEAN_PAY_HEAD"');
+    expect(cleanPayRehearsal).toContain('apply_through "$V011_REVISION"');
+    expect(cleanPayRehearsal).toContain("V011_MIGRATION_COUNT=16");
+    expect(cleanPayRehearsal).toContain("V020_MIGRATION_COUNT=22");
+    expect(cleanPayRehearsal).toContain("clean-pay-forward-to-v0.1.1.log");
     expect(cleanPayRehearsal).toContain('run_exact_migration_image "$EMPTY_DATABASE_NAME"');
     expect(cleanPayRehearsal).toContain('run_exact_migration_image "$DATABASE_NAME"');
     expect(cleanPayRehearsal).toContain('run_exact_migration_image "$RESTORE_DATABASE_NAME"');

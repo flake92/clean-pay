@@ -77,7 +77,18 @@ and verify a backup, set both `CLEAN_PAY_DATABASE_ADOPT_EXISTING=true` and
 install. Ownership reconciliation keeps the exact database owned by bootstrap
 and is limited otherwise to the target schema and inventoried manifest objects;
 an adopted pre-state accepts only bootstrap or migration ownership. Reset both
-flags to `false` immediately after `sync` and `verify` pass.
+flags to `false` immediately after `sync` and `verify` pass. `deploy.sh` now
+performs that reset atomically before any application runtime starts and
+regenerates the provision environment from the cleared authoritative file.
+
+Release `0.1.1` is an explicitly reviewed pre-contract source: its exact final
+ledger entry is `20260810013000_preserve_account_merge_target_telegram` (16
+successful migrations). `database-credential-init.mjs` accepts only its exact
+single-role shape where `DATABASE_URL` uses `POSTGRES_USER` with the identical
+`POSTGRES_PASSWORD`; it preserves that bootstrap identity and generates four
+distinct least-privilege role URLs. A reused bootstrap role with any different
+password, database, configured endpoint, or query contract fails before the env
+file is replaced. The target `0.2.0` ledger has 22 successful migrations.
 
 The standalone zero-downtime canary and its migration-status assertion use the
 same read-only root, dropped capabilities, no-new-privileges, PID/memory/CPU
