@@ -321,6 +321,32 @@ prepare_v011_upgrade() {
   printf '%s\n' 'Payment-data retention remains disabled until the operator explicitly enables it.'
 }
 
+authorize_existing_database() {
+  [ "$#" -eq 1 ] && [ "$1" = "--confirm-verified-backup" ] \
+    || die 'Usage: ./deploy.sh authorize-existing-database --confirm-verified-backup'
+  require_env
+
+  if command -v node >/dev/null 2>&1; then
+    node "$CREDENTIAL_ADOPTION_SCRIPT" authorize "$ENV_FILE" "$1"
+    return
+  fi
+
+  need_docker
+  docker run --rm --read-only --network none \
+    --cap-drop ALL \
+    --security-opt no-new-privileges \
+    --pids-limit 64 \
+    --memory 256m \
+    --cpus 0.5 \
+    --tmpfs /tmp:rw,noexec,nosuid,nodev,size=16m,mode=1777 \
+    --user "$(id -u):$(id -g)" \
+    --mount "type=bind,source=$ROOT_DIR,target=/workspace" \
+    --workdir /workspace \
+    "$NODE_TOOLING_IMAGE" \
+    node deploy/prod/database-adoption-state.mjs authorize \
+      deploy/prod/.env "$1"
+}
+
 clear_database_adoption_authorization() {
   if command -v node >/dev/null 2>&1; then
     node "$CREDENTIAL_ADOPTION_SCRIPT" clear "$ENV_FILE" || return 1
@@ -442,6 +468,7 @@ configure() {
   esac
   prompt_value REMNASHOP_ADMIN_API_BASE_URL 'Admin API Remnashop (должен оканчиваться /api/v1/admin)' "$admin_default"
   prompt_secret REMNASHOP_API_KEY 'APP_API_KEY из Remnashop'
+  prompt_value REMNASHOP_ENV_FILE 'Абсолютный путь к .env Remnashop на Docker-хосте' '/opt/remnashop/.env'
 
   auth_service_key=$(env_value REMNASHOP_AUTH_SERVICE_KEY)
   case "$auth_service_key" in
@@ -470,6 +497,7 @@ configure() {
   else
     replace_env PAYMENT_RECONCILIATION_ENABLED false
   fi
+  prompt_value PAYMENT_REDIRECT_ORIGINS 'HTTPS origins платёжных шлюзов (через запятую, без пути)' 'https://yoomoney.ru,https://pay.platega.io'
 
   assert_private_env_file
   ok "конфигурация сохранена в $ENV_FILE"
@@ -1045,6 +1073,17 @@ setup() {
   printf '\nClean Pay — простой мастер установки\n'
   printf 'Три этапа: конфигурация .env → подготовка Compose → установка.\n'
   configure
+  required_remnashop_revision=$(env_value REMNASHOP_MINIMUM_ALEMBIC_REVISION 0058)
+  printf '\nПеред продолжением скопируйте REMNASHOP_AUTH_SERVICE_KEY в APP_AUTH_SERVICE_KEY Remnashop.\n'
+  printf 'API, worker и scheduler Remnashop должны быть перезапущены из одного image; Alembic revision — не ниже %s.\n' "$required_remnashop_revision"
+  if ! confirm 'Ключ синхронизирован и все три сервиса Remnashop перезапущены?' no; then
+    printf 'Настройки сохранены. После настройки Remnashop выполните: ./deploy.sh install\n'
+    return
+  fi
+  if ! confirm 'DNS и HTTPS reverse proxy уже направляют домен Clean Pay на этот сервер?' no; then
+    printf 'Настройки сохранены. После настройки HTTPS reverse proxy выполните: ./deploy.sh install\n'
+    return
+  fi
   prepare_compose
   printf '\nПроверьте настройки перед запуском:\n'
   printf '  Адрес:  %s\n' "$(env_value APP_URL)"
@@ -1069,6 +1108,8 @@ Usage: ./deploy.sh <command>
   init      создать deploy/prod/.env и сгенерировать внутренние секреты
   prepare-v0.1.1-upgrade SUBSCRIPTION_ORIGINS PAYMENT_ORIGINS
             безопасно подготовить существующий .env 0.1.1 к обновлению на 0.2.0
+  authorize-existing-database --confirm-verified-backup
+            атомарно разрешить одно принятие проверенной legacy-базы
   compose   проверить .env, Compose-файл и подготовить Docker-сеть
   build     подготовить и проверить образы без остановки runtime и миграции БД
   migrate   проверить migration image и применить миграции, оставив runtime остановленным
@@ -1089,7 +1130,7 @@ else
   command=${1:-help}
 fi
 case "$command" in
-  setup|configure|config|init|prepare-v0.1.1-upgrade|compose|check|build|migrate|resolve-rolled-back|install|up|restart|down)
+  setup|configure|config|init|prepare-v0.1.1-upgrade|authorize-existing-database|compose|check|build|migrate|resolve-rolled-back|install|up|restart|down)
     acquire_production_operation_lock "$command"
     ;;
 esac
@@ -1100,6 +1141,10 @@ case "$command" in
   prepare-v0.1.1-upgrade)
     shift
     prepare_v011_upgrade "$@"
+    ;;
+  authorize-existing-database)
+    shift
+    authorize_existing_database "$@"
     ;;
   compose|check) prepare_compose ;;
   build) build_images_only ;;

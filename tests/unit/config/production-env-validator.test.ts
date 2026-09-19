@@ -1082,8 +1082,10 @@ describe("production env validator", () => {
     );
   });
 
-  it("validates an exact public HTTPS override while preserving ZDT rollback compatibility", () => {
-    expect(runValidator({ PAYMENT_REDIRECT_ORIGINS: null }).status).toBe(0);
+  it("requires and validates exact public HTTPS payment origins", () => {
+    expect(runValidator({ PAYMENT_REDIRECT_ORIGINS: null }).stderr).toContain(
+      "PAYMENT_REDIRECT_ORIGINS is required",
+    );
     expect(runValidator({
       PAYMENT_REDIRECT_ORIGINS: "http://yoomoney.ru",
     }).stderr).toContain("PAYMENT_REDIRECT_ORIGINS[1] must be a valid https: URL");

@@ -72,14 +72,22 @@ by the ephemeral provisioner only while application and workers are stopped;
 an edited URL alone is not a rotation until that guarded path succeeds.
 
 For a populated volume created before this contract, stop every runtime, take
-and verify a backup, set both `CLEAN_PAY_DATABASE_ADOPT_EXISTING=true` and
-`CLEAN_PAY_DATABASE_ADOPTION_BACKUP_CONFIRMED=true`, and run the normal guarded
-install. Ownership reconciliation keeps the exact database owned by bootstrap
-and is limited otherwise to the target schema and inventoried manifest objects;
-an adopted pre-state accepts only bootstrap or migration ownership. Reset both
-flags to `false` immediately after `sync` and `verify` pass. `deploy.sh` now
-performs that reset atomically before any application runtime starts and
-regenerates the provision environment from the cleared authoritative file.
+and verify a backup, then atomically authorize its one-time adoption:
+
+```bash
+./deploy.sh authorize-existing-database --confirm-verified-backup
+```
+
+Do not edit the two adoption assignments separately. The command updates
+`CLEAN_PAY_DATABASE_ADOPT_EXISTING` and
+`CLEAN_PAY_DATABASE_ADOPTION_BACKUP_CONFIRMED` together and rejects a partial
+state or concurrent file edit. Run the normal guarded install after it.
+Ownership reconciliation keeps the exact database owned by bootstrap and is
+limited otherwise to the target schema and inventoried manifest objects; an
+adopted pre-state accepts only bootstrap or migration ownership. `deploy.sh`
+resets both flags atomically after `sync` and `verify` pass, before any
+application runtime starts, then regenerates the provision environment from
+the cleared authoritative file.
 
 Release `0.1.1` is an explicitly reviewed pre-contract source: its exact final
 ledger entry is `20260810013000_preserve_account_merge_target_telegram` (16
