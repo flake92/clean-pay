@@ -26,6 +26,8 @@ import {
   materializeProductionRoleEnvironmentFiles,
   productionRoleEnvironmentPaths,
 } from "./role-env.mjs";
+import { clearDatabaseAdoptionAuthorization } from "./database-adoption-state.mjs";
+import { assertV011UpgradePreparationNotRequired } from "./production-environment-upgrade.mjs";
 import {
   acquireProductionOperationLock,
   exitCodeAfterProductionOperationLockRelease,
@@ -41,6 +43,10 @@ const remnashopRolloutScript = path.join(prodDir, "prepare-remnashop-rollout.sh"
 const imagePreflightScript = path.join(prodDir, "image-preflight.sh");
 const buildProvenanceScript = path.join(prodDir, "build-provenance.sh");
 const operationLockPath = path.join(prodDir, ".production-operation.lock");
+const composeCapabilityScript = path.join(
+  prodDir,
+  "docker-compose-capability-preflight.sh",
+);
 const composeFiles = [
   path.join(prodDir, "docker-compose.yml"),
 ];
@@ -215,6 +221,22 @@ function runDocker(args, options = {}) {
   return result.status ?? 1;
 }
 
+function assertDockerComposeCapabilities() {
+  const result = spawnSync("sh", [composeCapabilityScript], {
+    cwd: rootDir,
+    env: process.env,
+    stdio: "inherit",
+    shell: false,
+  });
+  if (result.error || result.status !== 0) {
+    console.error(
+      result.error?.message
+        ?? "Docker or Docker Compose lacks a required production capability.",
+    );
+    process.exit(result.status ?? 1);
+  }
+}
+
 function prepareDeploymentImages() {
   const source = readEnvValue("CLEAN_PAY_DEPLOY_SOURCE", "build");
   const operation = source === "build" ? "build" : source === "pull" ? "pull" : null;
@@ -384,6 +406,20 @@ function runVerifiedMigration() {
       "run", "--rm", "--no-deps", "--pull", "never", "db-grant-sync",
     )) !== 0
   ) {
+    process.exit(1);
+  }
+}
+
+function clearDatabaseAdoptionAuthorizationAfterMigration() {
+  try {
+    clearDatabaseAdoptionAuthorization(envFile);
+    parsedEnvironment = null;
+    roleEnvironmentFiles = materializeProductionRoleEnvironmentFiles(envFile);
+  } catch (error) {
+    console.error(
+      "Could not clear one-time database adoption authorization; application runtimes remain stopped:",
+      error instanceof Error ? error.message : String(error),
+    );
     process.exit(1);
   }
 }
@@ -621,6 +657,7 @@ function requireEnvFile() {
 function validateProductionEnvFile() {
   try {
     readPrivateCredentialFile(envFile, "production environment file");
+    assertV011UpgradePreparationNotRequired(envFile);
   } catch (error) {
     console.error(error instanceof Error ? error.message : String(error));
     process.exit(1);
@@ -766,6 +803,9 @@ if (!supportedCommands.has(command)) {
 acquireOwnedProductionOperationLock(command);
 requireEnvFile();
 validateProductionEnvFile();
+if (command === "build" || command === "up") {
+  assertDockerComposeCapabilities();
+}
 if (observationalCommands.has(command) && !releaseOwnedProductionOperationLock()) {
   process.exit(1);
 }
@@ -785,6 +825,7 @@ switch (command) {
     prepareRuntimeDependencies();
     stopRuntimeServices();
     runVerifiedMigration();
+    clearDatabaseAdoptionAuthorizationAfterMigration();
     startVerifiedRuntimes();
     await verify();
     prepareRemnashopPaymentRollout("finalize");

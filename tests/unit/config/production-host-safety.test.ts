@@ -12,6 +12,10 @@ const deploy = readFileSync("deploy.sh", "utf8");
 const rootStart = readFileSync("start.sh", "utf8");
 const nodeDeploy = readFileSync("deploy/prod/prod.mjs", "utf8");
 const shellProbe = readFileSync("deploy/prod/redis-host-safety.sh", "utf8");
+const composeCapabilities = readFileSync(
+  "deploy/prod/docker-compose-capability-preflight.sh",
+  "utf8",
+);
 
 function posixShell() {
   const pathShell = spawnSync("sh", ["-c", ":"], {
@@ -74,6 +78,43 @@ function expectBefore(source: string, before: string, after: string, context: st
 }
 
 describe("production host safety", () => {
+  it("fails before mutation when Docker Compose lacks a used deployment option", () => {
+    for (const [subcommand, option] of [
+      ["up", "--wait-timeout"],
+      ["up", "--wait"],
+      ["up", "--pull"],
+      ["up", "--no-build"],
+      ["up", "--no-deps"],
+      ["run", "--pull"],
+      ["run", "--rm"],
+      ["run", "--no-deps"],
+      ["pull", "--policy"],
+      ["ps", "--all"],
+      ["ps", "--quiet"],
+      ["rm", "--force"],
+      ["rm", "--stop"],
+      ["config", "--quiet"],
+    ]) {
+      expect(composeCapabilities).toContain(`require_option ${subcommand} ${option}`);
+    }
+    expect(shellFunction(deploy, "need_deployment_compose_capabilities")).toContain(
+      'sh "$COMPOSE_CAPABILITY_SCRIPT"',
+    );
+    expect(shellFunction(rootStart, "need_deployment_compose_capabilities")).toContain(
+      'sh "$COMPOSE_CAPABILITY_SCRIPT"',
+    );
+    expect(shellFunction(deploy, "prepare_compose")).toContain(
+      "need_deployment_compose_capabilities",
+    );
+    expect(shellFunction(rootStart, "start")).toContain(
+      "need_deployment_compose_capabilities",
+    );
+    expect(nodeDeploy).toContain("assertDockerComposeCapabilities();");
+    expect(nodeDeploy.indexOf("assertDockerComposeCapabilities();")).toBeLessThan(
+      nodeDeploy.indexOf('case "up":'),
+    );
+  });
+
   it("reads overcommit from an isolated container on the selected Docker daemon", () => {
     expect(redisOvercommitProbeArgs()).toEqual([
       "run",

@@ -151,10 +151,10 @@ describe("production readiness startup gate", () => {
 
   it("does not report compose up as successful before readiness passes", () => {
     expect(prodCommand).toMatch(
-      /case "up":[\s\S]*prepareDeploymentImages\(\)[\s\S]*preflightDeploymentImages\(\)[\s\S]*stopRuntimeServices\(\)[\s\S]*runVerifiedMigration\(\)[\s\S]*startVerifiedRuntimes\(\)[\s\S]*await verify\(\)/,
+      /case "up":[\s\S]*prepareDeploymentImages\(\)[\s\S]*preflightDeploymentImages\(\)[\s\S]*stopRuntimeServices\(\)[\s\S]*runVerifiedMigration\(\)[\s\S]*clearDatabaseAdoptionAuthorizationAfterMigration\(\)[\s\S]*startVerifiedRuntimes\(\)[\s\S]*await verify\(\)/,
     );
     expect(rootStart).toMatch(
-      /sh "\$REMNASHOP_ROLLOUT_SCRIPT" "\$ENV_FILE" check[\s\S]*prepare_images\s+preflight_images\s+prepare_runtime_dependencies\s+stop_runtime_services[\s\S]*run_verified_migration\s+start_verified_runtimes[\s\S]*verify[\s\S]*sh "\$REMNASHOP_ROLLOUT_SCRIPT" "\$ENV_FILE" finalize[\s\S]*info "started/,
+      /sh "\$REMNASHOP_ROLLOUT_SCRIPT" "\$ENV_FILE" check[\s\S]*prepare_images\s+preflight_images\s+prepare_runtime_dependencies\s+stop_runtime_services[\s\S]*run_verified_migration\s+clear_database_adoption_authorization\s+start_verified_runtimes[\s\S]*verify[\s\S]*sh "\$REMNASHOP_ROLLOUT_SCRIPT" "\$ENV_FILE" finalize[\s\S]*info "started/,
     );
   });
 
