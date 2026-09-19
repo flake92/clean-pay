@@ -47,9 +47,11 @@ describe("Remnashop payment rollout deployment", () => {
     expect(rollout).toContain("REMNASHOP_ENV_FILE /opt/remnashop/.env");
     expect(rollout).toContain("REMNASHOP_ENV_EXPECTED_UID 0");
     expect(rollout).toContain("REMNASHOP_ENV_EXPECTED_GID 0");
-    expect(rollout.indexOf('node "$script_dir/remnashop-env-preflight.mjs"'))
+    expect(rollout).toContain('python3 "$script_dir/remnashop-env-preflight.py"');
+    expect(rollout).toContain("node or python3 is required for credential metadata preflight");
+    expect(rollout.indexOf("run_remnashop_env_preflight"))
       .toBeLessThan(rollout.indexOf("command -v docker"));
-    expect(rollout.indexOf('node "$script_dir/remnashop-env-preflight.mjs"'))
+    expect(rollout.indexOf("run_remnashop_env_preflight"))
       .toBeLessThan(rollout.indexOf('docker inspect "$container"'));
     expect(rollout).toContain("API, worker and scheduler must use the same image");
     expect(rollout).toContain("current_revision");
