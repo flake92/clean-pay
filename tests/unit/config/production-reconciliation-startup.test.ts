@@ -86,10 +86,17 @@ describe("production reconciliation startup", () => {
     expect(rootDockerfile).toContain("reconciliation-batch.mjs");
     expect(rootDockerfile).toContain("reconciliation-support-handle.mjs");
     expect(prodCompose).toContain("dockerfile: Dockerfile");
-    expect(prodCompose).toContain('restart: "on-failure"');
-    expect(rootCompose).toContain('restart: "on-failure"');
-    expect(prodCompose).not.toContain('restart: "on-failure:');
-    expect(rootCompose).not.toContain('restart: "on-failure:');
+  });
+
+  it("returns the enabled worker after a Docker daemon or host restart", () => {
+    expect(prodCompose).toMatch(
+      /reconciliation-worker:[\s\S]*?restart: unless-stopped/,
+    );
+    expect(rootCompose).toMatch(
+      /reconciliation-worker:[\s\S]*?restart: unless-stopped/,
+    );
+    expect(prodCompose).not.toContain('restart: "on-failure"');
+    expect(rootCompose).not.toContain('restart: "on-failure"');
   });
 
   it("logs only non-reversible manual-operation support handles", () => {
