@@ -31,8 +31,8 @@
         outline-offset: 3px;
     }
 
-    &:disabled {
-        cursor: wait;
+    &[data-state="connecting"] {
+        cursor: progress;
         opacity: 0.72;
     }
 }

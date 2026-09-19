@@ -1,12 +1,15 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import {
   useSupportChatExpectedIdentity,
   useSupportChatSessionAuthenticated,
 } from "@/frontend/components/chatwoot-session-context";
-import { CHATWOOT_STATE_CHANGED_EVENT } from "@/frontend/lib/chatwoot-state-events";
+import {
+  CHATWOOT_OPEN_REQUEST_CONSUMED_EVENT,
+  CHATWOOT_STATE_CHANGED_EVENT,
+} from "@/frontend/lib/chatwoot-state-events";
 import {
   chatwootCookieValue,
   hasChatwootCookie,
@@ -19,6 +22,17 @@ type ExpectedChatwootIdentity = {
   core: string;
   websiteToken: string;
 };
+
+function chatwootIdentityKey(identity: ExpectedChatwootIdentity) {
+  return `${identity.baseUrl}\n${identity.websiteToken}\n${identity.core}`;
+}
+
+function notifyChatwootOpenRequestConsumed(identity: ExpectedChatwootIdentity) {
+  window.dispatchEvent(new CustomEvent(
+    CHATWOOT_OPEN_REQUEST_CONSUMED_EVENT,
+    { detail: chatwootIdentityKey(identity) },
+  ));
+}
 
 function chatwootActionState(
   authenticated: boolean,
@@ -98,12 +112,114 @@ function useSupportChatActionState() {
   return { authenticated, expectedIdentity, state };
 }
 
+function useSupportChatOpenAction() {
+  const action = useSupportChatActionState();
+  const { authenticated, expectedIdentity, state } = action;
+  const [openRequested, setOpenRequested] = useState(false);
+  const openRequestRef = useRef<ExpectedChatwootIdentity | null>(null);
+
+  useEffect(() => {
+    const consumeMatchingRequest = (event: Event) => {
+      const requestedIdentity = openRequestRef.current;
+      if (
+        requestedIdentity
+        && event instanceof CustomEvent
+        && event.detail === chatwootIdentityKey(requestedIdentity)
+      ) {
+        openRequestRef.current = null;
+        setOpenRequested(false);
+      }
+    };
+
+    window.addEventListener(
+      CHATWOOT_OPEN_REQUEST_CONSUMED_EVENT,
+      consumeMatchingRequest,
+    );
+    return () => {
+      openRequestRef.current = null;
+      window.removeEventListener(
+        CHATWOOT_OPEN_REQUEST_CONSUMED_EVENT,
+        consumeMatchingRequest,
+      );
+    };
+  }, []);
+
+  useEffect(() => {
+    const requestedIdentity = openRequestRef.current;
+    if (!requestedIdentity) {
+      if (openRequested) {
+        queueMicrotask(() => setOpenRequested(false));
+      }
+      return;
+    }
+
+    const requestStillMatches = Boolean(
+      expectedIdentity
+      && requestedIdentity.baseUrl === expectedIdentity.baseUrl
+      && requestedIdentity.websiteToken === expectedIdentity.websiteToken
+      && requestedIdentity.core === expectedIdentity.core,
+    );
+    if (!authenticated || !requestStillMatches
+      || state === "signed-out" || state === "failed") {
+      openRequestRef.current = null;
+      queueMicrotask(() => setOpenRequested(false));
+      return;
+    }
+
+    const currentState = chatwootActionState(authenticated, expectedIdentity);
+    if (currentState === "signed-out" || currentState === "failed") {
+      openRequestRef.current = null;
+      queueMicrotask(() => setOpenRequested(false));
+      return;
+    }
+
+    if (state !== "ready" || currentState !== "ready") {
+      return;
+    }
+
+    // The click may arrive while the server is still verifying ownership.
+    // Recheck the complete identity gate after the state-change event, then
+    // consume the request exactly once.
+    openRequestRef.current = null;
+    notifyChatwootOpenRequestConsumed(requestedIdentity);
+    queueMicrotask(() => setOpenRequested(false));
+    try {
+      window.$chatwoot?.toggle?.("open");
+    } catch {
+      // A third-party UI failure must not replay the user's click later.
+    }
+  }, [authenticated, expectedIdentity, openRequested, state]);
+
+  const requestOpen = () => {
+    const currentState = chatwootActionState(authenticated, expectedIdentity);
+
+    if (currentState === "ready" && expectedIdentity) {
+      openRequestRef.current = null;
+      notifyChatwootOpenRequestConsumed(expectedIdentity);
+      setOpenRequested(false);
+      try {
+        window.$chatwoot?.toggle?.("open");
+      } catch {
+        // Keep the application shell usable if the third-party API throws.
+      }
+    } else if (currentState === "connecting" && expectedIdentity) {
+      openRequestRef.current = { ...expectedIdentity };
+      setOpenRequested(true);
+    } else {
+      openRequestRef.current = null;
+      setOpenRequested(false);
+    }
+  };
+
+  return { ...action, openRequested, requestOpen };
+}
+
 export function SupportChatOpenButton({
   hideWhenSignedOut = false,
 }: {
   hideWhenSignedOut?: boolean;
 } = {}) {
-  const { authenticated, expectedIdentity, state } = useSupportChatActionState();
+  const { openRequested, requestOpen, state } = useSupportChatOpenAction();
 
   if (state === "signed-out") {
     if (hideWhenSignedOut) {
@@ -124,31 +240,48 @@ export function SupportChatOpenButton({
     );
   }
 
-  if (state === "connecting") {
-    return <span className="line-height-3 text-600">Подключаем чат поддержки…</span>;
-  }
-
   return (
     <button
+      aria-busy={state === "connecting"}
       className="p-button p-component p-button-outlined"
-      onClick={() => {
-        if (
-          chatwootActionState(authenticated, expectedIdentity) === "ready"
-        ) {
-          window.$chatwoot?.toggle?.("open");
-        }
-      }}
+      data-state={state}
+      onClick={requestOpen}
       type="button"
     >
-      <span className="p-button-icon p-c pi pi-comments" />
-      <span className="p-button-label">Открыть чат поддержки</span>
+      <span className={`p-button-icon p-c pi ${
+        state === "connecting" ? "pi-spin pi-spinner" : "pi-comments"
+      }`} />
+      <span className="p-button-label">
+        {openRequested
+          ? "Чат откроется после подключения…"
+          : state === "connecting"
+            ? "Подключаем чат поддержки…"
+            : "Открыть чат поддержки"}
+      </span>
     </button>
   );
 }
 
 export function SupportChatFloatingButton() {
-  const { authenticated, expectedIdentity, state } = useSupportChatActionState();
+  const {
+    authenticated,
+    expectedIdentity,
+    openRequested,
+    requestOpen,
+    state,
+  } = useSupportChatOpenAction();
   const [chatOpen, setChatOpen] = useState(false);
+  const identityKey = expectedIdentity
+    ? chatwootIdentityKey(expectedIdentity)
+    : null;
+  const chatOpenIdentityRef = useRef(identityKey);
+
+  useEffect(() => {
+    if (chatOpenIdentityRef.current !== identityKey) {
+      chatOpenIdentityRef.current = identityKey;
+      queueMicrotask(() => setChatOpen(false));
+    }
+  }, [identityKey]);
 
   useEffect(() => {
     const markOpen = () => setChatOpen(true);
@@ -169,7 +302,9 @@ export function SupportChatFloatingButton() {
 
   const ready = state === "ready";
   const expanded = ready && chatOpen;
-  const label = ready
+  const label = openRequested
+    ? "Чат откроется после подключения"
+    : ready
     ? (expanded ? "Закрыть чат поддержки" : "Открыть чат поддержки")
     : "Подключаем чат поддержки";
 
@@ -180,16 +315,22 @@ export function SupportChatFloatingButton() {
       aria-label={label}
       className="clean-pay-chatwoot-launcher"
       data-state={state}
-      disabled={!ready}
       onClick={() => {
-        if (chatwootActionState(authenticated, expectedIdentity) === "ready") {
-          window.$chatwoot?.toggle?.(expanded ? "close" : "open");
+        if (
+          expanded
+          && chatwootActionState(authenticated, expectedIdentity) === "ready"
+        ) {
+          window.$chatwoot?.toggle?.("close");
+        } else {
+          requestOpen();
         }
       }}
       title={label}
       type="button"
     >
-      <i className={`pi ${expanded ? "pi-times" : "pi-comments"}`} aria-hidden="true" />
+      <i className={`pi ${
+        ready ? (expanded ? "pi-times" : "pi-comments") : "pi-spin pi-spinner"
+      }`} aria-hidden="true" />
     </button>
   );
 }

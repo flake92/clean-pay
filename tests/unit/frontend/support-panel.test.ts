@@ -5,6 +5,9 @@ import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { ChatwootWidgetConfig } from "@/application/models/chatwoot";
+import {
+  SupportChatFloatingButton,
+} from "@/frontend/components/chatwoot-open-button";
 import { SupportChatSessionBoundary } from "@/frontend/components/chatwoot-session-context";
 import { SupportPanel } from "@/frontend/components/support-panel";
 import {
@@ -199,6 +202,63 @@ describe("SupportPanel", () => {
 
     expect(screen.getByText(/Подключаем чат поддержки/i)).toBeTruthy();
     expect(screen.queryByText(/Чат доступен после входа/i)).toBeNull();
+  });
+
+  it("queues one support-card click until verification without opening twice", async () => {
+    const toggle = vi.fn();
+    window.cleanPayChatwootAuthorized = true;
+    window.$chatwoot = {
+      baseUrl: chatwootConfig.baseUrl,
+      websiteToken: chatwootConfig.websiteToken,
+      hasLoaded: true,
+      setUser: vi.fn(),
+      toggle,
+      toggleBubbleVisibility: vi.fn(),
+      reset: vi.fn(),
+    };
+    render(createElement(
+      SupportChatSessionBoundary,
+      { authenticated: true, chatwootConfig },
+      createElement("div", null,
+        createElement(SupportPanel, {
+          support: { ...unavailable, liveChatEnabled: true },
+        }),
+        createElement(SupportChatFloatingButton),
+      ),
+    ));
+
+    const connectingButtons = screen.getAllByRole("button", {
+      name: /Подключаем чат поддержки/,
+    });
+    const supportButton = connectingButtons.find((button) => (
+      button.classList.contains("p-button-outlined")
+    ));
+    const floatingButton = connectingButtons.find((button) => (
+      button.classList.contains("clean-pay-chatwoot-launcher")
+    ));
+    expect(supportButton).toBeTruthy();
+    expect(floatingButton).toBeTruthy();
+    fireEvent.click(supportButton!);
+    fireEvent.click(floatingButton!);
+    expect(toggle).not.toHaveBeenCalled();
+    expect(screen.getByRole("button", {
+      name: "Чат откроется после подключения…",
+    })).toBeTruthy();
+
+    act(() => {
+      window.cleanPayChatwootIdentity = {
+        core: expectedCore,
+        customAttributes: "context",
+      };
+      document.cookie = "cw_conversation=conversation-1; Path=/";
+      document.cookie = `cw_user_${chatwootConfig.websiteToken}=identified; Path=/`;
+      notifyChatwootStateChanged();
+    });
+
+    await waitFor(() => expect(toggle).toHaveBeenCalledOnce());
+    expect(toggle).toHaveBeenCalledWith("open");
+    act(() => notifyChatwootStateChanged());
+    expect(toggle).toHaveBeenCalledOnce();
   });
 
   it("publishes the support button from lifecycle events without polling", async () => {
