@@ -11,6 +11,7 @@ IMAGE_PREFLIGHT_SCRIPT="$ROOT_DIR/deploy/prod/image-preflight.sh"
 BUILD_PROVENANCE_SCRIPT="$ROOT_DIR/deploy/prod/build-provenance.sh"
 ROLE_ENV_SCRIPT="$ROOT_DIR/deploy/prod/role-env.mjs"
 CREDENTIAL_INIT_SCRIPT="$ROOT_DIR/deploy/prod/database-credential-init.mjs"
+CREDENTIAL_ADOPTION_SCRIPT="$ROOT_DIR/deploy/prod/database-adoption-state.mjs"
 CREDENTIAL_FILE_GUARD_SCRIPT="$ROOT_DIR/deploy/prod/credential-file-guard.mjs"
 OPERATION_LOCK_SCRIPT="$ROOT_DIR/deploy/prod/production-operation-lock.mjs"
 OPERATION_LOCK_PATH="$ROOT_DIR/deploy/prod/.production-operation.lock"
@@ -240,6 +241,28 @@ initialize_database_credentials() {
     --workdir /workspace \
     "$NODE_TOOLING_IMAGE" \
     node deploy/prod/database-credential-init.mjs init deploy/prod/.env
+}
+
+clear_database_adoption_authorization() {
+  if command -v node >/dev/null 2>&1; then
+    node "$CREDENTIAL_ADOPTION_SCRIPT" clear "$ENV_FILE" || return 1
+  else
+    need_docker
+    docker run --rm --read-only --network none \
+      --cap-drop ALL \
+      --security-opt no-new-privileges \
+      --pids-limit 64 \
+      --memory 256m \
+      --cpus 0.5 \
+      --tmpfs /tmp:rw,noexec,nosuid,nodev,size=16m,mode=1777 \
+      --user "$(id -u):$(id -g)" \
+      --mount "type=bind,source=$ROOT_DIR,target=/workspace" \
+      --workdir /workspace \
+      "$NODE_TOOLING_IMAGE" \
+      node deploy/prod/database-adoption-state.mjs clear deploy/prod/.env \
+      || return 1
+  fi
+  materialize_role_env_files
 }
 
 init() {
@@ -811,7 +834,9 @@ install_services() {
   prepare_runtime_dependencies
   stop_runtime_services
   printf 'Running the verified one-shot migration before any application runtime starts...\n'
-  if ! run_verified_migration || ! start_verified_runtimes; then
+  if ! run_verified_migration \
+    || ! clear_database_adoption_authorization \
+    || ! start_verified_runtimes; then
     printf '\nStartup failed. Recent logs:\n' >&2
     compose logs --tail=200 >&2 || true
     exit 1
@@ -849,6 +874,8 @@ migrate_only() {
   stop_runtime_services
   run_verified_migration \
     || die 'Verified migration failed; application runtimes remain stopped.'
+  clear_database_adoption_authorization \
+    || die 'Could not clear one-time database adoption authorization; application runtimes remain stopped.'
   cleanup_verified_images
   if [ "$deploy_source" = "build" ]; then
     cleanup_build_artifacts
