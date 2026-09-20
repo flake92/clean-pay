@@ -99,6 +99,18 @@ export type RemnashopTransportObserver = {
   adminRequestSent(observation: RequestObservation): void;
   adminResponseReceived(observation: ResponseObservation): void;
   adminRequestFailed(observation: FailureObservation): void;
+  /**
+   * Reports that a successful provider response did not match the expected
+   * contract. Carries only the decoder's field-level reason, never a value, so
+   * a provider/panel version drift is visible in the logs instead of surfacing
+   * to users as an anonymous "try later" error.
+   */
+  responseDecodeFailed?(observation: {
+    method: string;
+    path: string;
+    status: number;
+    reason: string;
+  }): void;
 };
 
 type PendingRemnashopMetric = {
@@ -207,6 +219,12 @@ export function createRemnashopTransport(
             ? decodeResponse(parsed, response)
             : decodeRemnashopEndpointResponse(path, method, parsed);
         } catch (error) {
+          observer.responseDecodeFailed?.({
+            method,
+            path: safeRequestPath(path),
+            status: response.status,
+            reason: error instanceof Error ? error.message : String(error),
+          });
           throw remnashopUnavailableError(path, error);
         }
       }

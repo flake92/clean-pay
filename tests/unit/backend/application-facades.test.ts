@@ -405,7 +405,25 @@ describe("application facades", () => {
 
     await expect(loadCabinetViewModel(reader, authGateway({
       loadCurrentSession: vi.fn(async () => { throw new Error("database unavailable"); }),
-    }), history)).resolves.toMatchObject({ status: "error" });
+    }), history)).resolves.toMatchObject({ status: "error", recovery: "recover" });
+
+    // An unresolved account transition must never look like an anonymous
+    // failure: the user is offered the recovery route that explains it.
+    await expect(loadCabinetViewModel(reader, authGateway({
+      loadCurrentSession: vi.fn(async () => {
+        throw new AuthProfileError("ACCOUNT_MERGE_REQUIRED");
+      }),
+    }), history)).resolves.toMatchObject({
+      status: "error",
+      recovery: "recover",
+      message: expect.stringContaining("Восстановить доступ"),
+    });
+
+    await expect(loadCabinetViewModel(reader, authGateway({
+      loadCurrentSession: vi.fn(async () => {
+        throw new AuthProfileError("UPSTREAM_UNAVAILABLE");
+      }),
+    }), history)).resolves.toMatchObject({ status: "error", recovery: "retry" });
   });
 
   it("returns a safe fallback when subscription reissue fails unexpectedly", async () => {
