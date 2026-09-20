@@ -88,16 +88,28 @@ function readStoredBundle(session: ReadOnlySession, now: Date) {
     return recoverableStoredBundle(session, "missing_or_expired_bundle");
   }
 
-  // A claim/recovery fence means a command may be rotating this one-time
-  // bundle. Render-time code must wait for that command instead of consuming
-  // or repairing either side of the transition.
-  if (
+  // A refresh fence means a command may be rotating this one-time bundle.
+  // Render-time code must never consume or repair either side of the
+  // transition, but it also must not park the user behind a fence that nothing
+  // will ever clear: only a fence with a live lease is genuinely in progress
+  // and worth waiting for. An expired or lease-less fence (a refresh that was
+  // interrupted by a restart/deploy, or a finished-but-unpromoted recovery) is
+  // cleared only by the cookie-capable authorizer, so hand it over to that
+  // recovery route instead of rendering a permanent "try later" error.
+  const hasRefreshFence = Boolean(
     session.remnashopRefreshClaimTokenHash ||
     session.remnashopRefreshLeaseExpiresAt ||
     session.remnashopRefreshDispatchedAt ||
-    session.remnashopRefreshRecoveryEncrypted
-  ) {
-    return unavailableStoredBundle(session, "refresh_transition_in_progress");
+    session.remnashopRefreshRecoveryEncrypted,
+  );
+  if (hasRefreshFence) {
+    const leaseIsLive = Boolean(
+      session.remnashopRefreshLeaseExpiresAt &&
+      session.remnashopRefreshLeaseExpiresAt > now,
+    );
+    return leaseIsLive
+      ? unavailableStoredBundle(session, "refresh_transition_in_progress")
+      : recoverableStoredBundle(session, "stale_refresh_transition");
   }
 
   let accessToken: string;
@@ -156,10 +168,22 @@ export async function getStoredAuthorizedRemnashopTokens({
     assertEmailVerificationPolicy(localSession.user);
   }
 
-  // authPending denotes an unfinished upstream owner transition. The command
-  // authorizer may reconcile it; a render is never allowed to guess the owner.
+  // authPending denotes an unfinished upstream owner transition. A render is
+  // never allowed to guess the owner. When the cookie-capable authorizer can
+  // finish the transition on its own (Telegram identity plus a verified or
+  // staged e-mail, exactly its own precondition) hand it over to that recovery
+  // route; otherwise the ownership is genuinely unresolved.
   if (localSession.user.authPending) {
-    return accountOwnerMismatch(localSession, "account_transition_pending");
+    const user = localSession.user;
+    const recoverableByTelegram = Boolean(
+      user.telegramId && (
+        user.emailVerified ||
+        (user.pendingRemnashopUserId && user.pendingRemnashopEmail)
+      ),
+    );
+    return recoverableByTelegram
+      ? recoverableStoredBundle(localSession, "account_transition_recoverable")
+      : accountOwnerMismatch(localSession, "account_transition_pending");
   }
 
   const { accessToken, refreshToken } = readStoredBundle(
@@ -206,22 +230,26 @@ export async function getStoredAuthorizedRemnashopTokens({
   ) {
     const profile = await getRemnashopMe(accessToken);
     if (
-      profile.email !== session.user.email ||
-      !profile.is_email_verified
+      profile.email === session.user.email &&
+      profile.is_email_verified
     ) {
+      // Preserve the current request's authorization semantics without syncing
+      // database state or cookies during render. A command can persist it later.
+      session = {
+        ...session,
+        user: { ...session.user, emailVerified: true },
+      };
+    } else if (!session.user.telegramId) {
       throw new ServiceError(
         "EMAIL_NOT_VERIFIED",
         403,
         "E-mail must be verified before using Remnashop actions",
       );
     }
-
-    // Preserve the current request's authorization semantics without syncing
-    // database state or cookies during render. A command can persist it later.
-    session = {
-      ...session,
-      user: { ...session.user, emailVerified: true },
-    };
+    // A Telegram-linked account is already identified by Telegram, so a
+    // half-finished (unconfirmed) e-mail must not take the cabinet away. It is
+    // shown as a "confirm e-mail" prompt instead, and payments still enforce a
+    // verified e-mail on their own.
   }
 
   authDebugLog("remnashop_stored_tokens_authorize_success", {

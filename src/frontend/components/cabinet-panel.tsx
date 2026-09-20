@@ -10,6 +10,7 @@ import {
 } from "@/frontend/components/cabinet-responsive-sections";
 import { hasRenewOffer } from "@/frontend/lib/subscription-offers";
 import type { CabinetViewModel } from "@/application/models/cabinet";
+import { providerSessionRecoveryPath } from "@/shared/auth/session-navigation";
 import {
   detailValue,
   formatBytes,
@@ -36,6 +37,7 @@ export function CabinetPanel({ model }: { model: CabinetViewModel }) {
   const {
     devices,
     error,
+    errorRecovery,
     offers,
     paymentHistoryStatus,
     payments,
@@ -66,12 +68,20 @@ export function CabinetPanel({ model }: { model: CabinetViewModel }) {
     return (
       <div className="card">
         <Message severity="error" text={error} />
-        <div className="mt-3">
+        <div className="mt-3 flex flex-wrap gap-2">
           <LinkButton
             external
             href="/cabinet"
             label="Повторить"
           />
+          {errorRecovery === "recover" ? (
+            <LinkButton
+              external
+              href={providerSessionRecoveryPath("/cabinet")}
+              label="Восстановить доступ"
+              outlined
+            />
+          ) : null}
         </div>
       </div>
     );
@@ -94,6 +104,17 @@ export function CabinetPanel({ model }: { model: CabinetViewModel }) {
 
   return (
     <div className="grid">
+      {shouldShowVerifyEmail ? (
+        <div className="col-12">
+          <Message
+            severity="warn"
+            text={`E-mail${user.email ? ` ${user.email}` : ""} ещё не подтверждён. Вернитесь к вводу кода из письма или запросите новый код — доступ к кабинету при этом не ограничен.`}
+          />
+          <div className="mt-2">
+            <LinkButton href="/verify-email" label="Ввести код или запросить новый" outlined />
+          </div>
+        </div>
+      ) : null}
       <div className="col-12 lg:col-6 xl:col-3">
         <Metric icon="pi pi-shield" label="Подписка" tone="blue" value={subscription?.plan_name ?? "Не активна"} />
       </div>

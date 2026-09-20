@@ -126,6 +126,11 @@ export function initialVerificationTransition(
   return { kind: "unchanged" };
 }
 
+// Never fail silently: without a linked e-mail there is no code to request or
+// confirm, so say what is missing and where to fix it.
+const emailRequiredHint =
+  "К аккаунту ещё не привязан e-mail с паролем, поэтому подтверждать нечего. Откройте «Привязать аккаунт», добавьте e-mail и получите новый код.";
+
 export type RequestVerificationTransition =
   | { kind: "unchanged" }
   | {
@@ -151,7 +156,7 @@ export function requestVerificationTransition(
         kind: "rejected",
         error: autoContinue
           ? "Связь с e-mail нужно восстановить. Возвращаем к вводу e-mail и пароля."
-          : null,
+          : emailRequiredHint,
         clearTargetEmail: true,
         continueToPasswordRecovery: autoContinue,
       };
@@ -203,7 +208,7 @@ export function confirmVerificationTransition(
         kind: "rejected",
         error: autoContinue
           ? "Связь с e-mail нужно восстановить. Возвращаем к вводу e-mail и пароля."
-          : null,
+          : emailRequiredHint,
         continueToPasswordRecovery: autoContinue,
       };
     }

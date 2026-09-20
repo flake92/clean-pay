@@ -74,18 +74,43 @@ function decodeAuthResponse(value: unknown) {
   };
 }
 
+function optionalNullableString(input: Record<string, unknown>, field: string) {
+  const value = input[field];
+  if (value === undefined || value === null) return null;
+  if (typeof value !== "string") throw new TypeError(`${field} must be a string or null`);
+  return value;
+}
+
+// Telegram ids are numeric, but a panel that serialises the bigint as a string
+// must not lock the user out: accept a safe numeric string and reject the rest.
+function telegramIdField(input: Record<string, unknown>, field: string) {
+  const value = input[field];
+  if (value === undefined || value === null) return null;
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value === "string" && /^\d{1,15}$/.test(value)) return Number(value);
+  throw new TypeError(`${field} must be a finite number or null`);
+}
+
+// The identity-critical fields (`email`, `is_email_verified`, `telegram_id`)
+// stay validated. Presentation and optional-state fields are tolerated because
+// the application already treated them as optional before response validation
+// existed (`pending_email ?? null`, fallbacks for name/language), and a panel
+// that omits or nulls them must degrade gracefully, not break sign-in.
 function decodeProfile(value: unknown) {
   const input = record(value, "Remnashop profile");
-  const hasPassword = optionalBooleanField(input, "has_password");
+  const hasPassword = typeof input.has_password === "boolean"
+    ? input.has_password
+    : undefined;
+  const username = optionalNullableString(input, "username");
   return {
-    telegram_id: nullableNumberField(input, "telegram_id"),
-    auth_type: stringField(input, "auth_type"),
-    email: nullableStringField(input, "email"),
+    telegram_id: telegramIdField(input, "telegram_id"),
+    auth_type: optionalNullableString(input, "auth_type") ?? "unknown",
+    email: optionalNullableString(input, "email"),
     is_email_verified: booleanField(input, "is_email_verified"),
-    pending_email: nullableStringField(input, "pending_email"),
-    name: stringField(input, "name"),
-    username: nullableStringField(input, "username"),
-    language: stringField(input, "language"),
+    pending_email: optionalNullableString(input, "pending_email"),
+    name: optionalNullableString(input, "name") ?? username ?? "",
+    username,
+    language: optionalNullableString(input, "language") ?? "ru",
     ...(hasPassword === undefined ? {} : { has_password: hasPassword }),
   };
 }
