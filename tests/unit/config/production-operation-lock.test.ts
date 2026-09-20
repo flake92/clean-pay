@@ -79,6 +79,7 @@ function runShellEntrypointCleanup(
   const harness = `
 set -eu
 operation_lock_token='owner-token'
+operation_lock_owned=1
 secret_input_stty=''
 verified_image_output=''
 verified_image_dir=''
@@ -290,6 +291,152 @@ esac
     shellIntegrationTimeout,
   );
 
+  it.skipIf(!posixShell)(
+    "inherits a caller-owned deploy lock and preserves both ownership and exit status",
+    () => {
+      const source = readFileSync("deploy.sh", "utf8");
+      const harness = `
+set -eu
+operation_lock_token=''
+operation_lock_owned=0
+secret_input_stty=''
+verified_image_output=''
+verified_image_dir=''
+CLEAN_PAY_VERIFIED_APP_IMAGE=''
+CLEAN_PAY_VERIFIED_MIGRATION_IMAGE=''
+restore_secret_input_terminal() { :; }
+cleanup_verified_images() { :; }
+${shellFunctionFrom(source, "die")}
+${shellFunctionFrom(source, "operation_lock_command")}
+${shellFunctionFrom(source, "acquire_production_operation_lock")}
+${shellFunctionFrom(source, "enter_production_operation_lock")}
+${shellFunctionFrom(source, "release_production_operation_lock")}
+${shellFunctionFrom(source, "verify_inherited_production_operation_lock")}
+${shellFunctionFrom(source, "cleanup_deploy_state")}
+trap cleanup_deploy_state 0
+trap 'exit 129' HUP
+trap 'exit 130' INT
+trap 'exit 143' TERM
+enter_production_operation_lock build
+case "$MODE" in
+  build-success)
+    [ "$operation_lock_owned" -eq 0 ]
+    ;;
+  own-success)
+    [ "$operation_lock_owned" -eq 1 ]
+    ;;
+  error) exit 17 ;;
+  term) kill -TERM "$$" ;;
+  attempt-release)
+    if release_production_operation_lock; then
+      die "inherited lock was unexpectedly released"
+    fi
+    ;;
+  disappear-success)
+    operation_lock_command release "$operation_lock_token"
+    ;;
+  disappear-error)
+    operation_lock_command release "$operation_lock_token"
+    exit 17
+    ;;
+  *) die "unknown deploy lock harness mode" ;;
+esac
+`;
+      const environment = (
+        mode: string,
+        path: string,
+        inheritedToken?: string,
+      ): NodeJS.ProcessEnv => ({
+        NODE_ENV: "test",
+        PATH: process.env.PATH ?? "",
+        MODE: mode,
+        OPERATION_LOCK_PATH: shellPath(path),
+        NODE_TOOLING_SCRIPT: shellPath(resolve("deploy/prod/node-tooling.sh")),
+        ...(inheritedToken
+          ? { CLEAN_PAY_PRODUCTION_OPERATION_LOCK_TOKEN: inheritedToken }
+          : {}),
+      });
+
+      for (const [mode, expectedStatus] of [
+        ["build-success", 0],
+        ["error", 17],
+        ["term", 143],
+        ["attempt-release", 0],
+      ] as const) {
+        const path = operationLockPath();
+        const token = acquireProductionOperationLock(path, "zero-downtime-rollout");
+        const child = spawnSync(posixShell!, ["-s"], {
+          cwd: process.cwd(),
+          encoding: "utf8",
+          input: harness,
+          env: environment(mode, path, token),
+        });
+        expect(child.status, `${mode}: ${child.stderr}`).toBe(expectedStatus);
+        expect(existsSync(path), mode).toBe(true);
+        expect(() => verifyProductionOperationLock(path, token)).not.toThrow();
+        releaseProductionOperationLock(path, token);
+      }
+
+      for (const [mode, expectedStatus] of [
+        ["disappear-success", 1],
+        ["disappear-error", 17],
+      ] as const) {
+        const path = operationLockPath();
+        const token = acquireProductionOperationLock(path, "zero-downtime-rollout");
+        const child = spawnSync(posixShell!, ["-s"], {
+          cwd: process.cwd(),
+          encoding: "utf8",
+          input: harness,
+          env: environment(mode, path, token),
+        });
+        expect(child.status, `${mode}: ${child.stderr}`).toBe(expectedStatus);
+        expect(child.stderr).toContain("inherited production operation lock changed");
+        expect(existsSync(path), mode).toBe(false);
+      }
+
+      for (const scenario of ["missing", "wrong", "released"] as const) {
+        const path = operationLockPath();
+        const token = acquireProductionOperationLock(path, "zero-downtime-rollout");
+        if (scenario === "released") releaseProductionOperationLock(path, token);
+        const inheritedToken = scenario === "missing"
+          ? undefined
+          : scenario === "wrong"
+            ? "0".repeat(64)
+            : token;
+        const child = spawnSync(posixShell!, ["-s"], {
+          cwd: process.cwd(),
+          encoding: "utf8",
+          input: harness,
+          env: environment("build-success", path, inheritedToken),
+        });
+        expect(child.status, `${scenario}: ${child.stderr}`).not.toBe(0);
+        if (scenario === "released") {
+          expect(existsSync(path)).toBe(false);
+        } else {
+          expect(existsSync(path)).toBe(true);
+          expect(() => verifyProductionOperationLock(path, token)).not.toThrow();
+          releaseProductionOperationLock(path, token);
+        }
+      }
+
+      for (const [mode, expectedStatus] of [
+        ["own-success", 0],
+        ["error", 17],
+      ] as const) {
+        const path = operationLockPath();
+        const child = spawnSync(posixShell!, ["-s"], {
+          cwd: process.cwd(),
+          encoding: "utf8",
+          input: harness,
+          env: environment(mode, path),
+        });
+        expect(child.status, `owned/${mode}: ${child.stderr}`).toBe(expectedStatus);
+        expect(existsSync(path), `owned/${mode}`).toBe(false);
+      }
+    },
+    shellIntegrationTimeout,
+  );
+
   it("refuses a non-owner release without deleting the lock", () => {
     const path = operationLockPath();
     const token = acquireProductionOperationLock(path, "install");
@@ -406,13 +553,14 @@ process.exit(originalExitCode);
 
     for (const source of [deploy, start]) {
       expect(source).toContain("deploy/prod/.production-operation.lock");
-      expect(source).toContain("production-operation-lock.mjs");
       expect(source).toContain("trap cleanup_");
       expect(source).not.toMatch(/(?:mv|rename)\s+-?f?\s*[^\n]*\.env/);
       expect(source).toContain('"$operation_name" "$$"');
     }
+    expect(deploy).toContain("deploy/prod/node-tooling.sh");
+    expect(start).toContain("production-operation-lock.mjs");
     expect(deploy).toMatch(
-      /setup\|configure\|config\|init\|prepare-v0\.1\.1-upgrade\|authorize-existing-database\|compose\|check\|build\|migrate\|resolve-rolled-back\|install\|up\|restart\|down\)[\s\S]{0,100}acquire_production_operation_lock/,
+      /setup\|configure\|config\|init\|prepare-v0\.1\.1-upgrade\|authorize-existing-database\|compose\|check\|build\|migrate\|resolve-rolled-back\|install\|up\|restart\|down\)[\s\S]{0,100}enter_production_operation_lock/,
     );
     expect(start).toMatch(
       /start\|up\|stop\|down\|restart\|build\|prepare-v0\.1\.1-upgrade\)[\s\S]{0,100}acquire_production_operation_lock/,
@@ -435,8 +583,16 @@ process.exit(originalExitCode);
     expect(prod).toContain("exitCodeAfterProductionOperationLockRelease");
     expect(prod).toContain("`prod-${operation}`,\n      process.pid,");
     expect(deploy).toContain(
-      '"$lock_mode" deploy/prod/.production-operation.lock "$@"',
+      'CLEAN_PAY_PRODUCTION_OPERATION_LOCK_PATH:-"$ROOT_DIR/deploy/prod/.production-operation.lock"',
     );
+    expect(shellFunctionFrom(deploy, "operation_lock_command"))
+      .toContain('sh "$NODE_TOOLING_SCRIPT" operation-lock "$@"');
+    expect(shellFunctionFrom(deploy, "enter_production_operation_lock"))
+      .toContain('operation_lock_command verify "$inherited_token"');
+    expect(shellFunctionFrom(deploy, "release_production_operation_lock"))
+      .toContain('[ "$operation_lock_owned" -eq 1 ] || return 1');
+    expect(shellFunctionFrom(deploy, "cleanup_deploy_state"))
+      .toContain("verify_inherited_production_operation_lock");
     expect(prod).toContain('process.once("exit"');
     for (const signal of ["SIGHUP", "SIGINT", "SIGTERM"]) {
       expect(prod).toContain(`process.once("${signal}"`);
