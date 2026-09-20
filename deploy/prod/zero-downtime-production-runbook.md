@@ -242,13 +242,18 @@ cp --preserve=mode,ownership,timestamps "$caddy_host" "$caddy_backup"
 cp --preserve=mode,ownership,timestamps "$caddy_host" "$caddy_candidate"
 chmod 600 "$caddy_backup" "$caddy_candidate"
 
-test "$(grep -Fc 'reverse_proxy clean-pay:4000' "$caddy_backup")" -eq 1
-test "$(grep -Fc 'reverse_proxy clean-pay-advertiser-cabinet:4100' "$caddy_backup")" -eq 1
+primary_route_count=$(grep -Fc 'reverse_proxy clean-pay:4000' "$caddy_backup")
+advertiser_route_count=$(grep -Fc \
+  'reverse_proxy clean-pay-advertiser-cabinet:4100' "$caddy_backup")
+test "$primary_route_count" -ge 1
+test "$advertiser_route_count" -ge 1
 sed -i 's/reverse_proxy clean-pay:4000/reverse_proxy clean-pay-canary:4000/' \
   "$caddy_candidate"
 test "$(grep -Fc 'reverse_proxy clean-pay:4000' "$caddy_candidate")" -eq 0
-test "$(grep -Fc 'reverse_proxy clean-pay-canary:4000' "$caddy_candidate")" -eq 1
-test "$(grep -Fc 'reverse_proxy clean-pay-advertiser-cabinet:4100' "$caddy_candidate")" -eq 1
+test "$(grep -Fc 'reverse_proxy clean-pay-canary:4000' "$caddy_candidate")" \
+  -eq "$primary_route_count"
+test "$(grep -Fc 'reverse_proxy clean-pay-advertiser-cabinet:4100' "$caddy_candidate")" \
+  -eq "$advertiser_route_count"
 
 primary_sha=$(sha256sum "$caddy_backup" | awk '{print $1}')
 candidate_sha=$(sha256sum "$caddy_candidate" | awk '{print $1}')
