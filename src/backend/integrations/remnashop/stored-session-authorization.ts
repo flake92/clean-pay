@@ -198,11 +198,15 @@ export async function getStoredAuthorizedRemnashopTokens({
     return recoverableStoredBundle(localSession, "invalid_access_identity");
   }
 
+  // The token must belong to the account this session is linked to. A staged
+  // pendingRemnashopUserId (an e-mail link that was requested but not yet
+  // confirmed, authPending=false) is only a merge *target*: the session's own
+  // token legitimately keeps belonging to the local account, so it must not be
+  // read as an owner mismatch (that locked Telegram users out of the cabinet).
+  // A genuine unfinished owner transition is authPending and handled above.
   if (
     !localSession.user.remnashopUserId ||
-    localSession.user.remnashopUserId !== remnashopUserId ||
-    (localSession.user.pendingRemnashopUserId !== null &&
-      localSession.user.pendingRemnashopUserId !== remnashopUserId)
+    localSession.user.remnashopUserId !== remnashopUserId
   ) {
     return accountOwnerMismatch(localSession, "account_owner_mismatch");
   }
