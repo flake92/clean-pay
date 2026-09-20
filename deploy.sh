@@ -14,9 +14,9 @@ CREDENTIAL_INIT_SCRIPT="$ROOT_DIR/deploy/prod/database-credential-init.mjs"
 CREDENTIAL_ADOPTION_SCRIPT="$ROOT_DIR/deploy/prod/database-adoption-state.mjs"
 CREDENTIAL_UPGRADE_SCRIPT="$ROOT_DIR/deploy/prod/production-environment-upgrade.mjs"
 CREDENTIAL_FILE_GUARD_SCRIPT="$ROOT_DIR/deploy/prod/credential-file-guard.mjs"
-OPERATION_LOCK_SCRIPT="$ROOT_DIR/deploy/prod/production-operation-lock.mjs"
+NODE_TOOLING_SCRIPT="$ROOT_DIR/deploy/prod/node-tooling.sh"
 COMPOSE_CAPABILITY_SCRIPT="$ROOT_DIR/deploy/prod/docker-compose-capability-preflight.sh"
-OPERATION_LOCK_PATH="$ROOT_DIR/deploy/prod/.production-operation.lock"
+OPERATION_LOCK_PATH=${CLEAN_PAY_PRODUCTION_OPERATION_LOCK_PATH:-"$ROOT_DIR/deploy/prod/.production-operation.lock"}
 NODE_TOOLING_IMAGE="node:24.18.0-bookworm-slim@sha256:6f7b03f7c2c8e2e784dcf9295400527b9b1270fd37b7e9a7285cf83b6951452d"
 APP_ENV_FILE="${ENV_FILE}.app"
 HOLD_OPERATOR_ENV_FILE="${ENV_FILE}.hold-operator"
@@ -31,6 +31,7 @@ CLEAN_PAY_VERIFIED_APP_IMAGE=''
 CLEAN_PAY_VERIFIED_MIGRATION_IMAGE=''
 secret_input_stty=''
 operation_lock_token=''
+operation_lock_owned=0
 
 . "$ROOT_DIR/deploy/prod/redis-host-safety.sh"
 
@@ -665,10 +666,15 @@ cleanup_deploy_state() {
   restore_secret_input_terminal
   cleanup_verified_images
   if [ -n "$operation_lock_token" ]; then
-    if release_production_operation_lock; then
-      operation_lock_token=''
-    else
-      printf '%s\n' 'WARNING: production operation lock release failed; inspect the fail-closed lock before retrying.' >&2
+    if [ "$operation_lock_owned" -eq 1 ]; then
+      if ! release_production_operation_lock; then
+        printf '%s\n' 'WARNING: production operation lock release failed; inspect the fail-closed lock before retrying.' >&2
+        if [ "$status" -eq 0 ]; then
+          status=1
+        fi
+      fi
+    elif ! verify_inherited_production_operation_lock; then
+      printf '%s\n' 'WARNING: inherited production operation lock changed or disappeared; the caller-owned lock was not released.' >&2
       if [ "$status" -eq 0 ]; then
         status=1
       fi
@@ -678,40 +684,49 @@ cleanup_deploy_state() {
 }
 
 operation_lock_command() {
-  if command -v node >/dev/null 2>&1; then
-    node "$OPERATION_LOCK_SCRIPT" "$@"
-    return
-  fi
-  lock_mode=$1
-  shift
-  shift
-  need_docker
-  docker run --rm --read-only --network none \
-    --cap-drop ALL \
-    --security-opt no-new-privileges \
-    --pids-limit 32 \
-    --memory 128m \
-    --cpus 0.25 \
-    --tmpfs /tmp:rw,noexec,nosuid,nodev,size=8m,mode=1777 \
-    --user "$(id -u):$(id -g)" \
-    --mount "type=bind,source=$ROOT_DIR,target=/workspace" \
-    --workdir /workspace \
-    "$NODE_TOOLING_IMAGE" \
-    node deploy/prod/production-operation-lock.mjs \
-      "$lock_mode" deploy/prod/.production-operation.lock "$@"
+  CLEAN_PAY_PRODUCTION_OPERATION_LOCK_PATH=$OPERATION_LOCK_PATH \
+    sh "$NODE_TOOLING_SCRIPT" operation-lock "$@"
 }
 
 acquire_production_operation_lock() {
   operation_name=$1
   operation_lock_token=$(operation_lock_command \
-    acquire "$OPERATION_LOCK_PATH" "$operation_name" "$$") \
+    acquire "$operation_name" "$$") \
     || die 'Another production operation is active or the fail-closed operation lock needs reviewed recovery.'
   printf '%s\n' "$operation_lock_token" | grep -Eq '^[0-9a-f]{64}$' \
     || die 'Production operation lock returned an invalid ownership token.'
+  operation_lock_owned=1
+}
+
+enter_production_operation_lock() {
+  operation_name=$1
+  inherited_token=${CLEAN_PAY_PRODUCTION_OPERATION_LOCK_TOKEN:-}
+  if [ -z "$inherited_token" ]; then
+    acquire_production_operation_lock "$operation_name"
+    return
+  fi
+  printf '%s\n' "$inherited_token" | grep -Eq '^[0-9a-f]{64}$' \
+    || die 'Inherited production operation lock token is invalid.'
+  operation_lock_command verify "$inherited_token" \
+    || die 'Inherited production operation lock is missing or owned by another rollout.'
+  operation_lock_token=$inherited_token
+  operation_lock_owned=0
 }
 
 release_production_operation_lock() {
-  operation_lock_command release "$OPERATION_LOCK_PATH" "$operation_lock_token"
+  [ -n "$operation_lock_token" ] || return 0
+  [ "$operation_lock_owned" -eq 1 ] || return 1
+  if ! operation_lock_command release "$operation_lock_token"; then
+    return 1
+  fi
+  operation_lock_token=''
+  operation_lock_owned=0
+}
+
+verify_inherited_production_operation_lock() {
+  [ -n "$operation_lock_token" ] || return 1
+  [ "$operation_lock_owned" -eq 0 ] || return 1
+  operation_lock_command verify "$operation_lock_token"
 }
 
 trap cleanup_deploy_state 0
@@ -1131,7 +1146,7 @@ else
 fi
 case "$command" in
   setup|configure|config|init|prepare-v0.1.1-upgrade|authorize-existing-database|compose|check|build|migrate|resolve-rolled-back|install|up|restart|down)
-    acquire_production_operation_lock "$command"
+    enter_production_operation_lock "$command"
     ;;
 esac
 case "$command" in
