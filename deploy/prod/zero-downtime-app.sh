@@ -11,6 +11,7 @@ ROLE_ENV_SCRIPT="$ROOT_DIR/deploy/prod/role-env.mjs"
 ROLLBACK_COMPAT_SCRIPT="$ROOT_DIR/deploy/prod/rollback-env-compat.mjs"
 OPERATION_LOCK_SCRIPT="$ROOT_DIR/deploy/prod/production-operation-lock.mjs"
 OPERATION_LOCK_PATH="$ROOT_DIR/deploy/prod/.production-operation.lock"
+NODE_TOOLING_IMAGE="node:24.18.0-bookworm-slim@sha256:6f7b03f7c2c8e2e784dcf9295400527b9b1270fd37b7e9a7285cf83b6951452d"
 STATE_FILE=${CLEAN_PAY_ZDT_STATE_FILE:-"$ROOT_DIR/deploy/prod/.zero-downtime-state"}
 LOCK_DIR="${STATE_FILE}.lock"
 ROLLBACK_ENV_FILE=${CLEAN_PAY_ZDT_ROLLBACK_ENV_FILE:-}
@@ -90,6 +91,171 @@ validate_absolute_state_path() {
   if printf '%s' "$path_value" | LC_ALL=C grep -q '[[:cntrl:]=]'; then
     fail "$path_label path contains an unsupported character"
   fi
+}
+
+validate_docker_bind_directory() {
+  bind_directory=$1
+  bind_label=$2
+  validate_absolute_state_path "$bind_directory" "$bind_label"
+  [ -d "$bind_directory" ] || fail "$bind_label does not exist: $bind_directory"
+  [ ! -L "$bind_directory" ] || fail "$bind_label must not be a symbolic link"
+  case "$bind_directory" in
+    *,*) fail "$bind_label cannot contain a comma without host Node.js" ;;
+  esac
+}
+
+host_node_available() {
+  command -v node >/dev/null 2>&1
+}
+
+run_node_tooling_container() {
+  command -v docker >/dev/null 2>&1 \
+    || fail "docker is required when host Node.js is unavailable"
+  validate_docker_bind_directory "$ROOT_DIR" "release root"
+  docker image inspect "$NODE_TOOLING_IMAGE" >/dev/null 2>&1 \
+    || fail "the pinned Node tooling image is unavailable; run ./deploy.sh build first"
+  docker run --rm --pull never --read-only --network none \
+    --cap-drop ALL \
+    --security-opt no-new-privileges \
+    --pids-limit 32 \
+    --memory 128m \
+    --cpus 0.25 \
+    --tmpfs /tmp:rw,noexec,nosuid,nodev,size=8m,mode=1777 \
+    --user "$(id -u):$(id -g)" \
+    --mount "type=bind,source=$ROOT_DIR,target=/workspace,readonly" \
+    --workdir /workspace \
+    --entrypoint node \
+    "$@"
+}
+
+operation_lock_command() {
+  lock_mode=$1
+  shift
+  if host_node_available; then
+    node "$OPERATION_LOCK_SCRIPT" "$lock_mode" "$OPERATION_LOCK_PATH" "$@"
+    return
+  fi
+
+  operation_lock_parent=$(dirname -- "$OPERATION_LOCK_PATH")
+  validate_docker_bind_directory "$operation_lock_parent" "operation lock directory"
+  run_node_tooling_container \
+    --mount "type=bind,source=$operation_lock_parent,target=$operation_lock_parent" \
+    "$NODE_TOOLING_IMAGE" \
+    deploy/prod/production-operation-lock.mjs \
+      "$lock_mode" "$OPERATION_LOCK_PATH" "$@"
+}
+
+validate_environment_file() {
+  environment_path=$1
+  if host_node_available; then
+    node "$VALIDATE_ENV_SCRIPT" --clean-pay-env-file "$environment_path"
+    return
+  fi
+
+  environment_parent=$(dirname -- "$environment_path")
+  validate_docker_bind_directory "$environment_parent" "environment directory"
+  run_node_tooling_container \
+    --mount "type=bind,source=$environment_parent,target=$environment_parent,readonly" \
+    "$NODE_TOOLING_IMAGE" \
+    deploy/prod/validate-env.mjs --clean-pay-env-file "$environment_path"
+}
+
+materialize_role_environment() {
+  if host_node_available; then
+    node "$ROLE_ENV_SCRIPT" materialize "$ENV_FILE"
+    return
+  fi
+
+  environment_parent=$(dirname -- "$ENV_FILE")
+  validate_docker_bind_directory "$environment_parent" "environment directory"
+  run_node_tooling_container \
+    --mount "type=bind,source=$environment_parent,target=$environment_parent" \
+    "$NODE_TOOLING_IMAGE" \
+    deploy/prod/role-env.mjs materialize "$ENV_FILE"
+}
+
+environment_pair_command() {
+  pair_mode=$1
+  if host_node_available; then
+    node "$ENV_GUARD_SCRIPT" "$pair_mode" "$ENV_FILE" "$ROLLBACK_ENV_FILE"
+    return
+  fi
+
+  current_parent=$(dirname -- "$ENV_FILE")
+  rollback_parent=$(dirname -- "$ROLLBACK_ENV_FILE")
+  validate_docker_bind_directory "$current_parent" "current environment directory"
+  validate_docker_bind_directory "$rollback_parent" "rollback environment directory"
+  if [ "$current_parent" = "$rollback_parent" ]; then
+    if [ "$pair_mode" = verify ]; then
+      run_node_tooling_container \
+        --mount "type=bind,source=$current_parent,target=$current_parent,readonly" \
+        "$NODE_TOOLING_IMAGE" \
+        deploy/prod/zero-downtime-env.mjs \
+          "$pair_mode" "$ENV_FILE" "$ROLLBACK_ENV_FILE"
+    else
+      run_node_tooling_container \
+        --mount "type=bind,source=$current_parent,target=$current_parent" \
+        "$NODE_TOOLING_IMAGE" \
+        deploy/prod/zero-downtime-env.mjs \
+          "$pair_mode" "$ENV_FILE" "$ROLLBACK_ENV_FILE"
+    fi
+    return
+  fi
+
+  if [ "$pair_mode" = verify ]; then
+    run_node_tooling_container \
+      --mount "type=bind,source=$current_parent,target=$current_parent,readonly" \
+      --mount "type=bind,source=$rollback_parent,target=$rollback_parent,readonly" \
+      "$NODE_TOOLING_IMAGE" \
+      deploy/prod/zero-downtime-env.mjs \
+        "$pair_mode" "$ENV_FILE" "$ROLLBACK_ENV_FILE"
+  else
+    run_node_tooling_container \
+      --mount "type=bind,source=$current_parent,target=$current_parent" \
+      --mount "type=bind,source=$rollback_parent,target=$rollback_parent,readonly" \
+      "$NODE_TOOLING_IMAGE" \
+      deploy/prod/zero-downtime-env.mjs \
+        "$pair_mode" "$ENV_FILE" "$ROLLBACK_ENV_FILE"
+  fi
+}
+
+materialize_rollback_compatibility_environment() {
+  compatibility_revision=$1
+  image_environment_path=$2
+  compatibility_output_path=$3
+  if host_node_available; then
+    node "$ROLLBACK_COMPAT_SCRIPT" materialize \
+      "$compatibility_revision" \
+      "$image_environment_path" \
+      "$compatibility_output_path"
+    return
+  fi
+
+  image_environment_parent=$(dirname -- "$image_environment_path")
+  compatibility_output_parent=$(dirname -- "$compatibility_output_path")
+  validate_docker_bind_directory \
+    "$image_environment_parent" "rollback compatibility input directory"
+  validate_docker_bind_directory \
+    "$compatibility_output_parent" "rollback compatibility output directory"
+  if [ "$image_environment_parent" = "$compatibility_output_parent" ]; then
+    run_node_tooling_container \
+      --mount "type=bind,source=$image_environment_parent,target=$image_environment_parent" \
+      "$NODE_TOOLING_IMAGE" \
+      deploy/prod/rollback-env-compat.mjs materialize \
+        "$compatibility_revision" \
+        "$image_environment_path" \
+        "$compatibility_output_path"
+    return
+  fi
+
+  run_node_tooling_container \
+    --mount "type=bind,source=$image_environment_parent,target=$image_environment_parent,readonly" \
+    --mount "type=bind,source=$compatibility_output_parent,target=$compatibility_output_parent" \
+    "$NODE_TOOLING_IMAGE" \
+    deploy/prod/rollback-env-compat.mjs materialize \
+      "$compatibility_revision" \
+      "$image_environment_path" \
+      "$compatibility_output_path"
 }
 
 validate_container_name() {
@@ -245,8 +411,7 @@ release_lock() {
 
 acquire_production_operation_lock() {
   operation_name=$1
-  operation_lock_token=$(node "$OPERATION_LOCK_SCRIPT" \
-    acquire "$OPERATION_LOCK_PATH" "$operation_name" "$$") \
+  operation_lock_token=$(operation_lock_command acquire "$operation_name" "$$") \
     || fail "another production operation is active or the fail-closed operation lock needs reviewed recovery"
   printf '%s\n' "$operation_lock_token" | grep -Eq '^[0-9a-f]{64}$' \
     || fail "production operation lock returned an invalid ownership token"
@@ -254,8 +419,7 @@ acquire_production_operation_lock() {
 
 release_production_operation_lock() {
   [ -n "$operation_lock_token" ] || return 0
-  if ! node "$OPERATION_LOCK_SCRIPT" \
-    release "$OPERATION_LOCK_PATH" "$operation_lock_token"; then
+  if ! operation_lock_command release "$operation_lock_token"; then
     return 1
   fi
   operation_lock_token=''
@@ -377,12 +541,12 @@ restore_previous_compose() {
   TARGET_APP_IMAGE=$PREVIOUS_APP_IMAGE
   TARGET_MIGRATION_IMAGE=$PREVIOUS_MIGRATION_IMAGE
 
-  if ! node "$ENV_GUARD_SCRIPT" restore-images "$ENV_FILE" "$ROLLBACK_ENV_FILE"; then
+  if ! environment_pair_command restore-images; then
     printf '%s\n' \
       "CRITICAL: authoritative image configuration could not be restored; keep Caddy on the canary and investigate" >&2
     return 1
   fi
-  if ! node "$ROLE_ENV_SCRIPT" materialize "$ENV_FILE"; then
+  if ! materialize_role_environment; then
     printf '%s\n' \
       "CRITICAL: role-scoped environments could not be refreshed after rollback" >&2
     return 1
@@ -456,15 +620,14 @@ trap 'exit 143' TERM
 
 require_tools_and_environment() {
   command -v docker >/dev/null 2>&1 || fail "docker is required"
-  command -v node >/dev/null 2>&1 || fail "node is required"
   command -v curl >/dev/null 2>&1 || fail "curl is required for host-port liveness"
   command -v stat >/dev/null 2>&1 || fail "GNU stat is required"
   docker compose version >/dev/null 2>&1 || fail "Docker Compose v2 is required"
   [ -f "$ENV_FILE" ] || fail "authoritative environment file not found: $ENV_FILE"
   [ ! -L "$ENV_FILE" ] || fail "authoritative environment file must not be a symbolic link"
   validate_absolute_state_path "$ENV_FILE" "authoritative environment file"
-  node "$VALIDATE_ENV_SCRIPT" --clean-pay-env-file "$ENV_FILE"
-  node "$ROLE_ENV_SCRIPT" materialize "$ENV_FILE"
+  validate_environment_file "$ENV_FILE"
+  materialize_role_environment
 
   PROJECT_NAME=$(env_value COMPOSE_PROJECT_NAME clean-pay-prod)
   EDGE_NETWORK=$(env_value CLEAN_PAY_EDGE_NETWORK remnawave-network)
@@ -492,7 +655,7 @@ preflight_image_pair() {
   image_validation_env_file=$image_env_file
   if [ -n "$compatibility_revision" ]; then
     verified_compatibility_env="$verified_image_dir/rollback-compat.env"
-    node "$ROLLBACK_COMPAT_SCRIPT" materialize \
+    materialize_rollback_compatibility_environment \
       "$compatibility_revision" \
       "$image_env_file" \
       "$verified_compatibility_env" \
@@ -621,8 +784,8 @@ preflight_rollback_images() {
   [ -n "$ROLLBACK_ENV_FILE" ] \
     || fail "CLEAN_PAY_ZDT_ROLLBACK_ENV_FILE is required for stage"
   validate_absolute_state_path "$ROLLBACK_ENV_FILE" "rollback environment file"
-  node "$ENV_GUARD_SCRIPT" verify "$ENV_FILE" "$ROLLBACK_ENV_FILE"
-  node "$VALIDATE_ENV_SCRIPT" --clean-pay-env-file "$ROLLBACK_ENV_FILE"
+  environment_pair_command verify
+  validate_environment_file "$ROLLBACK_ENV_FILE"
   resolve_rollback_image_references \
     "$(env_file_value "$ROLLBACK_ENV_FILE" CLEAN_PAY_IMAGE)" \
     "$(env_file_value "$ROLLBACK_ENV_FILE" CLEAN_PAY_MIGRATION_IMAGE)"
@@ -1047,7 +1210,7 @@ load_state() {
   validate_image_id "$TARGET_APP_IMAGE"
   validate_image_id "$TARGET_MIGRATION_IMAGE"
   case "$PROMOTED" in true|false) ;; *) fail "invalid PROMOTED state" ;; esac
-  node "$ENV_GUARD_SCRIPT" verify "$ENV_FILE" "$ROLLBACK_ENV_FILE"
+  environment_pair_command verify
 }
 
 stage_canary() {
