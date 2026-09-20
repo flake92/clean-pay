@@ -86,6 +86,33 @@ install -m 600 "$old_env" "$rollback_env"
 install -m 600 "$old_env" "$target_env"
 ```
 
+Для точного перехода с единственной явно разрешённой production revision из
+`rollback-env-compat.mjs` добавьте в обе копии отсутствующую обязательную
+настройку в безопасном для target runtime состоянии. В новом target runtime
+значение `false` продолжает non-payment cleanup, но не удаляет исторические
+платёжные URL и snapshots до отдельной проверки backup и retention policy:
+
+```bash
+printf '%s' false | node deploy/prod/credential-file-guard.mjs env-set \
+  "$rollback_env" PAYMENT_DATA_RETENTION_ENABLED
+printf '%s' false | node deploy/prod/credential-file-guard.mjs env-set \
+  "$target_env" PAYMENT_DATA_RETENTION_ENABLED
+```
+
+В rollback env это значение также необходимо текущим validator и role-env
+materializer. Exact legacy rollback image был собран до появления флага и
+игнорирует `false`: автоматический rollback поэтому восстанавливает прежнее
+production-поведение retention worker, включая legacy payment cleanup. Это не
+новая операция rollback, но проверенный DB backup обязателен до stage.
+
+Stage сначала валидирует полные target и rollback env текущими правилами. Затем
+только для immutable rollback images с этим exact revision создаёт в приватном
+temporary directory проекцию без трёх более новых параметров
+(`CLEAN_PAY_CONFIG_VERSION`, `CLEAN_PAY_UPGRADE_SOURCE_VERSION`,
+`PAYMENT_DATA_RETENTION_ENABLED`) и передаёт её старому image validator.
+Исходные env-файлы не изменяются. Для любого другого revision такая проекция
+запрещена и preflight остаётся строгим.
+
 В `$target_env` измените только эти пять строк:
 
 - `CLEAN_PAY_DEPLOY_SOURCE`;
