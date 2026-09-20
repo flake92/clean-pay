@@ -1033,8 +1033,15 @@ ${functionName}
     );
     expect(runbook).toContain("caddy validate --config /tmp/Caddyfile-clean-pay-primary");
     expect(runbook).toContain("caddy validate --config /tmp/Caddyfile-clean-pay-canary");
-    expect(runbook).toContain("caddy reload --config /etc/caddy/Caddyfile");
-    expect(runbook).not.toContain("caddy reload --config /tmp/Caddyfile-clean-pay-canary");
+    expect(runbook).toContain("chmod 0400");
+    expect(runbook).toContain("caddy reload --config /tmp/Caddyfile-clean-pay-primary");
+    expect(runbook).toContain("caddy reload --config /tmp/Caddyfile-clean-pay-canary");
+    expect(runbook).not.toContain("caddy reload --config /etc/caddy/Caddyfile");
+    expect(
+      runbook.match(
+        /sha256sum \/tmp\/Caddyfile-clean-pay-(?:primary|canary)/g,
+      )?.length ?? 0,
+    ).toBeGreaterThanOrEqual(6);
     expect(runbook).toContain("Любая pending, failed или");
     expect(runbook).toContain("`migrate deploy`, `db push`");
     expect(runbook).toContain("revision `0059`");

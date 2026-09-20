@@ -262,11 +262,18 @@ caddy_inode=$caddy_host_inode
 
 docker cp "$caddy_backup" "$caddy_container:/tmp/Caddyfile-clean-pay-primary"
 docker cp "$caddy_candidate" "$caddy_container:/tmp/Caddyfile-clean-pay-canary"
+docker exec "$caddy_container" chmod 0400 \
+  /tmp/Caddyfile-clean-pay-primary /tmp/Caddyfile-clean-pay-canary
+test "$(docker exec "$caddy_container" sha256sum /tmp/Caddyfile-clean-pay-primary | awk '{print $1}')" = "$primary_sha"
+test "$(docker exec "$caddy_container" sha256sum /tmp/Caddyfile-clean-pay-canary | awk '{print $1}')" = "$candidate_sha"
 docker exec "$caddy_container" caddy validate --config /tmp/Caddyfile-clean-pay-primary
 docker exec "$caddy_container" caddy validate --config /tmp/Caddyfile-clean-pay-canary
 ```
 
-Оба варианта и checksums должны быть проверены до первой записи.
+Оба варианта копируются в контейнер с mode `0400`; их checksums и синтаксис
+должны быть проверены до первой записи. `reload` читает только соответствующую
+prevalidated private copy, а authoritative bind повторно сверяется после reload,
+поэтому неизвестная конкурентная запись в host path не становится runtime-config.
 `node-tooling.sh` запускает reviewed `caddyfile-same-inode.mjs` через host Node.js
 или закреплённый контейнер без изменения semantics записи.
 
@@ -309,8 +316,9 @@ restore_primary_on_failure() {
       test "$(sha256sum "$caddy_host" | awk '{print $1}')" = "$primary_sha" && \
       test "$(docker exec "$caddy_container" stat -c '%d:%i' /etc/caddy/Caddyfile)" = "$caddy_inode" && \
       test "$(docker exec "$caddy_container" sha256sum /etc/caddy/Caddyfile | awk '{print $1}')" = "$primary_sha"; then
-      docker exec "$caddy_container" caddy validate --config /etc/caddy/Caddyfile && \
-        docker exec "$caddy_container" caddy reload --config /etc/caddy/Caddyfile \
+      test "$(docker exec "$caddy_container" sha256sum /tmp/Caddyfile-clean-pay-primary | awk '{print $1}')" = "$primary_sha" && \
+        docker exec "$caddy_container" caddy validate --config /tmp/Caddyfile-clean-pay-primary && \
+        docker exec "$caddy_container" caddy reload --config /tmp/Caddyfile-clean-pay-primary \
         || recovery_failed=1
     else
       recovery_failed=1
@@ -335,15 +343,19 @@ test "$(stat -c '%d:%i' "$caddy_host")" = "$caddy_inode"
 test "$(sha256sum "$caddy_host" | awk '{print $1}')" = "$candidate_sha"
 test "$(docker exec "$caddy_container" stat -c '%d:%i' /etc/caddy/Caddyfile)" = "$caddy_inode"
 test "$(docker exec "$caddy_container" sha256sum /etc/caddy/Caddyfile | awk '{print $1}')" = "$candidate_sha"
-docker exec "$caddy_container" caddy validate --config /etc/caddy/Caddyfile
-docker exec "$caddy_container" caddy reload --config /etc/caddy/Caddyfile
+test "$(docker exec "$caddy_container" sha256sum /tmp/Caddyfile-clean-pay-canary | awk '{print $1}')" = "$candidate_sha"
+docker exec "$caddy_container" caddy validate --config /tmp/Caddyfile-clean-pay-canary
+docker exec "$caddy_container" caddy reload --config /tmp/Caddyfile-clean-pay-canary
+test "$(sha256sum "$caddy_host" | awk '{print $1}')" = "$candidate_sha"
+test "$(docker exec "$caddy_container" sha256sum /etc/caddy/Caddyfile | awk '{print $1}')" = "$candidate_sha"
 candidate_committed=1
 trap - 0 HUP INT TERM
 )
 ```
 
 При write/check/validate/reload failure trap восстанавливает prevalidated
-backup в тот же inode, fsync'ит его, сверяет checksum и reload'ит primary.
+backup в тот же inode, fsync'ит его, сверяет checksum и reload'ит primary из
+отдельной prevalidated `0400`-копии с exact checksum.
 Caddy сохраняет уже загруженную конфигурацию до успешного graceful reload.
 Restore ничего не пишет, если authoritative file уже имеет desired checksum;
 пишет только из exact candidate checksum и отказывается трогать любой третий,
@@ -398,8 +410,9 @@ restore_canary_on_failure() {
       test "$(sha256sum "$caddy_host" | awk '{print $1}')" = "$candidate_sha" && \
       test "$(docker exec "$caddy_container" stat -c '%d:%i' /etc/caddy/Caddyfile)" = "$caddy_inode" && \
       test "$(docker exec "$caddy_container" sha256sum /etc/caddy/Caddyfile | awk '{print $1}')" = "$candidate_sha"; then
-      docker exec "$caddy_container" caddy validate --config /etc/caddy/Caddyfile && \
-        docker exec "$caddy_container" caddy reload --config /etc/caddy/Caddyfile \
+      test "$(docker exec "$caddy_container" sha256sum /tmp/Caddyfile-clean-pay-canary | awk '{print $1}')" = "$candidate_sha" && \
+        docker exec "$caddy_container" caddy validate --config /tmp/Caddyfile-clean-pay-canary && \
+        docker exec "$caddy_container" caddy reload --config /tmp/Caddyfile-clean-pay-canary \
         || recovery_failed=1
     else
       recovery_failed=1
@@ -424,8 +437,11 @@ test "$(stat -c '%d:%i' "$caddy_host")" = "$caddy_inode"
 test "$(sha256sum "$caddy_host" | awk '{print $1}')" = "$primary_sha"
 test "$(docker exec "$caddy_container" stat -c '%d:%i' /etc/caddy/Caddyfile)" = "$caddy_inode"
 test "$(docker exec "$caddy_container" sha256sum /etc/caddy/Caddyfile | awk '{print $1}')" = "$primary_sha"
-docker exec "$caddy_container" caddy validate --config /etc/caddy/Caddyfile
-docker exec "$caddy_container" caddy reload --config /etc/caddy/Caddyfile
+test "$(docker exec "$caddy_container" sha256sum /tmp/Caddyfile-clean-pay-primary | awk '{print $1}')" = "$primary_sha"
+docker exec "$caddy_container" caddy validate --config /tmp/Caddyfile-clean-pay-primary
+docker exec "$caddy_container" caddy reload --config /tmp/Caddyfile-clean-pay-primary
+test "$(sha256sum "$caddy_host" | awk '{print $1}')" = "$primary_sha"
+test "$(docker exec "$caddy_container" sha256sum /etc/caddy/Caddyfile | awk '{print $1}')" = "$primary_sha"
 primary_committed=1
 trap - 0 HUP INT TERM
 )
