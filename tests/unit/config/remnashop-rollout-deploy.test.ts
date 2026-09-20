@@ -51,8 +51,8 @@ describe("Remnashop payment rollout deployment", () => {
     expect(rollout).toContain("node or python3 is required for credential metadata preflight");
     expect(rollout.indexOf("run_remnashop_env_preflight"))
       .toBeLessThan(rollout.indexOf("command -v docker"));
-    expect(rollout).toContain("repository_minimum_revision=0058");
-    expect(rollout.indexOf("repository_minimum_revision=0058"))
+    expect(rollout).toContain("repository_minimum_revision=0059");
+    expect(rollout.indexOf("repository_minimum_revision=0059"))
       .toBeLessThan(rollout.indexOf("run_remnashop_env_preflight"));
     expect(rollout).toContain("below the repository-required floor");
     expect(rollout.indexOf("run_remnashop_env_preflight"))

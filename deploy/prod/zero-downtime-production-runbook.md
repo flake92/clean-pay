@@ -411,6 +411,6 @@ recursive delete.
 5. После external smoke и observation удалите owned canary/state.
 
 Скрипт не откатывает БД, Remnashop, SMTP или kill switch. Additive Remnashop
-revision `0058` для e-mail reminders выпускается с
+revision `0059` для e-mail reminders выпускается с
 `EMAIL_SUBSCRIPTION_EXPIRATION_REMINDERS_ENABLED=false`. Любая необходимость
 отката schema/data требует отдельного migration/restore runbook.

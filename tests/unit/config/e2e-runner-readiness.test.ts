@@ -8,7 +8,7 @@ const compose = readFileSync(".devcontainer/docker-compose.yml", "utf8");
 const ciWorkflow = readFileSync(".github/workflows/ci.yml", "utf8");
 const dependabot = readFileSync(".github/dependabot.yml", "utf8");
 const productionRemnashopEnv = readFileSync("deploy/prod/remnashop.env.example", "utf8");
-const remnashopRevision = "837d964269078142307794ba3566a30d40b7b0b6";
+const remnashopRevision = "b0c28153fb604475c9da3a1cad94421363657668";
 
 const hostPortContract = [
   ["CLEAN_PAY_DEVCONTAINER_APP_HOST_PORT", "4000", "4000"],
@@ -117,12 +117,12 @@ describe("devcontainer e2e runner readiness", () => {
   it("keeps the default E2E source hermetic and accepts newer compatible schemas", () => {
     expect(runner).toContain('process.env.REMNASHOP_DISCOVER_HOST_SOURCE === "1"');
     expect(runner).toContain('"REMNASHOP_MINIMUM_ALEMBIC_REVISION"');
-    expect(shellRunner).toContain('REMNASHOP_MINIMUM_ALEMBIC_REVISION:-0058');
+    expect(shellRunner).toContain('REMNASHOP_MINIMUM_ALEMBIC_REVISION:-0059');
     expect(shellRunner).toContain('10#$current_revision >= 10#$minimum_revision');
-    expect(shellRunner).not.toContain('current_revision <> \'0058\'');
+    expect(shellRunner).not.toContain('current_revision <> \'0059\'');
   });
 
-  it("pins the default E2E source to the exact PR 135 head", () => {
+  it("pins the default E2E source to the exact reviewed reminder head", () => {
     expect(compose).toContain(`https://github.com/flake92/remnashop.git#${remnashopRevision}`);
     expect(compose).toContain(
       `BUILD_COMMIT: \${REMNASHOP_BUILD_REVISION:-${remnashopRevision}}`,

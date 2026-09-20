@@ -118,26 +118,35 @@ describe("production migration safety", () => {
     expect(ciWorkflow).toContain("remnashop-migration-rehearsal:");
     expect(ciWorkflow).toContain("bash scripts/security/rehearse-clean-pay-migrations.sh");
     expect(ciWorkflow).toContain("bash scripts/security/rehearse-remnashop-migrations.sh");
-    expect(remnashopRehearsal).toContain("837d964269078142307794ba3566a30d40b7b0b6");
+    expect(remnashopRehearsal).toContain("b0c28153fb604475c9da3a1cad94421363657668");
     expect(remnashopRehearsal).toContain('migrate "$SOURCE_DATABASE" 0040');
     expect(remnashopRehearsal).toContain('migrate "$SOURCE_DATABASE" 0047');
-    expect(remnashopRehearsal).toContain('migrate "$SOURCE_DATABASE" 0058');
+    expect(remnashopRehearsal).toContain('migrate "$SOURCE_DATABASE" 0059');
     expect(remnashopRehearsal).toContain("pre-0040-backup.list");
-    expect(remnashopRehearsal).toContain("post-0058-backup.list");
+    expect(remnashopRehearsal).toContain("post-0059-backup.list");
     expect(remnashopRehearsal).toContain(
       'docker rm --force --volumes "$POSTGRES_CONTAINER"',
     );
     expect(remnashopRehearsal).toContain('test "$(revision "$ROLLBACK_DATABASE")" = "0040"');
     expect(remnashopRehearsal).toContain("lock_timeout = '1500ms'");
     expect(remnashopRehearsal).toContain('test "$(revision "$LOCK_DATABASE")" = "0044"');
-    expect(remnashopRehearsal).toContain('migrate "$LOCK_DATABASE" 0058');
+    expect(remnashopRehearsal).toContain('migrate "$LOCK_DATABASE" 0059');
     expect(remnashopRehearsal).toContain("payment_operations");
     expect(remnashopRehearsal).toContain("user_merge_audit");
     expect(remnashopRehearsal.indexOf('migrate "$SOURCE_DATABASE" 0047')).toBeLessThan(
       remnashopRehearsal.indexOf("INSERT INTO payment_operations"),
     );
     expect(remnashopRehearsal.indexOf("INSERT INTO payment_operations")).toBeLessThan(
-      remnashopRehearsal.indexOf('migrate "$SOURCE_DATABASE" 0058'),
+      remnashopRehearsal.indexOf('migrate "$SOURCE_DATABASE" 0059'),
+    );
+    expect(remnashopRehearsal).toContain(
+      "0059 did not enable reminders for the verified e-mail fixture",
+    );
+    expect(remnashopRehearsal).toContain(
+      "0059 enabled reminders for the unverified fixture",
+    );
+    expect(remnashopRehearsal).toContain(
+      "0059 no-op rerun changed the reminder timestamp",
     );
     expect(remnashopRehearsal).toContain('migrate "$INVALID_OWNER_DATABASE" 0048');
     expect(remnashopRehearsal).toContain("migration 0048 blocked");
