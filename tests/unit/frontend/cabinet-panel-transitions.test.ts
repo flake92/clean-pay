@@ -71,6 +71,7 @@ describe("cabinet panel pure transitions", () => {
       paymentHistoryStatus: model.paymentHistoryStatus,
       support: model.support,
       error: null,
+      errorRecovery: null,
       subscriptionError: model.subscriptionError,
     });
     expect(selected.user).toBe(model.user);
@@ -88,6 +89,7 @@ describe("cabinet panel pure transitions", () => {
       paymentHistoryStatus: "current",
       support: null,
       error: null,
+      errorRecovery: null,
       subscriptionError: null,
     });
     expect(
@@ -101,8 +103,16 @@ describe("cabinet panel pure transitions", () => {
       paymentHistoryStatus: "current",
       support: null,
       error: "provider failed",
+      errorRecovery: null,
       subscriptionError: null,
     });
+    expect(
+      selectCabinetPanelData({
+        status: "error",
+        message: "provider failed",
+        recovery: "recover",
+      }),
+    ).toMatchObject({ error: "provider failed", errorRecovery: "recover" });
   });
 
   it("derives the existing bounded traffic, device, and account flags", () => {

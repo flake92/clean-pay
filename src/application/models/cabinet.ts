@@ -34,7 +34,17 @@ export type CabinetPaymentViewModel = {
 export type CabinetViewModel =
   | { status: "unauthorized" }
   | { status: "provider-session-recovery-required" }
-  | { status: "error"; message: string }
+  | {
+      status: "error";
+      message: string;
+      /**
+       * Which next step the page should offer. "recover" routes through the
+       * cookie-capable provider-session recovery (which can finish an
+       * interrupted refresh or Telegram transition, or explain what to do);
+       * "retry" is a plain reload for transient upstream trouble.
+       */
+      recovery?: "retry" | "recover";
+    }
   | {
       status: "ready";
       user: CabinetUserViewModel;
