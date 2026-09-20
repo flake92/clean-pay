@@ -9,7 +9,7 @@ const compose = readFileSync(".devcontainer/docker-compose.yml", "utf8");
 const ciWorkflow = readFileSync(".github/workflows/ci.yml", "utf8");
 const dependabot = readFileSync(".github/dependabot.yml", "utf8");
 const productionRemnashopEnv = readFileSync("deploy/prod/remnashop.env.example", "utf8");
-const remnashopRevision = "c2ab151676ed15b7035e438287449f6e2cc4281b";
+const remnashopRevision = "7d27eeefffefb65af702e1c6ef7ed5fc985873c2";
 
 const hostPortContract = [
   ["CLEAN_PAY_DEVCONTAINER_APP_HOST_PORT", "4000", "4000"],

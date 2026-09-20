@@ -520,7 +520,7 @@ entrypoint. The same CI job first runs
 [`scripts/security/rehearse-clean-pay-migrations.sh`](../scripts/security/rehearse-clean-pay-migrations.sh)
 against the checked-out Clean Pay migration chain, then runs
 [`scripts/security/rehearse-remnashop-migrations.sh`](../scripts/security/rehearse-remnashop-migrations.sh)
-against the exact reviewed revision beginning `c2ab151`; the CI workflow and
+against the exact reviewed revision beginning `7d27eee`; the CI workflow and
 rehearsal script enforce the complete commit identifier.
 The disposable job builds that source, creates a two-user synthetic fixture at
 `0040`, inventories a custom-format backup, advances to `0047`, and only then
