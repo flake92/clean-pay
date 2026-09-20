@@ -10,7 +10,7 @@ ENV_GUARD_SCRIPT="$ROOT_DIR/deploy/prod/zero-downtime-env.mjs"
 ROLE_ENV_SCRIPT="$ROOT_DIR/deploy/prod/role-env.mjs"
 ROLLBACK_COMPAT_SCRIPT="$ROOT_DIR/deploy/prod/rollback-env-compat.mjs"
 OPERATION_LOCK_SCRIPT="$ROOT_DIR/deploy/prod/production-operation-lock.mjs"
-OPERATION_LOCK_PATH="$ROOT_DIR/deploy/prod/.production-operation.lock"
+OPERATION_LOCK_PATH=${CLEAN_PAY_PRODUCTION_OPERATION_LOCK_PATH:-"$ROOT_DIR/deploy/prod/.production-operation.lock"}
 NODE_TOOLING_IMAGE="node:24.18.0-bookworm-slim@sha256:6f7b03f7c2c8e2e784dcf9295400527b9b1270fd37b7e9a7285cf83b6951452d"
 STATE_FILE=${CLEAN_PAY_ZDT_STATE_FILE:-"$ROOT_DIR/deploy/prod/.zero-downtime-state"}
 LOCK_DIR="${STATE_FILE}.lock"
@@ -30,6 +30,7 @@ ACKNOWLEDGEMENT=${2:-}
 
 lock_held=0
 operation_lock_token=''
+operation_lock_owned=0
 verified_image_dir=''
 verified_image_output=''
 verified_compatibility_env=''
@@ -131,6 +132,7 @@ run_node_tooling_container() {
 operation_lock_command() {
   lock_mode=$1
   shift
+  validate_absolute_state_path "$OPERATION_LOCK_PATH" "production operation lock"
   if host_node_available; then
     node "$OPERATION_LOCK_SCRIPT" "$lock_mode" "$OPERATION_LOCK_PATH" "$@"
     return
@@ -138,6 +140,14 @@ operation_lock_command() {
 
   operation_lock_parent=$(dirname -- "$OPERATION_LOCK_PATH")
   validate_docker_bind_directory "$operation_lock_parent" "operation lock directory"
+  if [ "$lock_mode" = verify ]; then
+    run_node_tooling_container \
+      --mount "type=bind,source=$operation_lock_parent,target=$operation_lock_parent,readonly" \
+      "$NODE_TOOLING_IMAGE" \
+      deploy/prod/production-operation-lock.mjs \
+        "$lock_mode" "$OPERATION_LOCK_PATH" "$@"
+    return
+  fi
   run_node_tooling_container \
     --mount "type=bind,source=$operation_lock_parent,target=$operation_lock_parent" \
     "$NODE_TOOLING_IMAGE" \
@@ -415,14 +425,38 @@ acquire_production_operation_lock() {
     || fail "another production operation is active or the fail-closed operation lock needs reviewed recovery"
   printf '%s\n' "$operation_lock_token" | grep -Eq '^[0-9a-f]{64}$' \
     || fail "production operation lock returned an invalid ownership token"
+  operation_lock_owned=1
+}
+
+enter_production_operation_lock() {
+  operation_name=$1
+  inherited_token=${CLEAN_PAY_PRODUCTION_OPERATION_LOCK_TOKEN:-}
+  if [ -z "$inherited_token" ]; then
+    acquire_production_operation_lock "$operation_name"
+    return
+  fi
+  printf '%s\n' "$inherited_token" | grep -Eq '^[0-9a-f]{64}$' \
+    || fail "inherited production operation lock token is invalid"
+  operation_lock_command verify "$inherited_token" \
+    || fail "inherited production operation lock is missing or owned by another rollout"
+  operation_lock_token=$inherited_token
+  operation_lock_owned=0
 }
 
 release_production_operation_lock() {
   [ -n "$operation_lock_token" ] || return 0
+  [ "$operation_lock_owned" -eq 1 ] || return 1
   if ! operation_lock_command release "$operation_lock_token"; then
     return 1
   fi
   operation_lock_token=''
+  operation_lock_owned=0
+}
+
+verify_inherited_production_operation_lock() {
+  [ -n "$operation_lock_token" ] || return 1
+  [ "$operation_lock_owned" -eq 0 ] || return 1
+  operation_lock_command verify "$operation_lock_token"
 }
 
 cleanup_private_files() {
@@ -602,9 +636,17 @@ on_exit() {
     status=1
   fi
   if [ -n "$operation_lock_token" ]; then
-    if ! release_production_operation_lock; then
+    if [ "$operation_lock_owned" -eq 1 ]; then
+      if ! release_production_operation_lock; then
+        printf '%s\n' \
+          "WARNING: production operation lock release failed; inspect the fail-closed lock before retrying." >&2
+        if [ "$status" -eq 0 ]; then
+          status=1
+        fi
+      fi
+    elif ! verify_inherited_production_operation_lock; then
       printf '%s\n' \
-        "WARNING: production operation lock release failed; inspect the fail-closed lock before retrying." >&2
+        "WARNING: inherited production operation lock changed or disappeared; the caller-owned lock was not released." >&2
       if [ "$status" -eq 0 ]; then
         status=1
       fi
@@ -1373,7 +1415,7 @@ EOF
 
 case "$COMMAND" in
   stage|verify|promote|rollback|remove|status)
-    acquire_production_operation_lock "zero-downtime-$COMMAND"
+    enter_production_operation_lock "zero-downtime-$COMMAND"
     ;;
 esac
 
