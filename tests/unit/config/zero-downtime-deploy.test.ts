@@ -659,6 +659,12 @@ describe("guarded zero-downtime application rollout", () => {
     expect(runbook).toContain("/etc/caddy/Caddyfile");
     expect(runbook).toContain("reverse_proxy clean-pay:4000");
     expect(runbook).toContain("reverse_proxy clean-pay-canary:4000");
+    expect(runbook).toContain(
+      "primary_route_count=$(grep -Fc 'reverse_proxy clean-pay:4000'",
+    );
+    expect(runbook).toContain('test "$primary_route_count" -ge 1');
+    expect(runbook).toContain('-eq "$primary_route_count"');
+    expect(runbook).toContain('-eq "$advertiser_route_count"');
     expect(runbook).toContain("reverse_proxy clean-pay-advertiser-cabinet:4100");
     expect(runbook).toContain("caddyfile-same-inode.mjs");
     expect(runbook).toContain('stat -c \'%d:%i\' "$caddy_host"');
