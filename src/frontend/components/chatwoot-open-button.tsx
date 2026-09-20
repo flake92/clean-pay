@@ -17,6 +17,11 @@ import {
 
 type ChatwootActionState = "signed-out" | "connecting" | "failed" | "ready";
 
+type ChatwootActionSnapshot = {
+  scopeKey: string;
+  state: ChatwootActionState;
+};
+
 type ExpectedChatwootIdentity = {
   baseUrl: string;
   core: string;
@@ -25,6 +30,15 @@ type ExpectedChatwootIdentity = {
 
 function chatwootIdentityKey(identity: ExpectedChatwootIdentity) {
   return `${identity.baseUrl}\n${identity.websiteToken}\n${identity.core}`;
+}
+
+function chatwootActionScopeKey(
+  authenticated: boolean,
+  identity: ExpectedChatwootIdentity | null,
+) {
+  return `${authenticated ? "authenticated" : "signed-out"}\n${
+    identity ? chatwootIdentityKey(identity) : "unconfigured"
+  }`;
 }
 
 function notifyChatwootOpenRequestConsumed(identity: ExpectedChatwootIdentity) {
@@ -86,15 +100,26 @@ function chatwootActionState(
 function useSupportChatActionState() {
   const authenticated = useSupportChatSessionAuthenticated();
   const expectedIdentity = useSupportChatExpectedIdentity();
-  const [state, setState] = useState<ChatwootActionState>(
-    authenticated ? "connecting" : "signed-out",
-  );
+  const scopeKey = chatwootActionScopeKey(authenticated, expectedIdentity);
+  const initialState = authenticated ? "connecting" : "signed-out";
+  const [snapshot, setSnapshot] = useState<ChatwootActionSnapshot>({
+    scopeKey,
+    state: initialState,
+  });
+  const state = snapshot.scopeKey === scopeKey
+    ? snapshot.state
+    : initialState;
 
   useEffect(() => {
-    const refresh = () => setState(chatwootActionState(
-      authenticated,
-      expectedIdentity,
-    ));
+    let active = true;
+    const refresh = () => {
+      if (!active) return;
+
+      setSnapshot({
+        scopeKey,
+        state: chatwootActionState(authenticated, expectedIdentity),
+      });
+    };
     const refreshAfterCurrentEvent = () => queueMicrotask(refresh);
     refresh();
 
@@ -103,11 +128,12 @@ function useSupportChatActionState() {
     window.addEventListener("chatwoot:error", refreshAfterCurrentEvent);
 
     return () => {
+      active = false;
       window.removeEventListener(CHATWOOT_STATE_CHANGED_EVENT, refresh);
       window.removeEventListener("chatwoot:ready", refreshAfterCurrentEvent);
       window.removeEventListener("chatwoot:error", refreshAfterCurrentEvent);
     };
-  }, [authenticated, expectedIdentity]);
+  }, [authenticated, expectedIdentity, scopeKey]);
 
   return { authenticated, expectedIdentity, state };
 }
