@@ -314,6 +314,8 @@ CANARY_NAME=''
 LOCK_DIR="\${OPERATION_LOCK_PATH}.private"
 ${shellFunctionFrom(source, "fail")}
 ${shellFunctionFrom(source, "release_lock")}
+${shellFunctionFrom(source, "host_node_available")}
+${shellFunctionFrom(source, "operation_lock_command")}
 ${shellFunctionFrom(source, "acquire_production_operation_lock")}
 ${shellFunctionFrom(source, "release_production_operation_lock")}
 ${shellFunctionFrom(source, "cleanup_private_files")}

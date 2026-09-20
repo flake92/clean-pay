@@ -1,7 +1,7 @@
 # Zero-downtime rollout приложения Clean Pay
 
 Этот runbook предназначен только для обновления runtime Clean Pay без schema
-change. Обычные `./deploy.sh install` и `node deploy/prod/prod.mjs up`
+change. Обычные `./deploy.sh install` и `./deploy.sh up`
 намеренно останавливают app/workers перед миграцией и создают maintenance
 window — их нельзя выдавать за zero-downtime.
 
@@ -77,6 +77,7 @@ env в release checkout:
 old_env='REPLACE_WITH_ABSOLUTE_CURRENT_ENV_FILE'
 target_env="$release_dir/deploy/prod/.env"
 rollback_env="$release_dir/deploy/prod/.env.rollback-before-$release_sha"
+node_tooling="$release_dir/deploy/prod/node-tooling.sh"
 
 test "$old_env" != 'REPLACE_WITH_ABSOLUTE_CURRENT_ENV_FILE'
 case "$old_env" in /*) ;; *) exit 1 ;; esac
@@ -93,9 +94,9 @@ install -m 600 "$old_env" "$target_env"
 платёжные URL и snapshots до отдельной проверки backup и retention policy:
 
 ```bash
-printf '%s' false | node deploy/prod/credential-file-guard.mjs env-set \
+printf '%s' false | sh "$node_tooling" credential-env-set \
   "$rollback_env" PAYMENT_DATA_RETENTION_ENABLED
-printf '%s' false | node deploy/prod/credential-file-guard.mjs env-set \
+printf '%s' false | sh "$node_tooling" credential-env-set \
   "$target_env" PAYMENT_DATA_RETENTION_ENABLED
 ```
 
@@ -130,7 +131,7 @@ cd "$release_dir"
 export CLEAN_PAY_ZDT_ENV_FILE="$target_env"
 export CLEAN_PAY_ZDT_ROLLBACK_ENV_FILE="$rollback_env"
 
-node deploy/prod/zero-downtime-env.mjs verify "$target_env" "$rollback_env"
+sh "$node_tooling" zero-downtime-env verify "$target_env" "$rollback_env"
 ./deploy.sh build
 ```
 
@@ -232,7 +233,7 @@ same-inode запись.
 caddy_state="$caddy_state_root/clean-pay-zdt-$release_sha"
 caddy_backup="$caddy_state/Caddyfile.primary"
 caddy_candidate="$caddy_state/Caddyfile.canary"
-caddy_writer="$release_dir/deploy/prod/caddyfile-same-inode.mjs"
+node_tooling="$release_dir/deploy/prod/node-tooling.sh"
 
 test -f "$caddy_host"
 test ! -L "$caddy_host"
@@ -266,6 +267,8 @@ docker exec "$caddy_container" caddy validate --config /tmp/Caddyfile-clean-pay-
 ```
 
 Оба варианта и checksums должны быть проверены до первой записи.
+`node-tooling.sh` запускает reviewed `caddyfile-same-inode.mjs` через host Node.js
+или закреплённый контейнер без изменения semantics записи.
 
 ## 4. Persistent switch на canary
 
@@ -280,7 +283,8 @@ restore_primary_on_failure() {
   trap - 0 HUP INT TERM
   if [ "$candidate_committed" -eq 0 ]; then
     recovery_failed=0
-    node "$caddy_writer" restore "$caddy_host" "$caddy_backup" "$primary_sha" || recovery_failed=1
+    sh "$node_tooling" caddyfile restore \
+      "$caddy_host" "$caddy_backup" "$primary_sha" || recovery_failed=1
     test "$(stat -c '%d:%i' "$caddy_host")" = "$caddy_inode" || recovery_failed=1
     test "$(sha256sum "$caddy_host" | awk '{print $1}')" = "$primary_sha" || recovery_failed=1
     test "$(docker exec "$caddy_container" stat -c '%d:%i' /etc/caddy/Caddyfile)" = "$caddy_inode" || recovery_failed=1
@@ -298,7 +302,7 @@ trap 'exit 129' HUP
 trap 'exit 130' INT
 trap 'exit 143' TERM
 
-node "$caddy_writer" replace \
+sh "$node_tooling" caddyfile replace \
   "$caddy_host" "$caddy_candidate" "$primary_sha" "$candidate_sha"
 test "$(stat -c '%d:%i' "$caddy_host")" = "$caddy_inode"
 test "$(sha256sum "$caddy_host" | awk '{print $1}')" = "$candidate_sha"
@@ -354,7 +358,8 @@ restore_canary_on_failure() {
   trap - 0 HUP INT TERM
   if [ "$primary_committed" -eq 0 ]; then
     recovery_failed=0
-    node "$caddy_writer" restore "$caddy_host" "$caddy_candidate" "$candidate_sha" || recovery_failed=1
+    sh "$node_tooling" caddyfile restore \
+      "$caddy_host" "$caddy_candidate" "$candidate_sha" || recovery_failed=1
     test "$(stat -c '%d:%i' "$caddy_host")" = "$caddy_inode" || recovery_failed=1
     test "$(sha256sum "$caddy_host" | awk '{print $1}')" = "$candidate_sha" || recovery_failed=1
     test "$(docker exec "$caddy_container" stat -c '%d:%i' /etc/caddy/Caddyfile)" = "$caddy_inode" || recovery_failed=1
@@ -372,7 +377,7 @@ trap 'exit 129' HUP
 trap 'exit 130' INT
 trap 'exit 143' TERM
 
-node "$caddy_writer" replace \
+sh "$node_tooling" caddyfile replace \
   "$caddy_host" "$caddy_backup" "$candidate_sha" "$primary_sha"
 test "$(stat -c '%d:%i' "$caddy_host")" = "$caddy_inode"
 test "$(sha256sum "$caddy_host" | awk '{print $1}')" = "$primary_sha"
