@@ -1,3 +1,4 @@
+import { Buffer } from "node:buffer";
 import { readFileSync } from "node:fs";
 
 import { describe, expect, it } from "vitest";
@@ -8,7 +9,7 @@ const compose = readFileSync(".devcontainer/docker-compose.yml", "utf8");
 const ciWorkflow = readFileSync(".github/workflows/ci.yml", "utf8");
 const dependabot = readFileSync(".github/dependabot.yml", "utf8");
 const productionRemnashopEnv = readFileSync("deploy/prod/remnashop.env.example", "utf8");
-const remnashopRevision = "b0c28153fb604475c9da3a1cad94421363657668";
+const remnashopRevision = "c2ab151676ed15b7035e438287449f6e2cc4281b";
 
 const hostPortContract = [
   ["CLEAN_PAY_DEVCONTAINER_APP_HOST_PORT", "4000", "4000"],
@@ -99,6 +100,46 @@ describe("devcontainer e2e runner readiness", () => {
     expect(productionRemnashopEnv).toContain("EMAIL_USE_TLS=true");
   });
 
+  it("uses fixture secrets accepted by every Remnashop configuration guard", () => {
+    const guardedSecrets = [
+      ["APP_CRYPT_KEY", 44],
+      ["APP_API_KEY", 24],
+      ["APP_AUTH_SERVICE_KEY", 24],
+      ["APP_JWT_SECRET", 32],
+      ["BOT_SECRET_TOKEN", 32],
+      ["REMNAWAVE_WEBHOOK_SECRET", 32],
+      ["DATABASE_PASSWORD", 24],
+    ] as const;
+    const configuredSecrets: string[] = [];
+
+    for (const [name, minimumLength] of guardedSecrets) {
+      const value = compose.match(new RegExp(`^\\s+${name}:\\s*"?([^\\s"#]+)"?\\s*$`, "m"))?.[1];
+
+      expect(value, `${name} must be present`).toBeDefined();
+      expect(value!.length, `${name} length`).toBeGreaterThanOrEqual(minimumLength);
+      expect(new Set(value).size, `${name} distinct characters`).toBeGreaterThanOrEqual(8);
+      expect(value!.replace(/[^a-z0-9]/gi, "").toLowerCase(), `${name} placeholder`).not.toMatch(
+        /changeme|replaceme|example|placeholder/,
+      );
+      expect(value, `${name} repeated pattern`).not.toMatch(/^(.{1,8})\1+$/);
+      configuredSecrets.push(value!);
+    }
+
+    expect(new Set(configuredSecrets).size).toBe(configuredSecrets.length);
+    const cryptKey = configuredSecrets[0]!;
+    expect(cryptKey).toMatch(/^[A-Za-z0-9+/]{43}=$/);
+    expect(Buffer.from(cryptKey, "base64")).toHaveLength(32);
+    expect(compose).not.toMatch(/^\s+REDIS_PASSWORD:/m);
+    expect(compose.match(/^\s+REMNASHOP_API_KEY:\s*([^\s#]+)\s*$/m)?.[1]).toBe(
+      compose.match(/^\s+APP_API_KEY:\s*([^\s#]+)\s*$/m)?.[1],
+    );
+    expect(compose.match(/^\s+REMNASHOP_AUTH_SERVICE_KEY:\s*([^\s#]+)\s*$/m)?.[1]).toBe(
+      compose.match(/^\s+APP_AUTH_SERVICE_KEY:\s*([^\s#]+)\s*$/m)?.[1],
+    );
+    const databasePassword = compose.match(/^\s+DATABASE_PASSWORD:\s*([^\s#]+)\s*$/m)?.[1];
+    expect(compose).toContain(`POSTGRES_PASSWORD: ${databasePassword}`);
+  });
+
   it("uses one project-scoped Remnashop image across every service", () => {
     const imageReference =
       "image: ${CLEAN_PAY_DEVCONTAINER_REMNASHOP_IMAGE:-${COMPOSE_PROJECT_NAME:-clean-pay-dev}-remnashop:latest}";
@@ -127,7 +168,7 @@ describe("devcontainer e2e runner readiness", () => {
     expect(compose).toContain(
       `BUILD_COMMIT: \${REMNASHOP_BUILD_REVISION:-${remnashopRevision}}`,
     );
-    expect(compose).toContain("BUILD_BRANCH: codex/clean-pay-integration-upstream-dev");
+    expect(compose).toContain("BUILD_BRANCH: codex/email-reminders-default-deploy-20260913");
     expect(compose).not.toContain("b9da68a651e9ab0b7ed52d030e13754311614759");
   });
 
