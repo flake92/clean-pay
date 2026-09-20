@@ -17,6 +17,10 @@ import { describe, expect, it } from "vitest";
 const script = readFileSync("deploy/prod/zero-downtime-app.sh", "utf8");
 const deployScript = readFileSync("deploy.sh", "utf8");
 const nodeToolingScript = readFileSync("deploy/prod/node-tooling.sh", "utf8");
+const caddySameInodeScript = readFileSync(
+  "deploy/prod/caddyfile-same-inode.mjs",
+  "utf8",
+);
 const runbook = readFileSync(
   "deploy/prod/zero-downtime-production-runbook.md",
   "utf8",
@@ -26,6 +30,20 @@ const posixShell = process.platform === "win32"
       .find((candidate) => existsSync(candidate))
   : "sh";
 const shellIntegrationTimeout = process.platform === "win32" ? 45_000 : 15_000;
+
+function shellPath(value: string) {
+  if (process.platform !== "win32" || !posixShell) return value;
+  const converted = spawnSync(
+    posixShell,
+    ["-c", 'cygpath -u -- "$VALUE"'],
+    {
+      encoding: "utf8",
+      env: { ...process.env, VALUE: value },
+    },
+  );
+  expect(converted.status, converted.stderr).toBe(0);
+  return converted.stdout.trim();
+}
 
 function shellFunctionFrom(source: string, name: string) {
   const start = source.indexOf(`${name}() {`);
@@ -39,6 +57,14 @@ function shellFunctionFrom(source: string, name: string) {
 
 function shellFunction(name: string) {
   return shellFunctionFrom(script, name);
+}
+
+function runbookShellFunction(name: string) {
+  const start = runbook.indexOf(`${name}() {`);
+  expect(start, `${name} must exist in the runbook`).toBeGreaterThanOrEqual(0);
+  const end = runbook.indexOf("\n}\ntrap ", start);
+  expect(end, `${name} must terminate before its trap`).toBeGreaterThan(start);
+  return runbook.slice(start, end + 2);
 }
 
 function shellSubshellFunction(name: string) {
@@ -112,9 +138,10 @@ printf 'mode=%s\\napp=%s\\nmigration=%s\\n' \\
   "$RESOLVED_ROLLBACK_MIGRATION_IMAGE"
 `;
 
-  return spawnSync(posixShell!, ["-c", harness], {
+  return spawnSync(posixShell!, ["-s"], {
     cwd: process.cwd(),
     encoding: "utf8",
+    input: harness,
     env: {
       NODE_ENV: "test",
       PATH: process.env.PATH ?? "",
@@ -347,6 +374,7 @@ ${shellFunction("materialize_role_environment")}
 ${shellFunction("environment_pair_command")}
 ${shellFunction("materialize_rollback_compatibility_environment")}
 operation_lock_command acquire zero-downtime-stage 123
+operation_lock_command verify "$(printf 'a%.0s' $(seq 1 64))"
 operation_lock_command release "$(printf 'a%.0s' $(seq 1 64))"
 validate_environment_file "$ENV_FILE"
 materialize_role_environment
@@ -357,13 +385,14 @@ materialize_rollback_compatibility_environment \
   "$ROLLBACK_ENV_FILE" \
   "$fixture_root/output/compat.env"
 `;
-      const result = spawnSync(posixShell!, ["-c", harness], {
+      const result = spawnSync(posixShell!, ["-s"], {
         cwd: process.cwd(),
         encoding: "utf8",
+        input: harness,
       });
       expect(result.status, result.stderr).toBe(0);
       const calls = result.stdout.trim().split(/\r?\n/u);
-      expect(calls).toHaveLength(7);
+      expect(calls).toHaveLength(8);
       for (const call of calls) {
         expect(call).toContain("|--pull|never|");
         expect(call).toContain("|--read-only|--network|none|");
@@ -371,15 +400,18 @@ materialize_rollback_compatibility_environment \
         expect(call).toContain(`|${script.match(/^NODE_TOOLING_IMAGE="([^"]+)"/mu)?.[1]}|`);
       }
       expect(calls[0]).toMatch(/target=.*\/deploy\/prod\|/u);
-      expect(calls[2]).toMatch(/target=.*\/current,readonly\|/u);
-      expect(calls[3]).toMatch(/target=.*\/current\|/u);
-      expect(calls[4]).toMatch(/target=.*\/current,readonly\|/u);
-      expect(calls[4]).toMatch(/target=.*\/rollback,readonly\|/u);
-      expect(calls[5]).toMatch(/target=.*\/current\|/u);
-      expect(calls[5]).not.toMatch(/target=.*\/current,readonly\|/u);
+      expect(calls[0]).not.toMatch(/target=.*\/deploy\/prod,readonly\|/u);
+      expect(calls[1]).toMatch(/target=.*\/deploy\/prod,readonly\|/u);
+      expect(calls[2]).not.toMatch(/target=.*\/deploy\/prod,readonly\|/u);
+      expect(calls[3]).toMatch(/target=.*\/current,readonly\|/u);
+      expect(calls[4]).toMatch(/target=.*\/current\|/u);
+      expect(calls[5]).toMatch(/target=.*\/current,readonly\|/u);
       expect(calls[5]).toMatch(/target=.*\/rollback,readonly\|/u);
+      expect(calls[6]).toMatch(/target=.*\/current\|/u);
+      expect(calls[6]).not.toMatch(/target=.*\/current,readonly\|/u);
       expect(calls[6]).toMatch(/target=.*\/rollback,readonly\|/u);
-      expect(calls[6]).toMatch(/target=.*\/output\|/u);
+      expect(calls[7]).toMatch(/target=.*\/rollback,readonly\|/u);
+      expect(calls[7]).toMatch(/target=.*\/output\|/u);
     },
     shellIntegrationTimeout,
   );
@@ -735,6 +767,10 @@ materialize_rollback_compatibility_environment \
     const primaryContents = "example.test { reverse_proxy clean-pay:4000 }\n";
     const candidateContents =
       "example.test { reverse_proxy clean-pay-canary:4000 }\n";
+    const unknownContents =
+      "example.test { reverse_proxy unknown-unreviewed-upstream:4000 }\n";
+    const primaryHash = sha256(primaryContents);
+    const candidateHash = sha256(candidateContents);
 
     try {
       writeFileSync(authoritative, primaryContents);
@@ -749,8 +785,8 @@ materialize_rollback_compatibility_environment \
           "replace",
           authoritative,
           candidate,
-          sha256(primaryContents),
-          sha256(candidateContents),
+          primaryHash,
+          candidateHash,
         ],
         { cwd: process.cwd(), encoding: "utf8" },
       );
@@ -766,7 +802,7 @@ materialize_rollback_compatibility_environment \
           authoritative,
           primary,
           sha256("not-the-current-file"),
-          sha256(primaryContents),
+          primaryHash,
         ],
         { cwd: process.cwd(), encoding: "utf8" },
       );
@@ -781,17 +817,110 @@ materialize_rollback_compatibility_environment \
           "restore",
           authoritative,
           primary,
-          sha256(primaryContents),
+          candidateHash,
+          primaryHash,
         ],
         { cwd: process.cwd(), encoding: "utf8" },
       );
       expect(restore.status, restore.stderr).toBe(0);
       expect(readFileSync(authoritative, "utf8")).toBe(primaryContents);
       expect(statSync(authoritative).ino).toBe(inode);
+
+      const idempotentRestore = spawnSync(
+        process.execPath,
+        [
+          "deploy/prod/caddyfile-same-inode.mjs",
+          "restore",
+          authoritative,
+          primary,
+          candidateHash,
+          primaryHash,
+        ],
+        { cwd: process.cwd(), encoding: "utf8" },
+      );
+      expect(idempotentRestore.status, idempotentRestore.stderr).toBe(0);
+      expect(idempotentRestore.stdout).toContain("no write was needed");
+      expect(readFileSync(authoritative, "utf8")).toBe(primaryContents);
+      expect(statSync(authoritative).ino).toBe(inode);
+
+      writeFileSync(authoritative, unknownContents);
+      expect(statSync(authoritative).ino).toBe(inode);
+      const unknownRestore = spawnSync(
+        process.execPath,
+        [
+          "deploy/prod/caddyfile-same-inode.mjs",
+          "restore",
+          authoritative,
+          primary,
+          candidateHash,
+          primaryHash,
+        ],
+        { cwd: process.cwd(), encoding: "utf8" },
+      );
+      expect(unknownRestore.status).not.toBe(0);
+      expect(unknownRestore.stderr).toContain("checksum does not match");
+      expect(readFileSync(authoritative, "utf8")).toBe(unknownContents);
+      expect(statSync(authoritative).ino).toBe(inode);
     } finally {
       rmSync(directory, { recursive: true, force: true });
     }
   });
+
+  it("keeps Caddy post-write verification on the guarded descriptor", () => {
+    const guardedWrite = caddySameInodeScript.slice(
+      caddySameInodeScript.indexOf("function writeSameInode"),
+      caddySameInodeScript.indexOf("function parseArguments"),
+    );
+    expect(guardedWrite).toContain("readDescriptor(descriptor, afterOperation.size)");
+    expect(guardedWrite).toContain("assertSameFileVersion(afterOperation, afterVerification)");
+    expect(guardedWrite).not.toContain("readFileSync(input.targetPath)");
+    expect(guardedWrite.indexOf("inspectRegularFile(")).toBeLessThan(
+      guardedWrite.indexOf("closeSync(descriptor)"),
+    );
+  });
+
+  it.skipIf(!posixShell)(
+    "refuses Caddy writes before mutation when the phase-wide lock token is missing",
+    () => {
+      const directory = mkdtempSync(path.join(tmpdir(), "clean-pay-caddy-lock-"));
+      const authoritative = path.join(directory, "Caddyfile");
+      const candidate = path.join(directory, "Caddyfile.canary");
+      const primaryContents = "example.test { reverse_proxy clean-pay:4000 }\n";
+      const candidateContents =
+        "example.test { reverse_proxy clean-pay-canary:4000 }\n";
+
+      try {
+        writeFileSync(authoritative, primaryContents);
+        writeFileSync(candidate, candidateContents);
+        const inode = statSync(authoritative).ino;
+        const rejected = spawnSync(
+          posixShell!,
+          [
+            "deploy/prod/node-tooling.sh",
+            "caddyfile",
+            "replace",
+            shellPath(authoritative),
+            shellPath(candidate),
+            sha256(primaryContents),
+            sha256(candidateContents),
+          ],
+          {
+            cwd: process.cwd(),
+            encoding: "utf8",
+            env: { NODE_ENV: "test", PATH: process.env.PATH ?? "" },
+          },
+        );
+        expect(rejected.status).not.toBe(0);
+        expect(rejected.stderr).toContain(
+          "CLEAN_PAY_PRODUCTION_OPERATION_LOCK_TOKEN is required",
+        );
+        expect(readFileSync(authoritative, "utf8")).toBe(primaryContents);
+        expect(statSync(authoritative).ino).toBe(inode);
+      } finally {
+        rmSync(directory, { recursive: true, force: true });
+      }
+    },
+  );
 
   it.skipIf(!posixShell)("keeps every production runbook shell block syntactically valid", () => {
     const blocks = [...runbook.matchAll(/```bash\n([\s\S]*?)```/g)].map(
@@ -806,6 +935,56 @@ materialize_rollback_compatibility_environment \
       expect(syntax.status, `runbook block ${index + 1}: ${syntax.stderr}`).toBe(0);
     }
   });
+
+  it.skipIf(!posixShell)(
+    "never validates or reloads Caddy after a guarded recovery refusal",
+    () => {
+      for (const [functionName, committedName] of [
+        ["restore_primary_on_failure", "candidate_committed"],
+        ["restore_canary_on_failure", "primary_committed"],
+      ] as const) {
+        const recovery = runbookShellFunction(functionName);
+        const harness = `
+set -eu
+${committedName}=0
+node_tooling=/reviewed/node-tooling.sh
+caddy_host=/reviewed/Caddyfile
+caddy_backup=/reviewed/Caddyfile.primary
+caddy_candidate=/reviewed/Caddyfile.canary
+caddy_container=reviewed-caddy
+caddy_inode=1:2
+primary_sha=$(printf 'a%.0s' $(seq 1 64))
+candidate_sha=$(printf 'b%.0s' $(seq 1 64))
+sh() { return 1; }
+docker() { printf 'UNEXPECTED_DOCKER:%s\n' "$*"; return 0; }
+stat() { printf 'UNEXPECTED_STAT\n'; return 0; }
+sha256sum() { printf 'UNEXPECTED_SHA256\n'; return 0; }
+${recovery}
+${functionName}
+`;
+        const refused = spawnSync(posixShell!, ["-s"], {
+          cwd: process.cwd(),
+          encoding: "utf8",
+          input: harness,
+        });
+        expect(refused.status, `${functionName}: ${refused.stderr}`).toBe(1);
+        expect(refused.stderr).toContain("CRITICAL: automatic");
+        expect(refused.stdout).not.toContain("UNEXPECTED_");
+        expect(recovery).toContain("switch_status=1");
+
+        const guardStart = recovery.indexOf('if sh "$node_tooling" caddyfile restore');
+        const successBranch = recovery.indexOf("; then", guardStart);
+        const failureBranch = recovery.indexOf("\n    else", successBranch);
+        const validate = recovery.indexOf("caddy validate", successBranch);
+        const reload = recovery.indexOf("caddy reload", successBranch);
+        expect(guardStart).toBeGreaterThanOrEqual(0);
+        expect(successBranch).toBeGreaterThan(guardStart);
+        expect(validate).toBeGreaterThan(successBranch);
+        expect(reload).toBeGreaterThan(validate);
+        expect(failureBranch).toBeGreaterThan(reload);
+      }
+    },
+  );
 
   it("documents a restart-durable same-inode Caddy switch and preserves the advertiser route", () => {
     expect(runbook).toContain("REPLACE_WITH_ABSOLUTE_RELEASE_ROOT");
@@ -830,6 +1009,15 @@ materialize_rollback_compatibility_environment \
     expect(runbook).toContain('-eq "$advertiser_route_count"');
     expect(runbook).toContain("reverse_proxy clean-pay-advertiser-cabinet:4100");
     expect(runbook).toContain("caddyfile-same-inode.mjs");
+    expect(runbook).toContain("operation-lock acquire");
+    expect(runbook).toContain("operation-lock verify");
+    expect(runbook).toContain("operation-lock release");
+    expect(runbook.indexOf("operation-lock acquire")).toBeLessThan(
+      runbook.indexOf('caddyfile replace \\\n  "$caddy_host" "$caddy_candidate"'),
+    );
+    expect(runbook.lastIndexOf("operation-lock release")).toBeGreaterThan(
+      runbook.lastIndexOf('caddyfile replace \\\n  "$caddy_host" "$caddy_backup"'),
+    );
     expect(runbook).toContain('stat -c \'%d:%i\' "$caddy_host"');
     expect(runbook).toContain('sha256sum "$caddy_host"');
     expect(

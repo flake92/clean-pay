@@ -3,6 +3,7 @@ set -eu
 
 ROOT_DIR=$(CDPATH='' cd -- "$(dirname -- "$0")/../.." && pwd)
 NODE_TOOLING_IMAGE="node:24.18.0-bookworm-slim@sha256:6f7b03f7c2c8e2e784dcf9295400527b9b1270fd37b7e9a7285cf83b6951452d"
+OPERATION_LOCK_PATH=${CLEAN_PAY_PRODUCTION_OPERATION_LOCK_PATH:-"$ROOT_DIR/deploy/prod/.production-operation.lock"}
 
 fail() {
   printf '%s\n' "Production Node tooling failed: $*" >&2
@@ -15,7 +16,9 @@ Usage: deploy/prod/node-tooling.sh <command> [arguments]
 
   credential-env-set ENV_FILE NAME
   zero-downtime-env <verify|restore-images> CURRENT_ENV ROLLBACK_ENV
-  caddyfile <replace|restore> AUTHORITATIVE_FILE SOURCE_FILE EXPECTED_SHA [NEW_SHA]
+  operation-lock acquire OPERATION [OWNER_PID]
+  operation-lock <verify|release> TOKEN
+  caddyfile <replace|restore> AUTHORITATIVE_FILE SOURCE_FILE CURRENT_SHA SOURCE_SHA
 
 Uses host Node.js when available. Otherwise it runs the reviewed helper from a
 pinned Node image with only the exact required parent directories mounted.
@@ -60,9 +63,55 @@ ensure_node_tooling_image() {
   command -v docker >/dev/null 2>&1 \
     || fail "docker is required when host Node.js is unavailable"
   if ! docker image inspect "$NODE_TOOLING_IMAGE" >/dev/null 2>&1; then
-    docker pull "$NODE_TOOLING_IMAGE" \
+    docker pull "$NODE_TOOLING_IMAGE" >&2 \
       || fail "the pinned Node tooling image could not be fetched"
   fi
+}
+
+run_operation_lock() {
+  lock_mode=${1:-}
+  case "$lock_mode" in
+    acquire)
+      [ "$#" -eq 2 ] || [ "$#" -eq 3 ] \
+        || fail "operation-lock acquire requires OPERATION and optional OWNER_PID"
+      ;;
+    verify|release)
+      [ "$#" -eq 2 ] || fail "operation-lock $lock_mode requires TOKEN"
+      ;;
+    *) fail "operation-lock mode must be acquire, verify, or release" ;;
+  esac
+  shift
+  validate_absolute_path "$OPERATION_LOCK_PATH" "production operation lock"
+  operation_lock_parent=$(dirname -- "$OPERATION_LOCK_PATH")
+  validate_bind_directory "$operation_lock_parent" "production operation lock directory"
+  if command -v node >/dev/null 2>&1; then
+    node "$ROOT_DIR/deploy/prod/production-operation-lock.mjs" \
+      "$lock_mode" "$OPERATION_LOCK_PATH" "$@"
+    return
+  fi
+
+  if [ "$lock_mode" = verify ]; then
+    run_container \
+      --mount "type=bind,source=$operation_lock_parent,target=$operation_lock_parent,readonly" \
+      "$NODE_TOOLING_IMAGE" \
+      deploy/prod/production-operation-lock.mjs \
+        "$lock_mode" "$OPERATION_LOCK_PATH" "$@"
+    return
+  fi
+
+  run_container \
+    --mount "type=bind,source=$operation_lock_parent,target=$operation_lock_parent" \
+    "$NODE_TOOLING_IMAGE" \
+    deploy/prod/production-operation-lock.mjs \
+      "$lock_mode" "$OPERATION_LOCK_PATH" "$@"
+}
+
+verify_required_operation_lock() {
+  required_operation_lock_token=${CLEAN_PAY_PRODUCTION_OPERATION_LOCK_TOKEN:-}
+  [ -n "$required_operation_lock_token" ] \
+    || fail "CLEAN_PAY_PRODUCTION_OPERATION_LOCK_TOKEN is required for Caddyfile changes"
+  run_operation_lock verify "$required_operation_lock_token" \
+    || fail "the phase-wide production operation lock is not owned by this rollout"
 }
 
 run_container() {
@@ -161,7 +210,7 @@ run_zero_downtime_env() {
 run_caddyfile() {
   case "${1:-}" in
     replace) [ "$#" -eq 5 ] || fail "caddyfile replace requires four arguments" ;;
-    restore) [ "$#" -eq 4 ] || fail "caddyfile restore requires three arguments" ;;
+    restore) [ "$#" -eq 5 ] || fail "caddyfile restore requires four arguments" ;;
     *) fail "caddyfile mode must be replace or restore" ;;
   esac
   caddy_mode=$1
@@ -170,9 +219,11 @@ run_caddyfile() {
   shift 3
   validate_absolute_path "$authoritative_path" "authoritative Caddyfile"
   validate_absolute_path "$source_path" "Caddyfile source"
+  verify_required_operation_lock
   if command -v node >/dev/null 2>&1; then
     node "$ROOT_DIR/deploy/prod/caddyfile-same-inode.mjs" \
       "$caddy_mode" "$authoritative_path" "$source_path" "$@"
+    verify_required_operation_lock
     return
   fi
 
@@ -187,6 +238,7 @@ run_caddyfile() {
       /run/clean-pay-caddy-authoritative \
       /run/clean-pay-caddy-source \
       "$@"
+  verify_required_operation_lock
 }
 
 command_name=${1:-help}
@@ -201,6 +253,10 @@ case "$command_name" in
   zero-downtime-env)
     shift
     run_zero_downtime_env "$@"
+    ;;
+  operation-lock)
+    shift
+    run_operation_lock "$@"
     ;;
   caddyfile)
     shift
