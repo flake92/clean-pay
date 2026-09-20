@@ -118,7 +118,7 @@ describe("production migration safety", () => {
     expect(ciWorkflow).toContain("remnashop-migration-rehearsal:");
     expect(ciWorkflow).toContain("bash scripts/security/rehearse-clean-pay-migrations.sh");
     expect(ciWorkflow).toContain("bash scripts/security/rehearse-remnashop-migrations.sh");
-    expect(remnashopRehearsal).toContain("c2ab151676ed15b7035e438287449f6e2cc4281b");
+    expect(remnashopRehearsal).toContain("7d27eeefffefb65af702e1c6ef7ed5fc985873c2");
     expect(remnashopRehearsal).toContain('migrate "$SOURCE_DATABASE" 0040');
     expect(remnashopRehearsal).toContain('migrate "$SOURCE_DATABASE" 0047');
     expect(remnashopRehearsal).toContain('migrate "$SOURCE_DATABASE" 0058');
