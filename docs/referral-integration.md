@@ -29,8 +29,9 @@ The referral panel always displays the current points balance. Historical point 
 
 ## Rollout boundary
 
-The current source boundary is PR #135 revision `837d964`. Its referral contract includes the
-durable schema from `0052`, bounded legacy/operator recovery through `0055`,
+The current reviewed source boundary is revision `b0c2815`. Its referral
+contract includes the durable schema from `0052`, bounded legacy/operator
+recovery through `0055`,
 permanent Remnapy contract compatibility, serialized recipient claims,
 database-owned reward audit timestamps, graph-derived referral-level statistics,
 and canonical acyclic referral edges enforced by `0056`. API, worker, and
@@ -38,7 +39,7 @@ scheduler must run one image built from that exact source before referral
 traffic is enabled.
 
 Clean Pay releases that expose e-mail expiration preferences additionally require
-the notification extension based on PR #135 at Alembic revision `0058`; the
+the notification extension through Alembic revision `0059`; the
 configured minimum revision therefore remains the authoritative rollout gate for
 the whole application, while `0056` identifies the referral-specific schema
 boundary.

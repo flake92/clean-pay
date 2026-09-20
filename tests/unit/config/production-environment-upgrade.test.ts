@@ -144,7 +144,7 @@ describe("v0.1.1 production environment upgrade", () => {
     expect(upgraded.CLEAN_PAY_UPGRADE_SOURCE_VERSION).toBe("0.1.1");
     expect(upgraded.PAYMENT_DATA_RETENTION_ENABLED).toBe("false");
     expect(upgraded.PAYMENT_REDIRECT_ORIGINS).toBe("https://pay.clean-pay.dev");
-    expect(upgraded.REMNASHOP_MINIMUM_ALEMBIC_REVISION).toBe("0058");
+    expect(upgraded.REMNASHOP_MINIMUM_ALEMBIC_REVISION).toBe("0059");
     expect(upgraded.POSTGRES_USER).toBe(before.POSTGRES_USER);
     expect(upgraded.POSTGRES_PASSWORD).toBe(before.POSTGRES_PASSWORD);
     for (const secretName of [
@@ -157,6 +157,24 @@ describe("v0.1.1 production environment upgrade", () => {
     ]) {
       expect(upgraded[secretName]).toBe(before[secretName]);
     }
+  });
+
+  it("raises an existing 0058 Remnashop floor to the required 0059 revision", () => {
+    const path = privateEnvironment(legacyEnvironment().replace(
+      "REMNASHOP_MINIMUM_ALEMBIC_REVISION=0050",
+      "REMNASHOP_MINIMUM_ALEMBIC_REVISION=0058",
+    ));
+
+    const preparation = prepareV011ProductionEnvironment(path, {
+      subscriptionOrigins: "https://sub.clean-pay.dev",
+      paymentRedirectOrigins: "https://pay.clean-pay.dev",
+      migrationImage: "clean-pay-prod-migration:local",
+    });
+
+    expect(preparation.updatedNames).toContain(
+      "REMNASHOP_MINIMUM_ALEMBIC_REVISION",
+    );
+    expect(environment(path).REMNASHOP_MINIMUM_ALEMBIC_REVISION).toBe("0059");
   });
 
   it("is idempotent and never silently replaces operator origins or image choices", () => {

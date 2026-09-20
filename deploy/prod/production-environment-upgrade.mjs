@@ -14,7 +14,7 @@ import {
 
 const CURRENT_CONFIG_VERSION = "0.2.0";
 const LEGACY_SOURCE_VERSION = "0.1.1";
-const MINIMUM_REMNASHOP_REVISION = 58n;
+const MINIMUM_REMNASHOP_REVISION = 59n;
 const POSTGRES_IDENTIFIER = /^[A-Za-z_][A-Za-z0-9_]{0,62}$/;
 const ACTIVE_DATABASE_QUERY_PARAMETERS = new Set(["schema", "sslmode"]);
 const LEGACY_DATABASE_QUERY_PARAMETERS = new Set([
@@ -411,7 +411,7 @@ export function prepareV011ProductionEnvironment(path, options = {}) {
     throw new Error("REMNASHOP_MINIMUM_ALEMBIC_REVISION must be numeric");
   }
   if (!minimumRevision || BigInt(minimumRevision) < MINIMUM_REMNASHOP_REVISION) {
-    updates.REMNASHOP_MINIMUM_ALEMBIC_REVISION = "0058";
+    updates.REMNASHOP_MINIMUM_ALEMBIC_REVISION = "0059";
   }
 
   if (Object.keys(updates).length > 0) {

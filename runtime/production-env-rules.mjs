@@ -8,7 +8,7 @@ const OFFICIAL_TELEGRAM_OIDC_URLS = {
 const OFFICIAL_TURNSTILE_VERIFY_URL =
   "https://challenges.cloudflare.com/turnstile/v0/siteverify";
 
-const MINIMUM_REMNASHOP_ALEMBIC_REVISION = 58n;
+const MINIMUM_REMNASHOP_ALEMBIC_REVISION = 59n;
 
 const KNOWN_TURNSTILE_TEST_KEYS = new Set([
   "1x00000000000000000000AA",
@@ -1100,7 +1100,7 @@ export function validateProductionEnvironment(environment) {
     minimumAlembicRevision
     && BigInt(minimumAlembicRevision) < MINIMUM_REMNASHOP_ALEMBIC_REVISION
   ) {
-    fail("REMNASHOP_MINIMUM_ALEMBIC_REVISION must be at least 0058");
+    fail("REMNASHOP_MINIMUM_ALEMBIC_REVISION must be at least 0059");
   }
 
   const logLevel = optional("LOG_LEVEL");

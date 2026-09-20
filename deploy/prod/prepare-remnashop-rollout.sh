@@ -37,7 +37,7 @@ env_value() {
   fi
 }
 
-repository_minimum_revision=0058
+repository_minimum_revision=0059
 minimum_revision=$(env_value REMNASHOP_MINIMUM_ALEMBIC_REVISION "$repository_minimum_revision")
 case "$minimum_revision:$repository_minimum_revision" in
   *[!0-9:]*|:*|*:) fail "Alembic revisions must be numeric (configured=$minimum_revision repository=$repository_minimum_revision)" ;;

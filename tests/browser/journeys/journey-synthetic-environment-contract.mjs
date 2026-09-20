@@ -181,7 +181,7 @@ export function buildJourneySyntheticEnvironment(input) {
     REMNASHOP_WORKER_CONTAINER: "browser-provider-mock",
     REMNASHOP_SCHEDULER_CONTAINER: "browser-provider-mock",
     REMNASHOP_POSTGRES_CONTAINER: "postgres",
-    REMNASHOP_MINIMUM_ALEMBIC_REVISION: "0058",
+    REMNASHOP_MINIMUM_ALEMBIC_REVISION: "0059",
     REMNASHOP_ENV_FILE: "/synthetic/not-mounted.env",
     REMNASHOP_ENV_EXPECTED_UID: "0",
     REMNASHOP_ENV_EXPECTED_GID: "0",

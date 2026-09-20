@@ -31,6 +31,9 @@ describe("interactive owner deployment", () => {
       setup.indexOf("DNS и HTTPS reverse proxy"),
     );
     expect(productionEnvExample).toContain("REMNASHOP_MINIMUM_ALEMBIC_REVISION=0059");
+    expect(deploy).toContain(
+      "required_remnashop_revision=$(env_value REMNASHOP_MINIMUM_ALEMBIC_REVISION 0059)",
+    );
   });
 
   it("creates secrets safely and does not require Docker before configuration", () => {

@@ -682,8 +682,8 @@ describe("guarded zero-downtime application rollout", () => {
     expect(runbook).not.toContain("caddy reload --config /tmp/Caddyfile-clean-pay-canary");
     expect(runbook).toContain("Любая pending, failed или");
     expect(runbook).toContain("`migrate deploy`, `db push`");
-    expect(runbook).toContain("revision `0058`");
-    expect(runbook).not.toContain("revision `0057`");
+    expect(runbook).toContain("revision `0059`");
+    expect(runbook).not.toContain("revision `0058`");
     for (const privateLiteral of [
       "host2",
       "2.8 GiB",
