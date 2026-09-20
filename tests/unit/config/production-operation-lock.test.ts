@@ -17,6 +17,7 @@ import {
   acquireProductionOperationLock,
   exitCodeAfterProductionOperationLockRelease,
   releaseProductionOperationLock,
+  verifyProductionOperationLock,
 } from "../../../deploy/prod/production-operation-lock.mjs";
 
 const temporaryDirectories: string[] = [];
@@ -25,6 +26,20 @@ const posixShell = process.platform === "win32"
       .find((candidate) => existsSync(candidate))
   : "sh";
 const shellIntegrationTimeout = process.platform === "win32" ? 45_000 : 15_000;
+
+function shellPath(value: string) {
+  if (process.platform !== "win32" || !posixShell) return value;
+  const converted = spawnSync(
+    posixShell,
+    ["-c", 'cygpath -u -- "$VALUE"'],
+    {
+      encoding: "utf8",
+      env: { ...process.env, VALUE: value },
+    },
+  );
+  expect(converted.status, converted.stderr).toBe(0);
+  return converted.stdout.trim();
+}
 
 function shellFunctionFrom(source: string, name: string) {
   const start = source.indexOf(`${name}() {`);
@@ -86,9 +101,10 @@ case "$MODE" in
   term) kill -TERM "$$" ;;
 esac
 `;
-  return spawnSync(posixShell!, ["-c", harness], {
+  return spawnSync(posixShell!, ["-s"], {
     cwd: process.cwd(),
     encoding: "utf8",
+    input: harness,
     env: {
       NODE_ENV: "test",
       PATH: process.env.PATH ?? "",
@@ -125,10 +141,154 @@ describe("production operation mutual exclusion", () => {
     expect(() => acquireProductionOperationLock(path, "restart"))
       .toThrow("another production operation is active");
     expect(existsSync(path)).toBe(true);
+    expect(() => verifyProductionOperationLock(path, token)).not.toThrow();
+    expect(() => verifyProductionOperationLock(path, "0".repeat(64)))
+      .toThrow("ownership token does not match");
+    expect(existsSync(path)).toBe(true);
 
     releaseProductionOperationLock(path, token);
     expect(existsSync(path)).toBe(false);
   });
+
+  it("verifies lock ownership through the CLI without changing or releasing it", () => {
+    const path = operationLockPath();
+    const token = acquireProductionOperationLock(path, "zero-downtime-rollout");
+    const before = readFileSync(path, "utf8");
+    const script = resolve("deploy/prod/production-operation-lock.mjs");
+
+    const verified = spawnSync(
+      process.execPath,
+      [script, "verify", path, token],
+      { cwd: process.cwd(), encoding: "utf8" },
+    );
+    expect(verified.status, verified.stderr).toBe(0);
+    expect(verified.stdout).toBe("");
+    expect(readFileSync(path, "utf8")).toBe(before);
+
+    const rejected = spawnSync(
+      process.execPath,
+      [script, "verify", path, "0".repeat(64)],
+      { cwd: process.cwd(), encoding: "utf8" },
+    );
+    expect(rejected.status).not.toBe(0);
+    expect(rejected.stderr).toContain("ownership token does not match");
+    expect(readFileSync(path, "utf8")).toBe(before);
+
+    releaseProductionOperationLock(path, token);
+  });
+
+  it.skipIf(!posixShell)(
+    "inherits, verifies, and never releases a caller-owned zero-downtime lock",
+    () => {
+      const source = readFileSync("deploy/prod/zero-downtime-app.sh", "utf8");
+      const harness = `
+set -eu
+lock_held=0
+operation_lock_token=''
+operation_lock_owned=0
+verified_image_dir=''
+verified_image_output=''
+verified_compatibility_env=''
+state_temp=''
+rollback_compose_on_failure=0
+cleanup_canary_on_failure=0
+CANARY_NAME=''
+LOCK_DIR="\${OPERATION_LOCK_PATH}.private"
+${shellFunctionFrom(source, "fail")}
+${shellFunctionFrom(source, "validate_absolute_state_path")}
+${shellFunctionFrom(source, "release_lock")}
+${shellFunctionFrom(source, "host_node_available")}
+${shellFunctionFrom(source, "operation_lock_command")}
+${shellFunctionFrom(source, "acquire_production_operation_lock")}
+${shellFunctionFrom(source, "enter_production_operation_lock")}
+${shellFunctionFrom(source, "release_production_operation_lock")}
+${shellFunctionFrom(source, "verify_inherited_production_operation_lock")}
+${shellFunctionFrom(source, "cleanup_private_files")}
+${shellFunctionFrom(source, "on_exit")}
+trap on_exit 0
+trap 'exit 129' HUP
+trap 'exit 130' INT
+trap 'exit 143' TERM
+enter_production_operation_lock zero-downtime-promote
+[ "$operation_lock_owned" -eq 0 ]
+case "$MODE" in
+  success) : ;;
+  fail) exit 17 ;;
+  attempt-release)
+    if release_production_operation_lock; then
+      fail "inherited lock was unexpectedly released"
+    fi
+    ;;
+  *) fail "unknown inherited-lock test mode" ;;
+esac
+`;
+
+      for (const [mode, expectedStatus] of [
+        ["success", 0],
+        ["fail", 17],
+        ["attempt-release", 0],
+      ] as const) {
+        const path = operationLockPath();
+        const token = acquireProductionOperationLock(path, "zero-downtime-rollout");
+        const child = spawnSync(posixShell!, ["-s"], {
+          cwd: process.cwd(),
+          encoding: "utf8",
+          input: harness,
+          env: {
+            NODE_ENV: "test",
+            PATH: process.env.PATH ?? "",
+            MODE: mode,
+            OPERATION_LOCK_PATH: shellPath(path),
+            OPERATION_LOCK_SCRIPT: shellPath(
+              resolve("deploy/prod/production-operation-lock.mjs"),
+            ),
+            CLEAN_PAY_PRODUCTION_OPERATION_LOCK_TOKEN: token,
+          },
+        });
+        expect(child.status, `${mode}: ${child.stderr}`).toBe(expectedStatus);
+        expect(existsSync(path), mode).toBe(true);
+        expect(() => verifyProductionOperationLock(path, token)).not.toThrow();
+        releaseProductionOperationLock(path, token);
+      }
+
+      for (const scenario of ["missing", "wrong", "released"] as const) {
+        const path = operationLockPath();
+        const token = acquireProductionOperationLock(path, "zero-downtime-rollout");
+        if (scenario === "released") releaseProductionOperationLock(path, token);
+        const inheritedToken = scenario === "missing"
+          ? undefined
+          : scenario === "wrong"
+            ? "0".repeat(64)
+            : token;
+        const child = spawnSync(posixShell!, ["-s"], {
+          cwd: process.cwd(),
+          encoding: "utf8",
+          input: harness,
+          env: {
+            NODE_ENV: "test",
+            PATH: process.env.PATH ?? "",
+            MODE: "success",
+            OPERATION_LOCK_PATH: shellPath(path),
+            OPERATION_LOCK_SCRIPT: shellPath(
+              resolve("deploy/prod/production-operation-lock.mjs"),
+            ),
+            ...(inheritedToken
+              ? { CLEAN_PAY_PRODUCTION_OPERATION_LOCK_TOKEN: inheritedToken }
+              : {}),
+          },
+        });
+        expect(child.status, `${scenario}: ${child.stderr}`).not.toBe(0);
+        if (scenario === "released") {
+          expect(existsSync(path)).toBe(false);
+        } else {
+          expect(existsSync(path)).toBe(true);
+          expect(() => verifyProductionOperationLock(path, token)).not.toThrow();
+          releaseProductionOperationLock(path, token);
+        }
+      }
+    },
+    shellIntegrationTimeout,
+  );
 
   it("refuses a non-owner release without deleting the lock", () => {
     const path = operationLockPath();
@@ -282,14 +442,23 @@ process.exit(originalExitCode);
       expect(prod).toContain(`process.once("${signal}"`);
     }
     expect(zeroDowntime).toContain("deploy/prod/.production-operation.lock");
+    expect(zeroDowntime).toContain(
+      'CLEAN_PAY_PRODUCTION_OPERATION_LOCK_PATH:-"$ROOT_DIR/deploy/prod/.production-operation.lock"',
+    );
     expect(zeroDowntime).toContain("production-operation-lock.mjs");
     expect(zeroDowntime).toContain('"$operation_name" "$$"');
     expect(zeroDowntime).toMatch(
-      /stage\|verify\|promote\|rollback\|remove\|status\)[\s\S]{0,120}acquire_production_operation_lock/,
+      /stage\|verify\|promote\|rollback\|remove\|status\)[\s\S]{0,120}enter_production_operation_lock/,
     );
-    expect(zeroDowntime.indexOf('acquire_production_operation_lock "zero-downtime-$COMMAND"'))
+    expect(zeroDowntime.indexOf('enter_production_operation_lock "zero-downtime-$COMMAND"'))
       .toBeLessThan(zeroDowntime.lastIndexOf("require_tools_and_environment"));
     expect(zeroDowntime).toContain("release_production_operation_lock");
+    expect(shellFunctionFrom(zeroDowntime, "enter_production_operation_lock"))
+      .toContain('operation_lock_command verify "$inherited_token"');
+    expect(shellFunctionFrom(zeroDowntime, "release_production_operation_lock"))
+      .toContain('[ "$operation_lock_owned" -eq 1 ] || return 1');
+    expect(shellFunctionFrom(zeroDowntime, "on_exit"))
+      .toContain("verify_inherited_production_operation_lock");
     expect(zeroDowntime).toContain("trap on_exit 0");
     expect(deploy).toContain("credential-file-guard.mjs env-set");
     expect(start).toContain("$CREDENTIAL_FILE_GUARD_SCRIPT\" env-set");
@@ -304,6 +473,7 @@ process.exit(originalExitCode);
 set -eu
 lock_held=0
 operation_lock_token=''
+operation_lock_owned=0
 verified_image_dir=''
 verified_image_output=''
 verified_compatibility_env=''
@@ -313,6 +483,7 @@ cleanup_canary_on_failure=0
 CANARY_NAME=''
 LOCK_DIR="\${OPERATION_LOCK_PATH}.private"
 ${shellFunctionFrom(source, "fail")}
+${shellFunctionFrom(source, "validate_absolute_state_path")}
 ${shellFunctionFrom(source, "release_lock")}
 ${shellFunctionFrom(source, "host_node_available")}
 ${shellFunctionFrom(source, "operation_lock_command")}
@@ -396,16 +567,18 @@ esac
         NODE_ENV: "test",
         PATH: process.env.PATH ?? "",
           MODE: mode,
-          OPERATION_LOCK_PATH: path.replaceAll("\\", "/"),
-          PRIVATE_CLEANUP_DIR: `${path}.cleanup`.replaceAll("\\", "/"),
-          OPERATION_LOCK_SCRIPT: resolve("deploy/prod/production-operation-lock.mjs")
-            .replaceAll("\\", "/"),
+          OPERATION_LOCK_PATH: shellPath(path),
+          PRIVATE_CLEANUP_DIR: shellPath(`${path}.cleanup`),
+          OPERATION_LOCK_SCRIPT: shellPath(
+            resolve("deploy/prod/production-operation-lock.mjs"),
+          ),
       });
 
       const deployToken = acquireProductionOperationLock(path, "restart");
-      const rejected = spawnSync(posixShell!, ["-c", harness], {
+      const rejected = spawnSync(posixShell!, ["-s"], {
         cwd: process.cwd(),
         encoding: "utf8",
+        input: harness,
         env: environment("contend"),
       });
       expect(rejected.status).not.toBe(0);
@@ -413,18 +586,20 @@ esac
       expect(existsSync(path)).toBe(true);
       releaseProductionOperationLock(path, deployToken);
 
-      const contended = spawnSync(posixShell!, ["-c", harness], {
+      const contended = spawnSync(posixShell!, ["-s"], {
         cwd: process.cwd(),
         encoding: "utf8",
+        input: harness,
         env: environment("contend"),
       });
       expect(contended.status, contended.stderr).toBe(0);
       expect(contended.stderr).toContain("another production operation is active");
       expect(existsSync(path)).toBe(false);
 
-      const metadata = spawnSync(posixShell!, ["-c", harness], {
+      const metadata = spawnSync(posixShell!, ["-s"], {
         cwd: process.cwd(),
         encoding: "utf8",
+        input: harness,
         env: environment("metadata"),
       });
       expect(metadata.status, metadata.stderr).toBe(0);
@@ -432,9 +607,10 @@ esac
       expect(existsSync(path)).toBe(false);
 
       for (const mode of ["fail", "term"]) {
-        const interrupted = spawnSync(posixShell!, ["-c", harness], {
+        const interrupted = spawnSync(posixShell!, ["-s"], {
           cwd: process.cwd(),
           encoding: "utf8",
+          input: harness,
           env: environment(mode),
         });
         expect(interrupted.status, `${mode}: ${interrupted.stderr}`).not.toBe(0);
@@ -446,9 +622,10 @@ esac
         ["release-fail-error", 17],
         ["release-fail-term", 143],
       ] as const) {
-        const releaseFailed = spawnSync(posixShell!, ["-c", harness], {
+        const releaseFailed = spawnSync(posixShell!, ["-s"], {
           cwd: process.cwd(),
           encoding: "utf8",
+          input: harness,
           env: environment(mode),
         });
         expect(releaseFailed.status, `${mode}: ${releaseFailed.stderr}`)
@@ -465,9 +642,10 @@ esac
         ["private-release-fail-error", 17],
         ["private-release-fail-term", 143],
       ] as const) {
-        const privateReleaseFailed = spawnSync(posixShell!, ["-c", harness], {
+        const privateReleaseFailed = spawnSync(posixShell!, ["-s"], {
           cwd: process.cwd(),
           encoding: "utf8",
+          input: harness,
           env: environment(mode),
         });
         expect(
@@ -488,9 +666,10 @@ esac
         ["cleanup-fail-error", 17],
         ["cleanup-fail-term", 143],
       ] as const) {
-        const cleanupFailed = spawnSync(posixShell!, ["-c", harness], {
+        const cleanupFailed = spawnSync(posixShell!, ["-s"], {
           cwd: process.cwd(),
           encoding: "utf8",
+          input: harness,
           env: environment(mode),
         });
         expect(cleanupFailed.status, `${mode}: ${cleanupFailed.stderr}`)

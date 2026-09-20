@@ -195,17 +195,45 @@ export function releaseProductionOperationLock(path, token) {
   }
 }
 
+export function verifyProductionOperationLock(path, token) {
+  safeToken(token);
+  const parent = guardedParent(path);
+  const directoryDescriptor = openParent(path, parent);
+  try {
+    const current = readPrivateCredentialFile(path, "production operation lock");
+    let payload;
+    try {
+      payload = JSON.parse(current.contents);
+    } catch {
+      fail("production operation lock contents are invalid");
+    }
+    if (!equalToken(payload?.token, token)) {
+      fail("production operation lock ownership token does not match");
+    }
+    const afterRead = assertPrivateCredentialFile(path, "production operation lock");
+    if (!sameCredentialFileVersion(current.metadata, afterRead)) {
+      fail("production operation lock changed during verification");
+    }
+    const parentAfterRead = guardedParent(path);
+    if (!sameCredentialFileIdentity(parent, parentAfterRead)) {
+      fail("production operation lock directory changed during verification");
+    }
+  } finally {
+    closeSync(directoryDescriptor);
+  }
+}
+
 async function main(argv) {
   const [mode, path, value, ownerPid, ...extra] = argv;
   if (
     extra.length > 0
     || !path
     || !value
-    || !["acquire", "release"].includes(mode)
-    || (mode === "release" && ownerPid !== undefined)
+    || !["acquire", "verify", "release"].includes(mode)
+    || (["verify", "release"].includes(mode) && ownerPid !== undefined)
   ) {
     fail(
-      "usage: production-operation-lock.mjs acquire PATH OPERATION [OWNER_PID] | release PATH TOKEN",
+      "usage: production-operation-lock.mjs acquire PATH OPERATION [OWNER_PID] | verify PATH TOKEN | release PATH TOKEN",
     );
   }
   if (mode === "acquire") {
@@ -214,6 +242,10 @@ async function main(argv) {
       value,
       commandLineOwnerPid(ownerPid),
     )}\n`);
+    return;
+  }
+  if (mode === "verify") {
+    verifyProductionOperationLock(path, value);
     return;
   }
   releaseProductionOperationLock(path, value);

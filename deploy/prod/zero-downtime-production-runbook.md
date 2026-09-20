@@ -272,7 +272,26 @@ docker exec "$caddy_container" caddy validate --config /tmp/Caddyfile-clean-pay-
 
 ## 4. Persistent switch на canary
 
-Выполните блок целиком в том же privileged shell:
+Перед первой записью возьмите один общий operation lock на весь критический
+участок Caddy → canary → Compose promotion → Caddy → primary. Все команды
+должны выполняться из одного reviewed `$release_dir`; absolute override lock
+path передаётся и `node-tooling.sh`, и `zero-downtime-app.sh`:
+
+```bash
+production_operation_lock="$release_dir/deploy/prod/.production-operation.lock"
+export CLEAN_PAY_PRODUCTION_OPERATION_LOCK_PATH="$production_operation_lock"
+rollout_lock_token=$(sh "$node_tooling" operation-lock acquire \
+  zero-downtime-rollout "$$") || exit 1
+export CLEAN_PAY_PRODUCTION_OPERATION_LOCK_TOKEN="$rollout_lock_token"
+sh "$node_tooling" operation-lock verify "$rollout_lock_token" || exit 1
+```
+
+Не печатайте token и не снимайте lock между блоками. При любой ошибке lock
+остаётся fail-closed до доказанного восстановления traffic/runtime. Выполните
+следующий блок целиком в том же privileged shell. Entry points из других
+checkout/release roots имеют другой legacy lock path и на всём критическом
+участке категорически запрещены; используйте только этот `$release_dir` и этот
+absolute override:
 
 ```bash
 (
@@ -283,16 +302,24 @@ restore_primary_on_failure() {
   trap - 0 HUP INT TERM
   if [ "$candidate_committed" -eq 0 ]; then
     recovery_failed=0
-    sh "$node_tooling" caddyfile restore \
-      "$caddy_host" "$caddy_backup" "$primary_sha" || recovery_failed=1
-    test "$(stat -c '%d:%i' "$caddy_host")" = "$caddy_inode" || recovery_failed=1
-    test "$(sha256sum "$caddy_host" | awk '{print $1}')" = "$primary_sha" || recovery_failed=1
-    test "$(docker exec "$caddy_container" stat -c '%d:%i' /etc/caddy/Caddyfile)" = "$caddy_inode" || recovery_failed=1
-    test "$(docker exec "$caddy_container" sha256sum /etc/caddy/Caddyfile | awk '{print $1}')" = "$primary_sha" || recovery_failed=1
-    docker exec "$caddy_container" caddy validate --config /etc/caddy/Caddyfile || recovery_failed=1
-    docker exec "$caddy_container" caddy reload --config /etc/caddy/Caddyfile || recovery_failed=1
+    if sh "$node_tooling" caddyfile restore \
+        "$caddy_host" "$caddy_backup" \
+        "$candidate_sha" "$primary_sha" && \
+      test "$(stat -c '%d:%i' "$caddy_host")" = "$caddy_inode" && \
+      test "$(sha256sum "$caddy_host" | awk '{print $1}')" = "$primary_sha" && \
+      test "$(docker exec "$caddy_container" stat -c '%d:%i' /etc/caddy/Caddyfile)" = "$caddy_inode" && \
+      test "$(docker exec "$caddy_container" sha256sum /etc/caddy/Caddyfile | awk '{print $1}')" = "$primary_sha"; then
+      docker exec "$caddy_container" caddy validate --config /etc/caddy/Caddyfile && \
+        docker exec "$caddy_container" caddy reload --config /etc/caddy/Caddyfile \
+        || recovery_failed=1
+    else
+      recovery_failed=1
+    fi
     if [ "$recovery_failed" -ne 0 ]; then
       printf '%s\n' 'CRITICAL: automatic primary Caddyfile recovery failed' >&2
+      if [ "$switch_status" -eq 0 ]; then
+        switch_status=1
+      fi
     fi
   fi
   exit "$switch_status"
@@ -318,6 +345,11 @@ trap - 0 HUP INT TERM
 При write/check/validate/reload failure trap восстанавливает prevalidated
 backup в тот же inode, fsync'ит его, сверяет checksum и reload'ит primary.
 Caddy сохраняет уже загруженную конфигурацию до успешного graceful reload.
+Restore ничего не пишет, если authoritative file уже имеет desired checksum;
+пишет только из exact candidate checksum и отказывается трогать любой третий,
+неизвестный checksum. Если guarded restore или любая проверка inode/checksum
+не прошла, trap не запускает ни validate, ни reload неизвестного файла,
+печатает CRITICAL и оставляет общий operation lock для ручного recovery.
 
 Same-inode write не является filesystem-atomic: между truncate/write/fsync
 остаётся минимальное crash/power-loss окно. Это неизбежный компромисс
@@ -335,6 +367,7 @@ login и безопасный authenticated read-only scenario. Не выпол�
 Пока Caddy обслуживает `clean-pay-canary:4000`:
 
 ```bash
+sh deploy/prod/zero-downtime-app.sh verify
 sh deploy/prod/zero-downtime-app.sh promote --traffic-on-canary
 ```
 
@@ -358,16 +391,24 @@ restore_canary_on_failure() {
   trap - 0 HUP INT TERM
   if [ "$primary_committed" -eq 0 ]; then
     recovery_failed=0
-    sh "$node_tooling" caddyfile restore \
-      "$caddy_host" "$caddy_candidate" "$candidate_sha" || recovery_failed=1
-    test "$(stat -c '%d:%i' "$caddy_host")" = "$caddy_inode" || recovery_failed=1
-    test "$(sha256sum "$caddy_host" | awk '{print $1}')" = "$candidate_sha" || recovery_failed=1
-    test "$(docker exec "$caddy_container" stat -c '%d:%i' /etc/caddy/Caddyfile)" = "$caddy_inode" || recovery_failed=1
-    test "$(docker exec "$caddy_container" sha256sum /etc/caddy/Caddyfile | awk '{print $1}')" = "$candidate_sha" || recovery_failed=1
-    docker exec "$caddy_container" caddy validate --config /etc/caddy/Caddyfile || recovery_failed=1
-    docker exec "$caddy_container" caddy reload --config /etc/caddy/Caddyfile || recovery_failed=1
+    if sh "$node_tooling" caddyfile restore \
+        "$caddy_host" "$caddy_candidate" \
+        "$primary_sha" "$candidate_sha" && \
+      test "$(stat -c '%d:%i' "$caddy_host")" = "$caddy_inode" && \
+      test "$(sha256sum "$caddy_host" | awk '{print $1}')" = "$candidate_sha" && \
+      test "$(docker exec "$caddy_container" stat -c '%d:%i' /etc/caddy/Caddyfile)" = "$caddy_inode" && \
+      test "$(docker exec "$caddy_container" sha256sum /etc/caddy/Caddyfile | awk '{print $1}')" = "$candidate_sha"; then
+      docker exec "$caddy_container" caddy validate --config /etc/caddy/Caddyfile && \
+        docker exec "$caddy_container" caddy reload --config /etc/caddy/Caddyfile \
+        || recovery_failed=1
+    else
+      recovery_failed=1
+    fi
     if [ "$recovery_failed" -ne 0 ]; then
       printf '%s\n' 'CRITICAL: automatic canary Caddyfile recovery failed' >&2
+      if [ "$switch_status" -eq 0 ]; then
+        switch_status=1
+      fi
     fi
   fi
   exit "$switch_status"
@@ -390,8 +431,20 @@ trap - 0 HUP INT TERM
 )
 ```
 
-Повторите external smoke. Сохраняйте canary, private state, оба Caddyfile и
-previous images весь observation window. Только после принятого окна:
+Повторите полный external smoke. Только после успешного smoke либо после
+доказанного recovery проверьте и снимите caller-owned lock:
+
+```bash
+sh "$node_tooling" operation-lock verify "$rollout_lock_token" && \
+  sh "$node_tooling" operation-lock release "$rollout_lock_token" && \
+  unset CLEAN_PAY_PRODUCTION_OPERATION_LOCK_TOKEN rollout_lock_token || exit 1
+```
+
+Если checksum/route/runtime после ошибки не доказаны, release запрещён. Lock
+остаётся для reviewed recovery; ни одна дочерняя ZDT-команда его не удаляет.
+
+Сохраняйте canary, private state, оба Caddyfile и previous images весь
+observation window. Только после принятого окна:
 
 ```bash
 sh deploy/prod/zero-downtime-app.sh remove --traffic-off-canary
