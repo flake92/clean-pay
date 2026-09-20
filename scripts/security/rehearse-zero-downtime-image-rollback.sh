@@ -7,6 +7,7 @@ readonly COMPOSE_MANIFEST="$ROOT_DIR/deploy/prod/docker-compose.yml"
 readonly ZERO_DOWNTIME_SCRIPT="$ROOT_DIR/deploy/prod/zero-downtime-app.sh"
 readonly IMAGE_PREFLIGHT_SCRIPT="$ROOT_DIR/deploy/prod/image-preflight.sh"
 readonly ROLE_ENV_SCRIPT="$ROOT_DIR/deploy/prod/role-env.mjs"
+readonly ROLLBACK_COMPAT_SCRIPT="$ROOT_DIR/deploy/prod/rollback-env-compat.mjs"
 readonly SYNTHETIC_ENV_SCRIPT="$ROOT_DIR/tests/fixtures/write-synthetic-production-env.mjs"
 readonly TRAFFIC_CONTINUITY_SCRIPT="$ROOT_DIR/scripts/security/disposable-traffic-continuity.mjs"
 readonly READINESS_PROVIDER_SCRIPT="$ROOT_DIR/scripts/security/disposable-readiness-provider.mjs"
@@ -275,6 +276,7 @@ readonly STATE_FILE="$TEMPORARY_DIR/state"
 readonly PREVIOUS_SOURCE_DIR="$TEMPORARY_DIR/previous-source"
 readonly PREVIOUS_INVENTORY_FILE="$TEMPORARY_DIR/previous-inventory"
 readonly ROLLBACK_PREFLIGHT_OUTPUT="$TEMPORARY_DIR/rollback-images.env"
+readonly ROLLBACK_COMPAT_ENV_FILE="$TEMPORARY_DIR/rollback-compat.env"
 readonly TRAFFIC_STATE_DIR="$TEMPORARY_DIR/traffic-state"
 readonly TRAFFIC_ROUTE_FILE="$TRAFFIC_STATE_DIR/route"
 readonly TRAFFIC_READY_FILE="$TRAFFIC_STATE_DIR/ready.json"
@@ -910,10 +912,13 @@ readonly -a PREVIOUS_ARCHIVE_INPUTS=(
   tsconfig.json
   scripts/next-command.mjs
   scripts/prisma-generate.mjs
+  runtime/database-pool.mjs
+  runtime/production-env-rules.mjs
   prisma
   public
   src
   deploy/prod/start.sh
+  deploy/prod/application-drain-preload.cjs
   deploy/prod/deploy-log.mjs
   deploy/prod/database-pool.mjs
   deploy/prod/credential-file-guard.mjs
@@ -933,6 +938,7 @@ readonly -a PREVIOUS_ARCHIVE_INPUTS=(
   deploy/prod/migration-rollback-verifier.mjs
   deploy/prod/database-privilege-manifest.mjs
   deploy/prod/database-role-provision.mjs
+  deploy/prod/prisma-migration-status.mjs
 )
 git -C "$ROOT_DIR" ls-tree -r -z --full-tree "$PREVIOUS_REVISION" \
   -- "${PREVIOUS_ARCHIVE_INPUTS[@]}" > "$PREVIOUS_INVENTORY_FILE"
@@ -940,11 +946,13 @@ node - "$PREVIOUS_INVENTORY_FILE" <<'NODE'
 const fs = require("node:fs");
 const inventory = fs.readFileSync(process.argv[2]);
 const records = inventory.toString("utf8").split("\0").filter(Boolean);
-if (records.length !== 358) throw new Error("baseline build inventory count differs");
+if (records.length !== 487) throw new Error("baseline build inventory count differs");
 const exact = new Set([
   "Dockerfile", ".dockerignore", ".npmrc", "package.json", "package-lock.json",
   "next.config.ts", "prisma.config.ts", "tsconfig.json",
   "scripts/next-command.mjs", "scripts/prisma-generate.mjs",
+  "runtime/database-pool.mjs", "runtime/production-env-rules.mjs",
+  "deploy/prod/application-drain-preload.cjs",
   "deploy/prod/start.sh", "deploy/prod/deploy-log.mjs",
   "deploy/prod/database-pool.mjs", "deploy/prod/credential-file-guard.mjs",
   "deploy/prod/worker-shutdown.mjs", "deploy/prod/validate-env.mjs",
@@ -958,6 +966,7 @@ const exact = new Set([
   "deploy/prod/migration-rollback-verifier.mjs",
   "deploy/prod/database-privilege-manifest.mjs",
   "deploy/prod/database-role-provision.mjs",
+  "deploy/prod/prisma-migration-status.mjs",
 ]);
 const seen = new Set();
 for (const record of records) {
@@ -1071,11 +1080,15 @@ set_env_value "$ROLLBACK_ENV_FILE" CLEAN_PAY_RELEASE "$PREVIOUS_RELEASE"
 set_env_value "$ROLLBACK_ENV_FILE" CLEAN_PAY_REVISION "$PREVIOUS_REVISION"
 chmod 600 "$TARGET_ENV_FILE" "$ROLLBACK_ENV_FILE"
 node "$ROLE_ENV_SCRIPT" materialize "$ROLLBACK_ENV_FILE"
+node "$ROLLBACK_COMPAT_SCRIPT" materialize \
+  "$PREVIOUS_REVISION" \
+  "$ROLLBACK_ENV_FILE" \
+  "$ROLLBACK_COMPAT_ENV_FILE" >/dev/null
 sh "$IMAGE_PREFLIGHT_SCRIPT" \
   build \
   "$PREVIOUS_APP_REFERENCE" \
   "$PREVIOUS_MIGRATION_REFERENCE" \
-  "$ROLLBACK_ENV_FILE" \
+  "$ROLLBACK_COMPAT_ENV_FILE" \
   "$PUBLIC_APP_URL" \
   "$PUBLIC_BRAND_NAME" \
   "$PUBLIC_BRAND_LOGO_URL" \

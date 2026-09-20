@@ -288,7 +288,7 @@ describe("production container boundary", () => {
       "bash scripts/security/rehearse-zero-downtime-image-rollback.sh",
     );
     expect(containerJob).toContain("clean-pay:ci clean-pay-migration:ci");
-    expect(containerJob).toContain("f5cb6f543d85256e7733a1ade6a4f451d86cf378");
+    expect(containerJob).toContain("0ede176ad863c7a721a9fbbf43f583e838516d4b");
     expect(containerJob).toContain(".image-rollback-rehearsal/report.json");
     expect(containerJob).toContain(".image-rollback-rehearsal/traffic/result.json");
     expect(containerJob).toContain("if-no-files-found: error");
@@ -355,7 +355,15 @@ describe("production container boundary", () => {
     expect(imageRollbackRehearsal).toContain(
       'git -C "$ROOT_DIR" ls-tree -r -z --full-tree "$PREVIOUS_REVISION"',
     );
-    expect(imageRollbackRehearsal).toContain("records.length !== 358");
+    expect(imageRollbackRehearsal).toContain("records.length !== 487");
+    expect(imageRollbackRehearsal).toContain("runtime/production-env-rules.mjs");
+    expect(imageRollbackRehearsal).toContain(
+      "deploy/prod/application-drain-preload.cjs",
+    );
+    expect(imageRollbackRehearsal).toContain(
+      'node "$ROLLBACK_COMPAT_SCRIPT" materialize',
+    );
+    expect(imageRollbackRehearsal).toContain('"$ROLLBACK_COMPAT_ENV_FILE"');
     expect(imageRollbackRehearsal).toContain(
       'cp -- "$ROOT_DIR/.dockerignore" "$PREVIOUS_SOURCE_DIR/.dockerignore"',
     );

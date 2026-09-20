@@ -306,6 +306,7 @@ lock_held=0
 operation_lock_token=''
 verified_image_dir=''
 verified_image_output=''
+verified_compatibility_env=''
 state_temp=''
 rollback_compose_on_failure=0
 cleanup_canary_on_failure=0
@@ -359,6 +360,18 @@ case "$MODE" in
     lock_held=1
     kill -TERM "$$"
     ;;
+  cleanup-fail-success|cleanup-fail-error|cleanup-fail-term)
+    mkdir "$PRIVATE_CLEANUP_DIR"
+    verified_image_dir="$PRIVATE_CLEANUP_DIR"
+    verified_compatibility_env="$PRIVATE_CLEANUP_DIR/rollback-compat.env"
+    : > "$verified_compatibility_env"
+    rm() { return 1; }
+    case "$MODE" in
+      cleanup-fail-success) : ;;
+      cleanup-fail-error) exit 17 ;;
+      cleanup-fail-term) kill -TERM "$$" ;;
+    esac
+    ;;
   metadata)
     metadata=$(node -e '
       const { readFileSync } = require("node:fs");
@@ -380,10 +393,11 @@ esac
       const environment = (mode: string): NodeJS.ProcessEnv => ({
         NODE_ENV: "test",
         PATH: process.env.PATH ?? "",
-        MODE: mode,
-        OPERATION_LOCK_PATH: path.replaceAll("\\", "/"),
-        OPERATION_LOCK_SCRIPT: resolve("deploy/prod/production-operation-lock.mjs")
-          .replaceAll("\\", "/"),
+          MODE: mode,
+          OPERATION_LOCK_PATH: path.replaceAll("\\", "/"),
+          PRIVATE_CLEANUP_DIR: `${path}.cleanup`.replaceAll("\\", "/"),
+          OPERATION_LOCK_SCRIPT: resolve("deploy/prod/production-operation-lock.mjs")
+            .replaceAll("\\", "/"),
       });
 
       const deployToken = acquireProductionOperationLock(path, "restart");
@@ -465,6 +479,31 @@ esac
         const privateLockPath = `${path}.private`;
         expect(existsSync(privateLockPath)).toBe(true);
         rmSync(privateLockPath, { force: true, recursive: true });
+      }
+
+      for (const [mode, expectedStatus] of [
+        ["cleanup-fail-success", 1],
+        ["cleanup-fail-error", 17],
+        ["cleanup-fail-term", 143],
+      ] as const) {
+        const cleanupFailed = spawnSync(posixShell!, ["-c", harness], {
+          cwd: process.cwd(),
+          encoding: "utf8",
+          env: environment(mode),
+        });
+        expect(cleanupFailed.status, `${mode}: ${cleanupFailed.stderr}`)
+          .toBe(expectedStatus);
+        expect(cleanupFailed.stderr).toContain(
+          "could not remove private rollback compatibility environment",
+        );
+        expect(cleanupFailed.stderr).toContain(
+          "private deployment files were not fully removed",
+        );
+        expect(existsSync(path), mode).toBe(false);
+        const privateCleanupPath = `${path}.cleanup`;
+        expect(existsSync(join(privateCleanupPath, "rollback-compat.env")), mode)
+          .toBe(true);
+        rmSync(privateCleanupPath, { force: true, recursive: true });
       }
     },
     shellIntegrationTimeout,
