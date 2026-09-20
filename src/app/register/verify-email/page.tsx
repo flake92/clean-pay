@@ -2,7 +2,11 @@ import { AuthShell } from "@/frontend/components/auth-shell";
 import { RegisterEmailConfirmForm } from "@/frontend/components/register-email-confirm-form";
 import { safeAccountSetupDestination } from "@/shared/auth/account-setup-flow";
 import { registrationEmailVerificationPath } from "@/shared/auth/account-setup-flow";
-import { requireRequestSession } from "@/app/_composition/require-request-session";
+import {
+  requestSessionHasNoEmailToConfirm,
+  requireRequestSession,
+} from "@/app/_composition/require-request-session";
+import { redirect } from "next/navigation";
 
 export const dynamic = "force-dynamic";
 
@@ -27,7 +31,10 @@ export default async function RegisterVerifyEmailPage({
   const returnTo = registrationEmailVerificationPath(redirectTo, {
     deliveryFailed: rawDelivery === "failed",
   });
-  await requireRequestSession(returnTo);
+  const session = await requireRequestSession(returnTo);
+  // A Telegram-linked account with nothing to confirm would only ever see
+  // "add an e-mail first" here; return it to where it was going instead.
+  if (requestSessionHasNoEmailToConfirm(session)) redirect(redirectTo);
 
   return (
     <AuthShell

@@ -13,6 +13,7 @@ vi.mock("@/app/_composition/request-scoped-readers", () => ({
 vi.mock("next/navigation", () => ({ redirect: mocks.redirect }));
 
 import {
+  requestSessionHasNoEmailToConfirm,
   requestSessionRequiresEmailVerification,
   requireCabinetEntrySession,
   requireRequestSession,
@@ -52,13 +53,13 @@ describe("database-backed protected setup boundary", () => {
     expect(mocks.redirect).not.toHaveBeenCalled();
   });
 
-  it("gates an e-mail-present unverified Telegram session before cabinet rendering", async () => {
+  it("gates an e-mail-present unverified web-only session before cabinet rendering", async () => {
     const session = {
-      id: "session-unverified-linked",
+      id: "session-unverified-web",
       user: {
-        email: "linked-unverified@example.com",
+        email: "web-unverified@example.com",
         emailVerified: false,
-        telegramId: "777000",
+        telegramId: null,
       },
     };
     mocks.loadCurrentSession.mockResolvedValueOnce(session);
@@ -70,6 +71,22 @@ describe("database-backed protected setup boundary", () => {
     expect(mocks.redirect).toHaveBeenCalledWith(
       "/register/verify-email?redirect_to=%2Fcabinet",
     );
+  });
+
+  it("never locks a Telegram-linked account out of the cabinet over an unverified local e-mail", async () => {
+    const session = {
+      id: "session-unverified-linked",
+      user: {
+        email: "linked-unverified@example.com",
+        emailVerified: false,
+        telegramId: "777000",
+      },
+    };
+    mocks.loadCurrentSession.mockResolvedValueOnce(session);
+
+    expect(requestSessionRequiresEmailVerification(session)).toBe(false);
+    await expect(requireCabinetEntrySession()).resolves.toBe(session);
+    expect(mocks.redirect).not.toHaveBeenCalled();
   });
 
   it("preserves cabinet access for Telegram-only and verified e-mail sessions", async () => {
@@ -93,5 +110,21 @@ describe("database-backed protected setup boundary", () => {
     mocks.loadCurrentSession.mockResolvedValueOnce(verifiedEmail);
     await expect(requireCabinetEntrySession()).resolves.toBe(verifiedEmail);
     expect(mocks.redirect).not.toHaveBeenCalled();
+  });
+
+  it("does not offer the confirmation page to a Telegram account that has nothing to confirm", () => {
+    const nothingStaged = {
+      user: { email: "half@example.com", emailVerified: false, telegramId: "777003", pendingEmail: null },
+    };
+    const stagedForConfirmation = {
+      user: { email: "half@example.com", emailVerified: false, telegramId: "777003", pendingEmail: "half@example.com" },
+    };
+    const webOnly = {
+      user: { email: "web@example.com", emailVerified: false, telegramId: null, pendingEmail: null },
+    };
+
+    expect(requestSessionHasNoEmailToConfirm(nothingStaged)).toBe(true);
+    expect(requestSessionHasNoEmailToConfirm(stagedForConfirmation)).toBe(false);
+    expect(requestSessionHasNoEmailToConfirm(webOnly)).toBe(false);
   });
 });

@@ -60,6 +60,40 @@ describe("Remnashop response decoders", () => {
     });
   });
 
+  it("keeps sign-in working when the panel omits or nulls optional profile fields", () => {
+    expect(decodeRemnashopEndpointResponse("/auth/me", "GET", {
+      telegram_id: "958734701",
+      email: null,
+      is_email_verified: false,
+      name: null,
+      username: "clean_user",
+      language: null,
+      has_password: null,
+    })).toEqual({
+      telegram_id: 958734701,
+      auth_type: "unknown",
+      email: null,
+      is_email_verified: false,
+      pending_email: null,
+      name: "clean_user",
+      username: "clean_user",
+      language: "ru",
+    });
+  });
+
+  it("still rejects a profile whose identity-critical fields are malformed", () => {
+    for (const malformed of [
+      { email: null, name: "User" },
+      { is_email_verified: "true", email: null },
+      { is_email_verified: false, email: 42 },
+      { is_email_verified: false, telegram_id: "not-a-number" },
+      { is_email_verified: false, telegram_id: {} },
+    ]) {
+      expect(() => decodeRemnashopEndpointResponse("/auth/me", "GET", malformed))
+        .toThrow();
+    }
+  });
+
   it("deep-equals valid subscription and payment contracts after nested projection", () => {
     const expectedCurrent = {
       user_remna_id: "rw-1",

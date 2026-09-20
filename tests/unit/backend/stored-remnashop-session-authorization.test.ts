@@ -142,25 +142,57 @@ describe("stored-only Remnashop session authorization", () => {
   });
 
   it.each([
-    ["active refresh claim", { remnashopRefreshClaimTokenHash: "claim" }],
     [
-      "active refresh lease",
-      { remnashopRefreshLeaseExpiresAt: new Date(NOW.getTime() + 60_000) },
+      "live refresh lease",
+      {
+        remnashopRefreshClaimTokenHash: "claim",
+        remnashopRefreshLeaseExpiresAt: new Date(NOW.getTime() + 60_000),
+      },
     ],
     [
-      "dispatched refresh",
-      { remnashopRefreshDispatchedAt: new Date(NOW.getTime() - 1_000) },
+      "live refresh lease that already dispatched the provider call",
+      {
+        remnashopRefreshClaimTokenHash: "claim",
+        remnashopRefreshLeaseExpiresAt: new Date(NOW.getTime() + 60_000),
+        remnashopRefreshDispatchedAt: new Date(NOW.getTime() - 1_000),
+      },
     ],
-    [
-      "pending refresh recovery",
-      { remnashopRefreshRecoveryEncrypted: "recovery" },
-    ],
-  ])("keeps %s retryable without starting a second recovery", async (_name, overrides) => {
+  ])("keeps a %s retryable without starting a second recovery", async (_name, overrides) => {
     await expect(
       authorize(session(overrides), {
         allowUnverifiedEmail: true,
       }),
     ).rejects.toMatchObject({ code: "UPSTREAM_UNAVAILABLE", status: 503 });
+
+    expect(apiMock.getRemnashopMe).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["claim whose lease is gone", { remnashopRefreshClaimTokenHash: "claim" }],
+    [
+      "expired refresh lease",
+      {
+        remnashopRefreshClaimTokenHash: "claim",
+        remnashopRefreshLeaseExpiresAt: new Date(NOW.getTime() - 1_000),
+      },
+    ],
+    [
+      "interrupted dispatched refresh",
+      { remnashopRefreshDispatchedAt: new Date(NOW.getTime() - 1_000) },
+    ],
+    [
+      "unpromoted refresh recovery",
+      { remnashopRefreshRecoveryEncrypted: "recovery" },
+    ],
+  ])("hands a stale %s to cookie-capable recovery instead of a permanent error", async (_name, overrides) => {
+    await expect(
+      authorize(session(overrides), {
+        allowUnverifiedEmail: true,
+      }),
+    ).rejects.toMatchObject({
+      code: "PROVIDER_SESSION_RECOVERY_REQUIRED",
+      status: 409,
+    });
 
     expect(apiMock.getRemnashopMe).not.toHaveBeenCalled();
   });
@@ -194,7 +226,10 @@ describe("stored-only Remnashop session authorization", () => {
   });
 
   it.each([
-    ["unfinished owner transition", { user: { authPending: true } }],
+    [
+      "unfinished owner transition without Telegram proof",
+      { user: { authPending: true } },
+    ],
     [
       "local owner mismatch",
       { user: { remnashopUserId: "7" } },
@@ -214,6 +249,61 @@ describe("stored-only Remnashop session authorization", () => {
     });
 
     expect(apiMock.getRemnashopMe).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    [
+      "verified e-mail",
+      { authPending: true, email: "user@example.com", emailVerified: true },
+    ],
+    [
+      "staged pending e-mail",
+      {
+        authPending: true,
+        pendingRemnashopUserId: "42",
+        pendingRemnashopEmail: "user@example.com",
+      },
+    ],
+  ])("hands an unfinished Telegram transition with %s to cookie-capable recovery", async (_name, user) => {
+    await expect(
+      authorize(session({ user }), { allowUnverifiedEmail: true }),
+    ).rejects.toMatchObject({
+      code: "PROVIDER_SESSION_RECOVERY_REQUIRED",
+      status: 409,
+    });
+
+    expect(apiMock.getRemnashopMe).not.toHaveBeenCalled();
+  });
+
+  it("does not take the cabinet away from a Telegram account over an unconfirmed staged e-mail", async () => {
+    const value = session({
+      user: { email: "staged@example.com", emailVerified: false },
+    });
+    apiMock.getRemnashopMe.mockResolvedValueOnce({
+      email: null,
+      is_email_verified: false,
+    });
+
+    await expect(authorize(value)).resolves.toMatchObject({
+      accessToken: "access",
+      session: { user: { emailVerified: false, telegramId: "123456" } },
+    });
+  });
+
+  it("still requires a verified e-mail for a web-only account", async () => {
+    const value = session({
+      authMethod: "EMAIL",
+      user: {
+        email: "web@example.com",
+        emailVerified: false,
+        telegramId: null,
+      },
+    });
+
+    await expect(authorize(value)).rejects.toMatchObject({
+      code: "EMAIL_NOT_VERIFIED",
+      status: 403,
+    });
   });
 
   it("preserves verified-email ownership checks without persisting state", async () => {

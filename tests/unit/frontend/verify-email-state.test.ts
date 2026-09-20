@@ -61,22 +61,23 @@ describe("verification presentation transitions", () => {
     )).toEqual({ kind: "unchanged" });
   });
 
-  it("characterizes the existing silent EMAIL_REQUIRED branch", () => {
+  it("explains a missing linked e-mail instead of failing silently", () => {
     const result = {
       ok: false as const,
       code: "EMAIL_REQUIRED",
       message: "provider detail",
     };
 
+    const hint = expect.stringContaining("Привязать аккаунт");
     expect(requestVerificationTransition(result, false)).toEqual({
       kind: "rejected",
-      error: null,
+      error: hint,
       clearTargetEmail: true,
       continueToPasswordRecovery: false,
     });
     expect(confirmVerificationTransition(result, false)).toEqual({
       kind: "rejected",
-      error: null,
+      error: hint,
       continueToPasswordRecovery: false,
     });
     expect(confirmVerificationTransition(result, true)).toMatchObject({
