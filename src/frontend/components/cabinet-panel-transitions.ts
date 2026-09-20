@@ -19,6 +19,7 @@ export type CabinetPanelData = {
   paymentHistoryStatus: "current" | "refreshing" | "unavailable";
   support: SupportSettings | null;
   error: string | null;
+  errorRecovery: "retry" | "recover" | null;
   subscriptionError: string | null;
 };
 
@@ -36,6 +37,7 @@ export function selectCabinetPanelData(
     paymentHistoryStatus: initial?.paymentHistoryStatus ?? "current",
     support: initial?.support ?? null,
     error: model.status === "error" ? model.message : null,
+    errorRecovery: model.status === "error" ? model.recovery ?? null : null,
     subscriptionError: initial?.subscriptionError ?? null,
   };
 }

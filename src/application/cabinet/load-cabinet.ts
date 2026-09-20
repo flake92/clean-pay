@@ -7,6 +7,32 @@ import { AuthProfileError } from "@/application/auth/ports/auth-profile";
 import { resolveAuthProfile } from "@/application/auth/resolve-auth-profile";
 import { isProviderSessionRecoveryRequired } from "@/shared/domain/provider-session-recovery";
 
+function cabinetLoadFailure(error: unknown): CabinetViewModel {
+  const code = error instanceof AuthProfileError ? error.code : "INTERNAL_ERROR";
+
+  if (code === "ACCOUNT_MERGE_REQUIRED" || code === "ACCOUNT_MERGE_SUBSCRIPTIONS_CONFLICT") {
+    return {
+      status: "error",
+      message: "Не удалось безопасно определить ваш аккаунт: данные Telegram и e-mail ещё не объединены. Нажмите «Восстановить доступ» — мы проверим привязку и подскажем следующий шаг.",
+      recovery: "recover",
+    };
+  }
+
+  if (code === "UPSTREAM_UNAVAILABLE" || code === "UPSTREAM_ERROR" || code === "RATE_LIMITED") {
+    return {
+      status: "error",
+      message: "Сервис подписок временно недоступен или обновляет вашу сессию. Подождите несколько секунд и повторите.",
+      recovery: "retry",
+    };
+  }
+
+  return {
+    status: "error",
+    message: "Не удалось загрузить данные аккаунта. Повторите попытку или восстановите доступ.",
+    recovery: "recover",
+  };
+}
+
 export async function loadCabinetViewModel(reader: CabinetReader, auth: AuthProfileGateway, history: PaymentHistoryGateway): Promise<CabinetViewModel> {
   let account;
   try {
@@ -18,7 +44,7 @@ export async function loadCabinetViewModel(reader: CabinetReader, auth: AuthProf
     if (error instanceof AuthProfileError && error.code === "PROVIDER_SESSION_RECOVERY_REQUIRED") {
       return { status: "provider-session-recovery-required" };
     }
-    return { status: "error", message: "Не удалось загрузить данные аккаунта. Попробуйте позже." };
+    return cabinetLoadFailure(error);
   }
 
   const [subscription, offers, devices, payments, support] = await Promise.allSettled([

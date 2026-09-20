@@ -44,6 +44,18 @@ export const remnashopTransport = createRemnashopTransport({
       message: `HTTP Request failed: ${method} ${path}`,
     });
   },
+  responseDecodeFailed({ method, path, status, reason }) {
+    logger.error("remnashop_response_decode_failed", {
+      method,
+      path,
+      status,
+      reason,
+    }, {
+      category: "upstream",
+      source: "remnashop.client",
+      message: `Remnashop response did not match the expected contract: ${method} ${path}`,
+    });
+  },
   adminRequestSent({ method, path, hasBody, trace }) {
     logger.info("remnashop_admin_request_sent", {
       method,
