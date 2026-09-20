@@ -8,6 +8,7 @@ IMAGE_PREFLIGHT_SCRIPT="$ROOT_DIR/deploy/prod/image-preflight.sh"
 VALIDATE_ENV_SCRIPT="$ROOT_DIR/deploy/prod/validate-env.mjs"
 ENV_GUARD_SCRIPT="$ROOT_DIR/deploy/prod/zero-downtime-env.mjs"
 ROLE_ENV_SCRIPT="$ROOT_DIR/deploy/prod/role-env.mjs"
+ROLLBACK_COMPAT_SCRIPT="$ROOT_DIR/deploy/prod/rollback-env-compat.mjs"
 OPERATION_LOCK_SCRIPT="$ROOT_DIR/deploy/prod/production-operation-lock.mjs"
 OPERATION_LOCK_PATH="$ROOT_DIR/deploy/prod/.production-operation.lock"
 STATE_FILE=${CLEAN_PAY_ZDT_STATE_FILE:-"$ROOT_DIR/deploy/prod/.zero-downtime-state"}
@@ -30,6 +31,7 @@ lock_held=0
 operation_lock_token=''
 verified_image_dir=''
 verified_image_output=''
+verified_compatibility_env=''
 state_temp=''
 cleanup_canary_on_failure=0
 rollback_compose_on_failure=0
@@ -260,18 +262,69 @@ release_production_operation_lock() {
 }
 
 cleanup_private_files() {
-  if [ -n "$verified_image_output" ] && [ -f "$verified_image_output" ]; then
-    rm -f -- "$verified_image_output"
+  cleanup_private_status=0
+
+  if [ -n "$verified_compatibility_env" ]; then
+    if { [ -e "$verified_compatibility_env" ] || [ -L "$verified_compatibility_env" ]; } \
+        && ! rm -f -- "$verified_compatibility_env"; then
+      printf '%s\n' \
+        "WARNING: could not remove private rollback compatibility environment." >&2
+      cleanup_private_status=1
+    elif [ -e "$verified_compatibility_env" ] || [ -L "$verified_compatibility_env" ]; then
+      printf '%s\n' \
+        "WARNING: private rollback compatibility environment still exists after cleanup." >&2
+      cleanup_private_status=1
+    else
+      verified_compatibility_env=''
+    fi
   fi
-  if [ -n "$verified_image_dir" ] && [ -d "$verified_image_dir" ]; then
-    rmdir "$verified_image_dir" 2>/dev/null || true
+
+  if [ -n "$verified_image_output" ]; then
+    if { [ -e "$verified_image_output" ] || [ -L "$verified_image_output" ]; } \
+        && ! rm -f -- "$verified_image_output"; then
+      printf '%s\n' "WARNING: could not remove private image-preflight output." >&2
+      cleanup_private_status=1
+    elif [ -e "$verified_image_output" ] || [ -L "$verified_image_output" ]; then
+      printf '%s\n' \
+        "WARNING: private image-preflight output still exists after cleanup." >&2
+      cleanup_private_status=1
+    else
+      verified_image_output=''
+    fi
   fi
-  if [ -n "$state_temp" ] && [ -f "$state_temp" ]; then
-    rm -f -- "$state_temp"
+
+  if [ -n "$verified_image_dir" ]; then
+    if [ -d "$verified_image_dir" ]; then
+      if ! rmdir "$verified_image_dir" 2>/dev/null; then
+        printf '%s\n' "WARNING: could not remove private image-preflight directory." >&2
+        cleanup_private_status=1
+      else
+        verified_image_dir=''
+      fi
+    elif [ -e "$verified_image_dir" ] || [ -L "$verified_image_dir" ]; then
+      printf '%s\n' \
+        "WARNING: private image-preflight path has an unexpected file type." >&2
+      cleanup_private_status=1
+    else
+      verified_image_dir=''
+    fi
   fi
-  verified_image_output=''
-  verified_image_dir=''
-  state_temp=''
+
+  if [ -n "$state_temp" ]; then
+    if { [ -e "$state_temp" ] || [ -L "$state_temp" ]; } \
+        && ! rm -f -- "$state_temp"; then
+      printf '%s\n' "WARNING: could not remove private deployment state file." >&2
+      cleanup_private_status=1
+    elif [ -e "$state_temp" ] || [ -L "$state_temp" ]; then
+      printf '%s\n' \
+        "WARNING: private deployment state file still exists after cleanup." >&2
+      cleanup_private_status=1
+    else
+      state_temp=''
+    fi
+  fi
+
+  return "$cleanup_private_status"
 }
 
 owned_canary_value() {
@@ -374,7 +427,13 @@ on_exit() {
     remove_owned_canary "$CANARY_NAME" || true
   fi
 
-  cleanup_private_files
+  if ! cleanup_private_files; then
+    printf '%s\n' \
+      "WARNING: private deployment files were not fully removed; inspect the protected temporary directory before retrying." >&2
+    if [ "$status" -eq 0 ]; then
+      status=1
+    fi
+  fi
   if ! release_lock && [ "$status" -eq 0 ]; then
     status=1
   fi
@@ -425,16 +484,27 @@ require_tools_and_environment() {
 
 preflight_image_pair() {
   image_env_file=$1
+  compatibility_revision=${2:-}
   cleanup_private_files
   verified_image_dir=$(mktemp -d "${TMPDIR:-/tmp}/clean-pay-zdt-verified.XXXXXX") \
     || fail "could not create a private image-preflight directory"
   verified_image_output="$verified_image_dir/images.env"
+  image_validation_env_file=$image_env_file
+  if [ -n "$compatibility_revision" ]; then
+    verified_compatibility_env="$verified_image_dir/rollback-compat.env"
+    node "$ROLLBACK_COMPAT_SCRIPT" materialize \
+      "$compatibility_revision" \
+      "$image_env_file" \
+      "$verified_compatibility_env" \
+      || fail "rollback compatibility environment could not be materialized"
+    image_validation_env_file=$verified_compatibility_env
+  fi
 
   sh "$IMAGE_PREFLIGHT_SCRIPT" \
     "$(env_file_value "$image_env_file" CLEAN_PAY_DEPLOY_SOURCE build)" \
     "$(env_file_value "$image_env_file" CLEAN_PAY_IMAGE)" \
     "$(env_file_value "$image_env_file" CLEAN_PAY_MIGRATION_IMAGE)" \
-    "$image_env_file" \
+    "$image_validation_env_file" \
     "$(env_file_value "$image_env_file" NEXT_PUBLIC_APP_URL)" \
     "$(env_file_value "$image_env_file" NEXT_PUBLIC_BRAND_NAME 'Clean Pay')" \
     "$(env_file_value "$image_env_file" NEXT_PUBLIC_BRAND_LOGO_URL /clean-pay-logo.png)" \
@@ -482,6 +552,16 @@ image_role_label() {
   esac
 }
 
+image_revision_label() {
+  image_id=$1
+  revision_value=$(docker image inspect --format \
+    '{{with .Config.Labels}}{{index . "org.opencontainers.image.revision"}}{{end}}' \
+    "$image_id") || fail "cannot inspect rollback image revision metadata"
+  printf '%s' "$revision_value" | grep -Eq '^([a-f0-9]{40}|[a-f0-9]{64})$' \
+    || fail "rollback image revision metadata is missing or invalid"
+  printf '%s' "$revision_value"
+}
+
 resolve_rollback_image_references() {
   rollback_app_ref=$1
   rollback_migration_ref=$2
@@ -496,6 +576,11 @@ resolve_rollback_image_references() {
   rollback_migration_role=$(image_role_label "$RESOLVED_ROLLBACK_MIGRATION_IMAGE")
   case "$rollback_app_role:$rollback_migration_role" in
     app:migration)
+      rollback_app_revision=$(image_revision_label "$RESOLVED_ROLLBACK_APP_IMAGE")
+      rollback_migration_revision=$(image_revision_label "$RESOLVED_ROLLBACK_MIGRATION_IMAGE")
+      [ "$rollback_app_revision" = "$rollback_migration_revision" ] \
+        || fail "rollback application and migration revisions differ"
+      RESOLVED_ROLLBACK_REVISION=$rollback_app_revision
       ROLLBACK_IMAGE_MODE=strict
       ;;
     :)
@@ -543,7 +628,17 @@ preflight_rollback_images() {
     "$(env_file_value "$ROLLBACK_ENV_FILE" CLEAN_PAY_MIGRATION_IMAGE)"
 
   if [ "$ROLLBACK_IMAGE_MODE" = "strict" ]; then
-    preflight_image_pair "$ROLLBACK_ENV_FILE"
+    [ "$(env_file_value "$ROLLBACK_ENV_FILE" CLEAN_PAY_REVISION)" = \
+      "$RESOLVED_ROLLBACK_REVISION" ] \
+      || fail "rollback environment revision does not match the immutable images"
+    case "$RESOLVED_ROLLBACK_REVISION" in
+      0ede176ad863c7a721a9fbbf43f583e838516d4b)
+        preflight_image_pair "$ROLLBACK_ENV_FILE" "$RESOLVED_ROLLBACK_REVISION"
+        ;;
+      *)
+        preflight_image_pair "$ROLLBACK_ENV_FILE"
+        ;;
+    esac
     [ "$PREFLIGHT_APP_IMAGE" = "$RESOLVED_ROLLBACK_APP_IMAGE" ] \
       || fail "rollback application image reference changed during preflight"
     [ "$PREFLIGHT_MIGRATION_IMAGE" = "$RESOLVED_ROLLBACK_MIGRATION_IMAGE" ] \

@@ -592,7 +592,7 @@ jobs:
         run: |
           bash scripts/security/rehearse-zero-downtime-image-rollback.sh \
             clean-pay:ci clean-pay-migration:ci \
-            f5cb6f543d85256e7733a1ade6a4f451d86cf378 \
+            0ede176ad863c7a721a9fbbf43f583e838516d4b \
             "$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
       - name: Preserve sanitized image rollback evidence
         if: always()

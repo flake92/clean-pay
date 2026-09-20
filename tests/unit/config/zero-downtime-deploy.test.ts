@@ -72,6 +72,7 @@ ${shellFunction("fail")}
 ${shellFunction("validate_image_id")}
 ${shellFunction("resolve_local_image_id")}
 ${shellFunction("image_role_label")}
+${shellFunction("image_revision_label")}
 ${shellFunction("resolve_rollback_image_references")}
 APP_IMAGE=${appImage}
 MIGRATION_IMAGE=${migrationImage}
@@ -93,6 +94,13 @@ docker() {
         *) return 93 ;;
       esac
       ;;
+    *org.opencontainers.image.revision*)
+      case "$5" in
+        "$APP_IMAGE") printf '%s\\n' "$MOCK_APP_REVISION" ;;
+        "$MIGRATION_IMAGE") printf '%s\\n' "$MOCK_MIGRATION_REVISION" ;;
+        *) return 95 ;;
+      esac
+      ;;
     *) return 94 ;;
   esac
 }
@@ -111,6 +119,8 @@ printf 'mode=%s\\napp=%s\\nmigration=%s\\n' \\
       PATH: process.env.PATH ?? "",
       MOCK_APP_ROLE: appRole,
       MOCK_MIGRATION_ROLE: migrationRole,
+      MOCK_APP_REVISION: "0ede176ad863c7a721a9fbbf43f583e838516d4b",
+      MOCK_MIGRATION_REVISION: "0ede176ad863c7a721a9fbbf43f583e838516d4b",
     },
   });
 }
@@ -328,9 +338,16 @@ describe("guarded zero-downtime application rollout", () => {
     expect(target).toContain('preflight_image_pair "$ENV_FILE"');
     expect(resolver).toContain("app:migration");
     expect(resolver).toContain("ROLLBACK_IMAGE_MODE=strict");
+    expect(resolver).toContain("RESOLVED_ROLLBACK_REVISION");
     expect(resolver).toContain("ROLLBACK_IMAGE_MODE=legacy");
     expect(rollback).toContain('if [ "$ROLLBACK_IMAGE_MODE" = "strict" ]');
-    expect(rollback).toContain('preflight_image_pair "$ROLLBACK_ENV_FILE"');
+    expect(rollback).toContain(
+      'preflight_image_pair "$ROLLBACK_ENV_FILE" "$RESOLVED_ROLLBACK_REVISION"',
+    );
+    expect(rollback).toContain("0ede176ad863c7a721a9fbbf43f583e838516d4b");
+    expect(script).toContain(
+      'ROLLBACK_COMPAT_SCRIPT="$ROOT_DIR/deploy/prod/rollback-env-compat.mjs"',
+    );
     expect(rollback).toContain("reference changed during preflight");
     expect(rollback).toContain("validate_legacy_rollback_environment");
     expect(legacyValidator).toContain("--pull never");
