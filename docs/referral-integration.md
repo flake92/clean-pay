@@ -29,7 +29,7 @@ The referral panel always displays the current points balance. Historical point 
 
 ## Rollout boundary
 
-The current reviewed source boundary is revision `b0c2815`. Its referral
+The current reviewed source boundary is revision `c2ab151`. Its referral
 contract includes the durable schema from `0052`, bounded legacy/operator
 recovery through `0055`,
 permanent Remnapy contract compatibility, serialized recipient claims,

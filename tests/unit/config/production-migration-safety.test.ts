@@ -118,9 +118,10 @@ describe("production migration safety", () => {
     expect(ciWorkflow).toContain("remnashop-migration-rehearsal:");
     expect(ciWorkflow).toContain("bash scripts/security/rehearse-clean-pay-migrations.sh");
     expect(ciWorkflow).toContain("bash scripts/security/rehearse-remnashop-migrations.sh");
-    expect(remnashopRehearsal).toContain("b0c28153fb604475c9da3a1cad94421363657668");
+    expect(remnashopRehearsal).toContain("c2ab151676ed15b7035e438287449f6e2cc4281b");
     expect(remnashopRehearsal).toContain('migrate "$SOURCE_DATABASE" 0040');
     expect(remnashopRehearsal).toContain('migrate "$SOURCE_DATABASE" 0047');
+    expect(remnashopRehearsal).toContain('migrate "$SOURCE_DATABASE" 0058');
     expect(remnashopRehearsal).toContain('migrate "$SOURCE_DATABASE" 0059');
     expect(remnashopRehearsal).toContain("pre-0040-backup.list");
     expect(remnashopRehearsal).toContain("post-0059-backup.list");
@@ -137,14 +138,23 @@ describe("production migration safety", () => {
       remnashopRehearsal.indexOf("INSERT INTO payment_operations"),
     );
     expect(remnashopRehearsal.indexOf("INSERT INTO payment_operations")).toBeLessThan(
+      remnashopRehearsal.indexOf('migrate "$SOURCE_DATABASE" 0058'),
+    );
+    expect(remnashopRehearsal.indexOf('migrate "$SOURCE_DATABASE" 0058')).toBeLessThan(
       remnashopRehearsal.indexOf('migrate "$SOURCE_DATABASE" 0059'),
     );
     expect(remnashopRehearsal).toContain(
-      "0059 did not enable reminders for the verified e-mail fixture",
+      "0059 changed the existing verified opt-out fixture",
     );
     expect(remnashopRehearsal).toContain(
       "0059 enabled reminders for the unverified fixture",
     );
+    expect(remnashopRehearsal).toContain("0059 changed existing reminder preferences");
+    expect(remnashopRehearsal).toContain("0059 created a preference backfill table");
+    expect(remnashopRehearsal).toContain("0059 did not preserve the fresh verified default");
+    expect(remnashopRehearsal).toContain('"existingOptOutPreserved": "passed"');
+    expect(remnashopRehearsal).toContain('"freshVerifiedDefault": "passed"');
+    expect(remnashopRehearsal).toContain('"backfillTableAbsent": "passed"');
     expect(remnashopRehearsal).toContain(
       "0059 no-op rerun changed the reminder timestamp",
     );
