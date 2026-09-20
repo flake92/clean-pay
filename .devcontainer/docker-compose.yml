@@ -25,8 +25,8 @@ x-clean-pay-env: &clean-pay-env
   NEXT_PUBLIC_APP_URL: http://localhost:4000
   LOG_LEVEL: debug
   REMNASHOP_API_BASE_URL: http://remnashop:5000/api/v1/public
-  REMNASHOP_API_KEY: dev-remnashop-api-key-change-me
-  REMNASHOP_AUTH_SERVICE_KEY: dev-remnashop-auth-service-key-change-me
+  REMNASHOP_API_KEY: clean-pay-e2e-remnashop-api-key-2026
+  REMNASHOP_AUTH_SERVICE_KEY: clean-pay-e2e-remnashop-auth-key-2026
   REDIS_URL: redis://redis:6379/0
   WEB_JWT_SECRET: dev-web-jwt-secret-change-me
   WEB_REFRESH_SECRET: dev-web-refresh-secret-change-me
@@ -68,12 +68,12 @@ x-remnashop-env: &remnashop-env
   WEB_ENABLED: "true"
   WEB_CABINET_URL: https://clean-pay.example.test/auth/telegram/webapp
   REFERRAL_REWARD_BACKFILL_ENABLED: "false"
-  APP_API_KEY: dev-remnashop-api-key-change-me
-  APP_AUTH_SERVICE_KEY: dev-remnashop-auth-service-key-change-me
-  APP_JWT_SECRET: dev-remnashop-jwt-secret-change-me
+  APP_API_KEY: clean-pay-e2e-remnashop-api-key-2026
+  APP_AUTH_SERVICE_KEY: clean-pay-e2e-remnashop-auth-key-2026
+  APP_JWT_SECRET: clean-pay-e2e-remnashop-jwt-secret-2026
 
   BOT_TOKEN: "0000000000:dev-telegram-bot-token-placeholder"
-  BOT_SECRET_TOKEN: dev-bot-secret-token
+  BOT_SECRET_TOKEN: clean-pay-e2e-bot-secret-token-2026
   BOT_OWNER_ID: "1"
   BOT_SUPPORT_USERNAME: cleanpay_support
   BOT_API_BASE_URL: http://telegram-mock:8080
@@ -84,18 +84,17 @@ x-remnashop-env: &remnashop-env
 
   REMNAWAVE_HOST: http://remnawave-mock:3000
   REMNAWAVE_TOKEN: dev-remnawave-token
-  REMNAWAVE_WEBHOOK_SECRET: dev-remnawave-webhook-secret
+  REMNAWAVE_WEBHOOK_SECRET: clean-pay-e2e-remnawave-webhook-secret-2026
 
   DATABASE_HOST: remnashop-postgres
   DATABASE_PORT: "5432"
   DATABASE_NAME: remnashop
   DATABASE_USER: remnashop
-  DATABASE_PASSWORD: remnashop
+  DATABASE_PASSWORD: clean-pay-e2e-remnashop-db-password-2026
 
   REDIS_HOST: remnashop-cache
   REDIS_PORT: "6379"
   REDIS_NAME: "0"
-  REDIS_PASSWORD: ""
 
   # Dev-only email delivery through local Mailpit.
   # These variables are intentionally duplicated with EMAIL/SMTP/MAIL names
@@ -232,11 +231,11 @@ services:
 
   remnashop:
     build:
-      context: ${REMNASHOP_BUILD_CONTEXT:-https://github.com/flake92/remnashop.git#b0c28153fb604475c9da3a1cad94421363657668}
+      context: ${REMNASHOP_BUILD_CONTEXT:-https://github.com/flake92/remnashop.git#c2ab151676ed15b7035e438287449f6e2cc4281b}
       dockerfile: Dockerfile
       args:
-        BUILD_BRANCH: codex/clean-pay-integration-upstream-dev
-        BUILD_COMMIT: ${REMNASHOP_BUILD_REVISION:-b0c28153fb604475c9da3a1cad94421363657668}
+        BUILD_BRANCH: codex/email-reminders-default-deploy-20260913
+        BUILD_COMMIT: ${REMNASHOP_BUILD_REVISION:-c2ab151676ed15b7035e438287449f6e2cc4281b}
     image: ${CLEAN_PAY_DEVCONTAINER_REMNASHOP_IMAGE:-${COMPOSE_PROJECT_NAME:-clean-pay-dev}-remnashop:latest}
     restart: unless-stopped
     environment:
@@ -302,7 +301,7 @@ services:
     environment:
       POSTGRES_DB: remnashop
       POSTGRES_USER: remnashop
-      POSTGRES_PASSWORD: remnashop
+      POSTGRES_PASSWORD: clean-pay-e2e-remnashop-db-password-2026
       TZ: UTC
     volumes:
       - remnashop-postgres-data:/var/lib/postgresql/data
