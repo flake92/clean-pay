@@ -3,7 +3,7 @@ set -Eeuo pipefail
 
 # Disposable, synthetic-data-only rehearsal of the audited Remnashop migration
 # boundary. The caller must check out the exact reviewed source revision first.
-readonly EXPECTED_REMNASHOP_REVISION="c2ab151676ed15b7035e438287449f6e2cc4281b"
+readonly EXPECTED_REMNASHOP_REVISION="7d27eeefffefb65af702e1c6ef7ed5fc985873c2"
 readonly POSTGRES_IMAGE="postgres:17-alpine@sha256:18cfe3ef5e6815560c98237d6216d1e5119702fb0f3894c8785dd58b8bbe5d73"
 readonly REMNASHOP_SOURCE="${REMNASHOP_SOURCE:?REMNASHOP_SOURCE must point to the reviewed checkout}"
 readonly REHEARSAL_OUTPUT_DIR="${REHEARSAL_OUTPUT_DIR:?REHEARSAL_OUTPUT_DIR must be explicit}"
