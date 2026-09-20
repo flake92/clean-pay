@@ -234,10 +234,6 @@ describe("stored-only Remnashop session authorization", () => {
       "local owner mismatch",
       { user: { remnashopUserId: "7" } },
     ],
-    [
-      "pending owner mismatch",
-      { user: { pendingRemnashopUserId: "7" } },
-    ],
   ])("rejects %s instead of merging or recovering", async (_name, overrides) => {
     await expect(
       authorize(session(overrides), {
@@ -273,6 +269,29 @@ describe("stored-only Remnashop session authorization", () => {
     });
 
     expect(apiMock.getRemnashopMe).not.toHaveBeenCalled();
+  });
+
+  it("keeps the cabinet open when a staged e-mail link points at another provider account", async () => {
+    // Regression: authPending=false with pendingRemnashopUserId different from
+    // the session's own account is only an unconfirmed link request, not an
+    // owner mismatch. The session token still belongs to the local account.
+    const value = session({
+      user: {
+        email: "staged@example.com",
+        emailVerified: false,
+        pendingRemnashopUserId: "7",
+        pendingRemnashopEmail: "staged@example.com",
+      },
+    });
+    apiMock.getRemnashopMe.mockResolvedValueOnce({
+      email: null,
+      is_email_verified: false,
+    });
+
+    await expect(authorize(value)).resolves.toMatchObject({
+      accessToken: "access",
+      session: { user: { telegramId: "123456", pendingRemnashopUserId: "7" } },
+    });
   });
 
   it("does not take the cabinet away from a Telegram account over an unconfirmed staged e-mail", async () => {

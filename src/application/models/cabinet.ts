@@ -43,7 +43,7 @@ export type CabinetViewModel =
        * interrupted refresh or Telegram transition, or explain what to do);
        * "retry" is a plain reload for transient upstream trouble.
        */
-      recovery?: "retry" | "recover";
+      recovery?: "retry" | "recover" | "merge";
     }
   | {
       status: "ready";
