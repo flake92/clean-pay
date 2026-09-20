@@ -40,6 +40,34 @@ function recoveryAttempt(value: string | null) {
   return value === "1" ? 1 : 0;
 }
 
+// A successful recovery redirects back to the page that asked for it. If that
+// page keeps asking for recovery (its render-only authorizer still refuses the
+// freshly refreshed bundle), the browser would bounce between the two forever
+// and every lap would burn a one-time upstream refresh token. A short-lived
+// hop counter turns that into a visible, actionable page after a few laps.
+const RECOVERY_HOPS_COOKIE = "clean_pay_recover_hops";
+const RECOVERY_HOPS_WINDOW_SECONDS = 60;
+const MAX_RECOVERY_HOPS = 3;
+
+function recoveryHops(request: Request) {
+  const header = request.headers.get("cookie") ?? "";
+  const match = new RegExp(`(?:^|;\\s*)${RECOVERY_HOPS_COOKIE}=(\\d{1,3})(?:;|$)`)
+    .exec(header);
+  return match ? Number(match[1]) : 0;
+}
+
+function withRecoveryHops(response: NextResponse, hops: number) {
+  const env = getEnv();
+  response.cookies.set(RECOVERY_HOPS_COOKIE, String(hops), {
+    httpOnly: true,
+    maxAge: RECOVERY_HOPS_WINDOW_SECONDS,
+    path: "/auth/session",
+    sameSite: env.cookieSameSite,
+    secure: env.cookieSecure,
+  });
+  return response;
+}
+
 function unavailable(
   request: Request,
   error: ServiceError | null,
@@ -116,13 +144,27 @@ export async function GET(request: Request) {
   const returnTo = safeRedirectPath(requestUrl.searchParams.get("return_to"))
     ?? "/cabinet";
   const attempt = recoveryAttempt(requestUrl.searchParams.get("attempt"));
+  const hops = recoveryHops(request);
+
+  if (hops >= MAX_RECOVERY_HOPS) {
+    // Do not touch the provider again: this is a loop, not a transient miss.
+    return unavailable(
+      request,
+      new ServiceError("CONFLICT", 409, "Provider session recovery is looping", {
+        retryAfterSeconds: RECOVERY_HOPS_WINDOW_SECONDS / 2,
+      }),
+      returnTo,
+      1,
+      409,
+    );
+  }
 
   try {
     await getAuthorizedRemnashopTokens({
       allowUnverifiedEmail: true,
       forceRefresh: true,
     });
-    return redirect(returnTo);
+    return withRecoveryHops(redirect(returnTo), hops + 1);
   } catch (error) {
     const serviceError = error instanceof ServiceError ? error : null;
     const code = serviceError?.code ?? "INTERNAL_ERROR";

@@ -53,8 +53,60 @@ describe("provider session recovery route", () => {
       "https://pay.example.com/cabinet?tab=payments",
     );
     expect(response.headers.get("cache-control")).toBe("no-store");
-    expect(response.headers.get("set-cookie")).toBeNull();
+    // Only the short-lived loop counter is set; no session credential changes.
+    const cookie = response.headers.get("set-cookie") ?? "";
+    expect(cookie).toContain("clean_pay_recover_hops=1");
+    expect(cookie).toContain("Max-Age=60");
+    expect(cookie).toContain("Path=/auth/session");
+    expect(cookie).toContain("HttpOnly");
+    expect(cookie).not.toContain("clean_pay_access");
+    expect(cookie).not.toContain("clean_pay_refresh");
     expect(mocks.clearWebSession).not.toHaveBeenCalled();
+  });
+
+  it("stops a redirect loop between a page and recovery without touching the provider", async () => {
+    const looping = new Request(
+      "https://pay.example.com/auth/session/recover?return_to=%2Fcabinet",
+      { headers: { cookie: "a=b; clean_pay_recover_hops=3" } },
+    );
+
+    const response = await GET(looping);
+
+    expect(mocks.authorize).not.toHaveBeenCalled();
+    expect(response.status).toBe(303);
+    const target = location(response);
+    expect(target.pathname).toBe("/auth/session/recovery");
+    expect(target.searchParams.get("attempt")).toBe("1");
+    expect(target.searchParams.get("kind")).toBe("provider");
+    expect(target.searchParams.get("return_to")).toBe("/cabinet");
+    expect(target.searchParams.get("retry_after")).toBe("30");
+  });
+
+  it("counts consecutive recoveries below the loop limit", async () => {
+    const second = new Request(
+      "https://pay.example.com/auth/session/recover?return_to=%2Fcabinet",
+      { headers: { cookie: "clean_pay_recover_hops=2" } },
+    );
+
+    const response = await GET(second);
+
+    expect(mocks.authorize).toHaveBeenCalledTimes(1);
+    expect(response.headers.get("set-cookie") ?? "").toContain(
+      "clean_pay_recover_hops=3",
+    );
+    expect(response.headers.get("location")).toBe("https://pay.example.com/cabinet");
+  });
+
+  it("ignores a malformed loop counter", async () => {
+    const forged = new Request(
+      "https://pay.example.com/auth/session/recover?return_to=%2Fcabinet",
+      { headers: { cookie: "clean_pay_recover_hops=abc; x=clean_pay_recover_hops=9" } },
+    );
+
+    const response = await GET(forged);
+
+    expect(mocks.authorize).toHaveBeenCalledTimes(1);
+    expect(response.headers.get("location")).toBe("https://pay.example.com/cabinet");
   });
 
   it.each([

@@ -242,7 +242,7 @@ describe("Remnashop response decoders", () => {
     });
 
     expect(() => decodeRemnashopEndpointResponse("/auth/me", "GET", {
-      telegram_id: "777",
+      telegram_id: "not-a-number",
     })).toThrow("telegram_id must be a finite number or null");
   });
 
