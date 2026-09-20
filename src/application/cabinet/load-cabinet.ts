@@ -13,8 +13,8 @@ function cabinetLoadFailure(error: unknown): CabinetViewModel {
   if (code === "ACCOUNT_MERGE_REQUIRED" || code === "ACCOUNT_MERGE_SUBSCRIPTIONS_CONFLICT") {
     return {
       status: "error",
-      message: "Не удалось безопасно определить ваш аккаунт: данные Telegram и e-mail ещё не объединены. Нажмите «Восстановить доступ» — мы проверим привязку и подскажем следующий шаг.",
-      recovery: "recover",
+      message: "Не удалось безопасно определить ваш аккаунт: данные Telegram и e-mail ещё не объединены. Нажмите «Объединить аккаунты» — откроется страница привязки, где можно подтвердить e-mail и завершить объединение.",
+      recovery: "merge",
     };
   }
 

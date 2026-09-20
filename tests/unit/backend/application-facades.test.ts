@@ -415,8 +415,8 @@ describe("application facades", () => {
       }),
     }), history)).resolves.toMatchObject({
       status: "error",
-      recovery: "recover",
-      message: expect.stringContaining("Восстановить доступ"),
+      recovery: "merge",
+      message: expect.stringContaining("Объединить аккаунты"),
     });
 
     await expect(loadCabinetViewModel(reader, authGateway({
