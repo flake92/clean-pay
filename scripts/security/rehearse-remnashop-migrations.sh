@@ -3,7 +3,7 @@ set -Eeuo pipefail
 
 # Disposable, synthetic-data-only rehearsal of the audited Remnashop migration
 # boundary. The caller must check out the exact reviewed source revision first.
-readonly EXPECTED_REMNASHOP_REVISION="837d964269078142307794ba3566a30d40b7b0b6"
+readonly EXPECTED_REMNASHOP_REVISION="b0c28153fb604475c9da3a1cad94421363657668"
 readonly POSTGRES_IMAGE="postgres:17-alpine@sha256:18cfe3ef5e6815560c98237d6216d1e5119702fb0f3894c8785dd58b8bbe5d73"
 readonly REMNASHOP_SOURCE="${REMNASHOP_SOURCE:?REMNASHOP_SOURCE must point to the reviewed checkout}"
 readonly REHEARSAL_OUTPUT_DIR="${REHEARSAL_OUTPUT_DIR:?REHEARSAL_OUTPUT_DIR must be explicit}"
@@ -139,12 +139,13 @@ INSERT INTO users (
   telegram_id, username, name, role, language,
   personal_discount, purchase_discount, is_blocked, is_bot_blocked,
   referral_code, points, is_rules_accepted, is_trial_available,
-  auth_type, is_email_verified
+  auth_type, email, is_email_verified
 ) VALUES
   (900000000001, 'fixture_owner', 'Synthetic Owner', 'OWNER', 'RU',
-   0, 0, false, false, 'fixture-owner', 0, true, true, 'telegram', false),
+   0, 0, false, false, 'fixture-owner', 0, true, true, 'telegram', NULL, false),
   (900000000002, 'fixture_member', 'Synthetic Member', 'USER', 'EN',
-   7, 3, false, false, 'fixture-member', 10, true, false, 'telegram', false);
+   7, 3, false, false, 'fixture-member', 10, true, false, 'telegram',
+   'fixture@example.com', true);
 SQL
 
 pre_state=$(fixture_state "$SOURCE_DATABASE")
@@ -194,12 +195,20 @@ docker exec "$POSTGRES_CONTAINER" pg_restore --list /tmp/remnashop-pre-0048.dump
   >"$REHEARSAL_OUTPUT_DIR/pre-0048-backup.list"
 test -s "$REHEARSAL_OUTPUT_DIR/pre-0048-backup.list" || fail "pre-0048 backup inventory is empty"
 
-migrate "$SOURCE_DATABASE" 0058 \
-  >"$REHEARSAL_OUTPUT_DIR/forward-0047-to-0058.log" 2>&1
-test "$(revision "$SOURCE_DATABASE")" = "0058" || fail "source did not reach 0058"
+migrate "$SOURCE_DATABASE" 0059 \
+  >"$REHEARSAL_OUTPUT_DIR/forward-0047-to-0059.log" 2>&1
+test "$(revision "$SOURCE_DATABASE")" = "0059" || fail "source did not reach 0059"
 test "$(fixture_state "$SOURCE_DATABASE")" = "$pre_state" || fail "user fixture changed"
 test "$(query "$SOURCE_DATABASE" "SELECT status FROM payment_operations WHERE provider_key = 'synthetic-provider-key';")" = "MANUAL_REQUIRED" ||
   fail "0049 did not conservatively migrate the populated UNKNOWN operation"
+test "$(query "$SOURCE_DATABASE" "SELECT count(*) FROM users WHERE telegram_id = 900000000002 AND email = 'fixture@example.com' AND is_email_verified IS TRUE AND subscription_expiration_email_enabled IS TRUE AND subscription_expiration_email_enabled_at IS NOT NULL;")" = "1" ||
+  fail "0059 did not enable reminders for the verified e-mail fixture"
+test "$(query "$SOURCE_DATABASE" "SELECT count(*) FROM users WHERE telegram_id = 900000000001 AND is_email_verified IS FALSE AND subscription_expiration_email_enabled IS FALSE AND subscription_expiration_email_enabled_at IS NULL;")" = "1" ||
+  fail "0059 enabled reminders for the unverified fixture"
+test "$(query "$SOURCE_DATABASE" "SELECT count(*) FROM subscription_email_consent_backfill_0059 backfill JOIN users ON users.id = backfill.user_id WHERE users.telegram_id = 900000000002 AND users.subscription_expiration_email_enabled_at = backfill.applied_enabled_at;")" = "1" ||
+  fail "0059 did not record the verified e-mail backfill audit"
+reminder_enabled_at=$(query "$SOURCE_DATABASE" "SELECT extract(epoch FROM subscription_expiration_email_enabled_at)::text FROM users WHERE telegram_id = 900000000002;" | tr -d '[:space:]')
+test -n "$reminder_enabled_at" || fail "0059 reminder timestamp fixture is empty"
 
 if query "$SOURCE_DATABASE" \
   "UPDATE users SET merged_into_user_id = (SELECT id FROM users WHERE telegram_id = 900000000002) WHERE telegram_id = 900000000001;" \
@@ -213,19 +222,21 @@ test "$(query "$SOURCE_DATABASE" "SELECT count(*) FROM user_merge_audit;")" = "1
 test "$(query "$SOURCE_DATABASE" "SELECT count(*) FROM users WHERE merged_into_user_id IS NOT NULL;")" = "0" ||
   fail "failed owner merge was not atomic"
 
-migrate "$SOURCE_DATABASE" 0058 \
-  >"$REHEARSAL_OUTPUT_DIR/no-op-0058.log" 2>&1
-test "$(revision "$SOURCE_DATABASE")" = "0058" || fail "no-op rerun changed revision"
-if grep -q "Running upgrade" "$REHEARSAL_OUTPUT_DIR/no-op-0058.log"; then
-  fail "second 0058 migration run was not a no-op"
+migrate "$SOURCE_DATABASE" 0059 \
+  >"$REHEARSAL_OUTPUT_DIR/no-op-0059.log" 2>&1
+test "$(revision "$SOURCE_DATABASE")" = "0059" || fail "no-op rerun changed revision"
+if grep -q "Running upgrade" "$REHEARSAL_OUTPUT_DIR/no-op-0059.log"; then
+  fail "second 0059 migration run was not a no-op"
 fi
+test "$(query "$SOURCE_DATABASE" "SELECT extract(epoch FROM subscription_expiration_email_enabled_at)::text FROM users WHERE telegram_id = 900000000002;" | tr -d '[:space:]')" = "$reminder_enabled_at" ||
+  fail "0059 no-op rerun changed the reminder timestamp"
 
 docker exec "$POSTGRES_CONTAINER" pg_dump \
   --username "$DATABASE_USER" --dbname "$SOURCE_DATABASE" \
-  --format custom --file /tmp/remnashop-post-0058.dump
-docker exec "$POSTGRES_CONTAINER" pg_restore --list /tmp/remnashop-post-0058.dump \
-  >"$REHEARSAL_OUTPUT_DIR/post-0058-backup.list"
-test -s "$REHEARSAL_OUTPUT_DIR/post-0058-backup.list" || fail "post-upgrade backup inventory is empty"
+  --format custom --file /tmp/remnashop-post-0059.dump
+docker exec "$POSTGRES_CONTAINER" pg_restore --list /tmp/remnashop-post-0059.dump \
+  >"$REHEARSAL_OUTPUT_DIR/post-0059-backup.list"
+test -s "$REHEARSAL_OUTPUT_DIR/post-0059-backup.list" || fail "post-upgrade backup inventory is empty"
 
 create_database "$ROLLBACK_DATABASE"
 docker exec "$POSTGRES_CONTAINER" pg_restore \
@@ -270,10 +281,10 @@ test "$(query "$INVALID_OWNER_DATABASE" "SELECT count(*) FROM payment_operations
 query "$INVALID_OWNER_DATABASE" \
   "UPDATE users SET merged_into_user_id = NULL, merged_at = NULL WHERE telegram_id = 900000000001;" \
   >/dev/null
-migrate "$INVALID_OWNER_DATABASE" 0058 \
-  >"$REHEARSAL_OUTPUT_DIR/invalid-owner-repaired-to-0058.log" 2>&1
-test "$(revision "$INVALID_OWNER_DATABASE")" = "0058" ||
-  fail "repaired invalid-owner chain did not reach 0058"
+migrate "$INVALID_OWNER_DATABASE" 0059 \
+  >"$REHEARSAL_OUTPUT_DIR/invalid-owner-repaired-to-0059.log" 2>&1
+test "$(revision "$INVALID_OWNER_DATABASE")" = "0059" ||
+  fail "repaired invalid-owner chain did not reach 0059"
 test "$(query "$INVALID_OWNER_DATABASE" "SELECT status FROM payment_operations WHERE provider_key = 'synthetic-provider-key';")" = "MANUAL_REQUIRED" ||
   fail "repaired invalid-owner operation was not migrated conservatively"
 
@@ -325,9 +336,9 @@ test "$(query "$LOCK_DATABASE" "SELECT count(*) FROM information_schema.columns 
 query "$LOCK_DATABASE" "SELECT pg_terminate_backend($holder_database_pid);" >/dev/null
 wait "$holder_client_pid" || true
 query postgres "ALTER DATABASE $LOCK_DATABASE RESET lock_timeout;" >/dev/null
-migrate "$LOCK_DATABASE" 0058 \
-  >"$REHEARSAL_OUTPUT_DIR/resume-0044-to-0058.log" 2>&1
-test "$(revision "$LOCK_DATABASE")" = "0058" || fail "lock retry did not reach 0058"
+migrate "$LOCK_DATABASE" 0059 \
+  >"$REHEARSAL_OUTPUT_DIR/resume-0044-to-0059.log" 2>&1
+test "$(revision "$LOCK_DATABASE")" = "0059" || fail "lock retry did not reach 0059"
 test "$(fixture_state "$LOCK_DATABASE")" = "$pre_state" || fail "lock retry changed fixture"
 
 create_database "$ROW_LOCK_DATABASE"
@@ -382,9 +393,9 @@ test "$(query "$ROW_LOCK_DATABASE" "SELECT count(*) FROM pg_constraint WHERE con
 query "$ROW_LOCK_DATABASE" "SELECT pg_terminate_backend($row_holder_database_pid);" >/dev/null
 wait "$row_holder_client_pid" || true
 query postgres "ALTER DATABASE $ROW_LOCK_DATABASE RESET lock_timeout;" >/dev/null
-migrate "$ROW_LOCK_DATABASE" 0058 \
-  >"$REHEARSAL_OUTPUT_DIR/row-lock-resume-0050-to-0058.log" 2>&1
-test "$(revision "$ROW_LOCK_DATABASE")" = "0058" || fail "row-lock retry did not reach 0058"
+migrate "$ROW_LOCK_DATABASE" 0059 \
+  >"$REHEARSAL_OUTPUT_DIR/row-lock-resume-0050-to-0059.log" 2>&1
+test "$(revision "$ROW_LOCK_DATABASE")" = "0059" || fail "row-lock retry did not reach 0059"
 test "$(query "$ROW_LOCK_DATABASE" "SELECT legacy_rollout_gate_active FROM payment_runtime_control WHERE id = 1;")" = "f" ||
   fail "0051 retry did not finalize the rollout gate"
 test "$(query "$ROW_LOCK_DATABASE" "SELECT count(*) FROM pg_constraint WHERE conname = 'ck_payment_runtime_control_rollout_finalized';")" = "1" ||
@@ -395,7 +406,7 @@ remnashop "$SOURCE_DATABASE" python -c \
   >"$REHEARSAL_OUTPUT_DIR/application-contract.log" 2>&1
 
 fixture_hash=${pre_state#*|}
-printf '{\n  "schemaVersion": 3,\n  "remnashopRevision": "%s",\n  "fixtureUsers": 2,\n  "fixturePaymentOperations": 1,\n  "fixtureOwnerFencingAudits": 1,\n  "fixtureHash": "%s",\n  "forward": "0040->0047(populate)->0058",\n  "noOpRevision": "0058",\n  "restoreRevision": "0040",\n  "invalidOwnerFailureRevision": "0047",\n  "invalidOwnerResumeRevision": "0058",\n  "tableLockFailureRevision": "0044",\n  "tableLockTimeoutMilliseconds": %s,\n  "tableLockResumeRevision": "0058",\n  "rowLockFailureRevision": "0050",\n  "rowLockTimeoutMilliseconds": %s,\n  "rowLockResumeRevision": "0058",\n  "applicationFactory": "passed",\n  "authApiContract": {"emailStart": 422, "identify": 422, "serviceSession": 422, "notificationPreferencesUnsupportedMethod": 405}\n}\n' \
+printf '{\n  "schemaVersion": 4,\n  "remnashopRevision": "%s",\n  "fixtureUsers": 2,\n  "fixturePaymentOperations": 1,\n  "fixtureOwnerFencingAudits": 1,\n  "fixtureHash": "%s",\n  "forward": "0040->0047(populate)->0059",\n  "noOpRevision": "0059",\n  "verifiedReminderBackfill": "passed",\n  "restoreRevision": "0040",\n  "invalidOwnerFailureRevision": "0047",\n  "invalidOwnerResumeRevision": "0059",\n  "tableLockFailureRevision": "0044",\n  "tableLockTimeoutMilliseconds": %s,\n  "tableLockResumeRevision": "0059",\n  "rowLockFailureRevision": "0050",\n  "rowLockTimeoutMilliseconds": %s,\n  "rowLockResumeRevision": "0059",\n  "applicationFactory": "passed",\n  "authApiContract": {"emailStart": 422, "identify": 422, "serviceSession": 422, "notificationPreferencesUnsupportedMethod": 405}\n}\n' \
   "$EXPECTED_REMNASHOP_REVISION" "$fixture_hash" "$lock_elapsed_ms" "$row_lock_elapsed_ms" \
   >"$REHEARSAL_OUTPUT_DIR/report.json"
 

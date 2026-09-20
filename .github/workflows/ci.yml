@@ -951,7 +951,7 @@ jobs:
         uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
           repository: flake92/remnashop
-          ref: 837d964269078142307794ba3566a30d40b7b0b6
+          ref: b0c28153fb604475c9da3a1cad94421363657668
           path: .migration-remnashop
           fetch-depth: 1
           persist-credentials: false
@@ -982,7 +982,7 @@ jobs:
     env:
       CLEAN_PAY_DEVCONTAINER_PROJECT: clean-pay-e2e-${{ github.run_id }}-${{ github.run_attempt }}
       REMNASHOP_HOST_SOURCE: ${{ github.workspace }}/.e2e-remnashop
-      REMNASHOP_BUILD_REVISION: 837d964269078142307794ba3566a30d40b7b0b6
+      REMNASHOP_BUILD_REVISION: b0c28153fb604475c9da3a1cad94421363657668
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
@@ -991,7 +991,7 @@ jobs:
         uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
           repository: flake92/remnashop
-          ref: 837d964269078142307794ba3566a30d40b7b0b6
+          ref: b0c28153fb604475c9da3a1cad94421363657668
           path: .e2e-remnashop
           fetch-depth: 1
           persist-credentials: false

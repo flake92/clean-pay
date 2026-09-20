@@ -43,18 +43,18 @@ file and run the explicit configuration-only preparation before this window:
 The command performs no Clean Pay service or database mutation. It preserves
 existing secrets, creates distinct role credentials with guarded idempotent
 file publications, requires the exact subscription and payment redirect
-origins, raises the stale Remnashop floor from `0050` to the legacy-upgrade
-minimum `0058`, and leaves
+origins, raises the stale Remnashop floor from `0050` to the required minimum
+`0059`, and leaves
 `PAYMENT_DATA_RETENTION_ENABLED=false`. Do not replace the old env with the
 example and do not invent either origin list. Upgrade Remnashop to at least
-revision `0058`, then run `./deploy.sh build`; all of these checks must pass
+revision `0059`, then run `./deploy.sh build`; all of these checks must pass
 while the old Clean Pay runtime is still available.
 
-Fresh Clean Pay installations default to Remnashop revision `0059`. A direct
-upgrade from `0.1.1` intentionally remains at `0058`: revision `0059` changes
-the initial e-mail-reminder preferences and therefore requires a separate,
-reviewed decision for existing users rather than an implicit deployment
-backfill.
+Fresh installations and direct upgrades from `0.1.1` both require Remnashop
+revision `0059`. Its audited backfill enables expiration reminders for every
+existing account with a verified e-mail address; unverified accounts remain
+disabled. Users can still disable later reminders in their profile. The
+Remnashop migration must complete before Clean Pay is installed or restarted.
 
 The already-created `0.1.1` containers retain their original environment, but
 must not be recreated with the old deployment code after preparation. If the
@@ -520,22 +520,24 @@ entrypoint. The same CI job first runs
 [`scripts/security/rehearse-clean-pay-migrations.sh`](../scripts/security/rehearse-clean-pay-migrations.sh)
 against the checked-out Clean Pay migration chain, then runs
 [`scripts/security/rehearse-remnashop-migrations.sh`](../scripts/security/rehearse-remnashop-migrations.sh)
-against the exact reviewed revision beginning `837d964`; the CI workflow and
+against the exact reviewed revision beginning `b0c2815`; the CI workflow and
 rehearsal script enforce the complete commit identifier.
 The disposable job builds that source, creates a two-user synthetic fixture at
 `0040`, inventories a custom-format backup, advances to `0047`, and only then
 adds a payment operation plus user-merge audit data. Thus `0048` installs and
 validates owner fencing over a populated operation, while `0049` must
 conservatively transform its legacy `UNKNOWN` state before the chain reaches
-`0058`. A separate restored `0047` database deliberately links that operation
+`0059`. The fixture proves that `0059` enables reminders for the verified
+synthetic user, leaves the unverified user disabled, and is a no-op on a second
+apply. A separate restored `0047` database deliberately links that operation
 to an already merged owner: `0048` must fail without leaving its replacement FK
-or triggers, then reach `0058` after the row is repaired. The job also verifies
+or triggers, then reach `0059` after the row is repaired. The job also verifies
 a second no-op apply, restores the `0040` backup into a separate database,
 forces `0045` to fail under a 1.5-second table-lock budget from `0044`, and
 resumes the unchanged chain. A second contention database holds the populated
 `payment_runtime_control` row before `0051`; the timeout must leave revision
 `0050`, the old gate value and no partial finalization constraint, after which
-the same migration command reaches `0058`. Finally, an in-process ASGI client
+the same migration command reaches `0059`. Finally, an in-process ASGI client
 verifies the three empty-body auth probes still return `422` and the
 side-effect-free unsupported notification-preferences method returns `405`,
 matching the Clean Pay runtime compatibility check. It preserves only
@@ -545,8 +547,10 @@ Rollback still uses the pinned previous image plus a verified pre-upgrade
 database restore; never run an automatic destructive downgrade against the only
 production database.
 
-Revision `0057` adds the explicit user opt-in and durable subscription-email
-outbox. Before enabling delivery, configure Remnashop SMTP plus:
+Revision `0057` adds the user preference and durable subscription-email outbox.
+Revision `0059` makes that preference default-on for newly verified addresses
+and backfills every existing verified address. Before enabling delivery,
+configure Remnashop SMTP plus:
 
 ```dotenv
 EMAIL_USE_TLS=true
@@ -557,11 +561,15 @@ EMAIL_SUBSCRIPTION_EXPIRATION_REMINDERS_ENABLED=false
 ```
 
 Deploy migration, API, worker and scheduler from one image first. While the
-kill switch is `false`, verify the GET route and PATCH with `false`; enabling a
-user preference intentionally returns `503` in this state. Validate a complete
-opt-in and test delivery in staging. For production, be ready to restore the
-switch to `false`, change it to `true`, restart the Remnashop runtime roles,
-enable one controlled test account and verify its delivery before wider use.
+kill switch is `false`, verify that the GET route reports the backfilled state
+for a verified account and that PATCH with `false` persists an opt-out;
+re-enabling a preference intentionally returns `503` in this state. Validate a
+complete delivery in staging. Before the production switch, review the number
+of eligible expiring subscriptions and confirm the worker's bounded rate. Be
+ready to restore the switch to `false`, then change it to `true`, restart the
+Remnashop runtime roles and monitor the durable outbox, SMTP failures and send
+rate. Revision `0059` is a default-on rollout, so production must not rely on a
+manual one-account opt-in as a safety boundary.
 Do not use `WEB_CABINET_URL` in reminder emails: it points to Telegram WebApp
 auth in this integration. SMTP credentials remain only in Remnashop. Configure
 SPF, DKIM and DMARC for the sender domain before wider delivery; the application
