@@ -164,13 +164,21 @@ describe("Chatwoot widget context lifecycle", () => {
     mocks.loadContext.mockResolvedValue(null);
     mocks.verifyIdentity.mockResolvedValue("confirmed");
     delete window.$chatwoot;
+    document.getElementById("chatwoot_live_chat_widget")?.remove();
 
     const api = chatwootApi();
     api.hasLoaded = false;
     api.setUser.mockImplementation(() => {
       document.cookie = `cw_user_${config.websiteToken}=identified; Path=/`;
     });
-    const run = vi.fn(() => {
+    const run = vi.fn(({ baseUrl, websiteToken }: {
+      baseUrl: string;
+      websiteToken: string;
+    }) => {
+      const frame = document.createElement("iframe");
+      frame.id = "chatwoot_live_chat_widget";
+      frame.src = `${baseUrl}/widget?website_token=${websiteToken}`;
+      document.body.appendChild(frame);
       window.$chatwoot = api;
     });
     window.chatwootSDK = { run };
@@ -252,6 +260,7 @@ describe("Chatwoot widget context lifecycle", () => {
     mocks.loadContext.mockResolvedValue(null);
     mocks.verifyIdentity.mockResolvedValue("rejected");
     delete window.$chatwoot;
+    document.getElementById("chatwoot_live_chat_widget")?.remove();
 
     const api = chatwootApi();
     api.hasLoaded = false;
@@ -259,7 +268,11 @@ describe("Chatwoot widget context lifecycle", () => {
       document.cookie = `cw_user_${config.websiteToken}=identified; Path=/`;
     });
     window.chatwootSDK = {
-      run: vi.fn(() => {
+      run: vi.fn(({ baseUrl, websiteToken }) => {
+        const frame = document.createElement("iframe");
+        frame.id = "chatwoot_live_chat_widget";
+        frame.src = `${baseUrl}/widget?website_token=${websiteToken}`;
+        document.body.appendChild(frame);
         window.$chatwoot = api;
       }),
     };
@@ -303,11 +316,22 @@ describe("Chatwoot widget context lifecycle", () => {
     await flushWidgetEffects();
 
     expect(api.setUser).toHaveBeenCalledOnce();
+    expect(api.setUser).toHaveBeenCalledWith(
+      config.user.identifier,
+      expect.objectContaining({
+        identifier_hash: config.user.identifierHash,
+      }),
+    );
     expect(document.cookie).toContain(`cw_user_${config.websiteToken}=identified`);
     expect(document.cookie).toContain("cw_conversation=authenticated");
     expect(api.toggle).not.toHaveBeenCalledWith("open");
 
+    act(() => window.dispatchEvent(new CustomEvent("chatwoot:error")));
+
     await act(async () => {
+      // The initial 750 ms probe is already scheduled when the uncorrelated
+      // SDK error arrives, so the controller deliberately keeps that bounded
+      // probe instead of creating a duplicate zero-delay request.
       await vi.advanceTimersByTimeAsync(750);
     });
 
