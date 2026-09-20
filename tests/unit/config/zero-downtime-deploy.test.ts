@@ -16,6 +16,7 @@ import { describe, expect, it } from "vitest";
 
 const script = readFileSync("deploy/prod/zero-downtime-app.sh", "utf8");
 const deployScript = readFileSync("deploy.sh", "utf8");
+const nodeToolingScript = readFileSync("deploy/prod/node-tooling.sh", "utf8");
 const runbook = readFileSync(
   "deploy/prod/zero-downtime-production-runbook.md",
   "utf8",
@@ -209,11 +210,16 @@ function productionEnvContent(overrides: Record<string, string> = {}) {
 
 describe("guarded zero-downtime application rollout", () => {
   it.skipIf(!posixShell)("has valid shell syntax and a side-effect-free help command", () => {
-    const syntax = spawnSync(posixShell!, ["-n", "deploy/prod/zero-downtime-app.sh"], {
-      cwd: process.cwd(),
-      encoding: "utf8",
-    });
-    expect(syntax.status, syntax.stderr).toBe(0);
+    for (const shellScript of [
+      "deploy/prod/zero-downtime-app.sh",
+      "deploy/prod/node-tooling.sh",
+    ]) {
+      const syntax = spawnSync(posixShell!, ["-n", shellScript], {
+        cwd: process.cwd(),
+        encoding: "utf8",
+      });
+      expect(syntax.status, `${shellScript}: ${syntax.stderr}`).toBe(0);
+    }
 
     const help = spawnSync(posixShell!, ["deploy/prod/zero-downtime-app.sh", "help"], {
       cwd: process.cwd(),
@@ -224,7 +230,159 @@ describe("guarded zero-downtime application rollout", () => {
     expect(help.stdout).toContain("--require-no-pending-migrations");
     expect(help.stdout).toContain("--traffic-on-canary");
     expect(help.stdout).toContain("--traffic-off-canary");
+
+    const toolingHelp = spawnSync(posixShell!, ["deploy/prod/node-tooling.sh", "help"], {
+      cwd: process.cwd(),
+      encoding: "utf8",
+      env: { NODE_ENV: "test", PATH: process.env.PATH ?? "" },
+    });
+    expect(toolingHelp.status, toolingHelp.stderr).toBe(0);
+    expect(toolingHelp.stdout).toContain("zero-downtime-env");
+    expect(toolingHelp.stdout).toContain("caddyfile");
   });
+
+  it("uses one pinned, least-privilege Node fallback for every host-side helper", () => {
+    const pinnedImage = deployScript.match(/^NODE_TOOLING_IMAGE="([^"]+)"/mu)?.[1];
+    expect(pinnedImage).toMatch(
+      /^node:24\.18\.0-bookworm-slim@sha256:[a-f0-9]{64}$/u,
+    );
+    for (const source of [script, nodeToolingScript]) {
+      expect(source).toContain(`NODE_TOOLING_IMAGE="${pinnedImage}"`);
+      expect(source).toContain("docker run --rm --pull never --read-only --network none");
+      expect(source).toContain("--cap-drop ALL");
+      expect(source).toContain("--security-opt no-new-privileges");
+      expect(source).toContain('--user "$(id -u):$(id -g)"');
+      expect(source).toContain("--entrypoint node");
+      expect(source).not.toContain("--network host");
+      expect(source).not.toContain("/var/run/docker.sock");
+    }
+    expect(nodeToolingScript).toContain('docker pull "$NODE_TOOLING_IMAGE"');
+    expect(runbook).not.toMatch(/(?:^|\n)\s*node\s+/u);
+    expect(runbook).not.toMatch(/\|\s*node\s+/u);
+
+    for (const validator of [
+      shellFunction("validate_docker_bind_directory"),
+      shellFunctionFrom(nodeToolingScript, "validate_bind_directory"),
+    ]) {
+      expect(validator).toContain("must not be a symbolic link");
+      expect(validator).toContain("cannot contain a comma");
+    }
+
+    const requirements = shellFunction("require_tools_and_environment");
+    expect(requirements).not.toContain('fail "node is required"');
+    expect(requirements).toContain('validate_environment_file "$ENV_FILE"');
+    expect(requirements).toContain("materialize_role_environment");
+    expect(shellFunction("acquire_production_operation_lock")).toContain(
+      'operation_lock_command acquire "$operation_name" "$$"',
+    );
+    expect(shellFunction("release_production_operation_lock")).toContain(
+      'operation_lock_command release "$operation_lock_token"',
+    );
+    expect(shellFunction("restore_previous_compose")).toContain(
+      "environment_pair_command restore-images",
+    );
+    expect(shellFunction("preflight_rollback_images")).toContain(
+      "environment_pair_command verify",
+    );
+    expect(shellFunction("load_state")).toContain("environment_pair_command verify");
+
+    const pairFallback = shellFunction("environment_pair_command");
+    expect(pairFallback).toContain('if [ "$pair_mode" = verify ]');
+    expect(pairFallback).toContain(
+      'source=$current_parent,target=$current_parent,readonly',
+    );
+    expect(pairFallback).toContain(
+      'source=$rollback_parent,target=$rollback_parent,readonly',
+    );
+    expect(pairFallback).toContain(
+      'source=$current_parent,target=$current_parent"',
+    );
+
+    const caddyFallback = shellFunctionFrom(nodeToolingScript, "run_caddyfile");
+    expect(caddyFallback).toContain(
+      "source=$authoritative_path,target=/run/clean-pay-caddy-authoritative",
+    );
+    expect(caddyFallback).toContain(
+      "source=$source_path,target=/run/clean-pay-caddy-source,readonly",
+    );
+    expect(caddyFallback).not.toContain("source=$authoritative_parent");
+    expect(caddyFallback).not.toContain("source=$source_parent");
+  });
+
+  it.skipIf(!posixShell)(
+    "assembles no-host-Node fallback calls with exact external-directory access",
+    () => {
+      const harness = `
+set -eu
+ROOT_DIR=$(pwd)
+NODE_TOOLING_IMAGE="node:24.18.0-bookworm-slim@sha256:6f7b03f7c2c8e2e784dcf9295400527b9b1270fd37b7e9a7285cf83b6951452d"
+OPERATION_LOCK_SCRIPT="$ROOT_DIR/deploy/prod/production-operation-lock.mjs"
+OPERATION_LOCK_PATH="$ROOT_DIR/deploy/prod/.production-operation.lock"
+VALIDATE_ENV_SCRIPT="$ROOT_DIR/deploy/prod/validate-env.mjs"
+ROLE_ENV_SCRIPT="$ROOT_DIR/deploy/prod/role-env.mjs"
+ENV_GUARD_SCRIPT="$ROOT_DIR/deploy/prod/zero-downtime-env.mjs"
+ROLLBACK_COMPAT_SCRIPT="$ROOT_DIR/deploy/prod/rollback-env-compat.mjs"
+fixture_root=$(mktemp -d)
+trap 'rm -rf -- "$fixture_root"' 0
+mkdir "$fixture_root/current" "$fixture_root/rollback" "$fixture_root/output"
+: > "$fixture_root/current/target.env"
+: > "$fixture_root/rollback/previous.env"
+ENV_FILE="$fixture_root/current/target.env"
+ROLLBACK_ENV_FILE="$fixture_root/rollback/previous.env"
+host_node_available() { return 1; }
+docker() {
+  if [ "$1" = image ] && [ "$2" = inspect ]; then return 0; fi
+  [ "$1" = run ] || return 91
+  printf 'DOCKER'
+  for argument in "$@"; do printf '|%s' "$argument"; done
+  printf '\n'
+}
+${shellFunction("fail")}
+${shellFunction("validate_absolute_state_path")}
+${shellFunction("validate_docker_bind_directory")}
+${shellFunction("run_node_tooling_container")}
+${shellFunction("operation_lock_command")}
+${shellFunction("validate_environment_file")}
+${shellFunction("materialize_role_environment")}
+${shellFunction("environment_pair_command")}
+${shellFunction("materialize_rollback_compatibility_environment")}
+operation_lock_command acquire zero-downtime-stage 123
+operation_lock_command release "$(printf 'a%.0s' $(seq 1 64))"
+validate_environment_file "$ENV_FILE"
+materialize_role_environment
+environment_pair_command verify
+environment_pair_command restore-images
+materialize_rollback_compatibility_environment \
+  "$(printf 'b%.0s' $(seq 1 40))" \
+  "$ROLLBACK_ENV_FILE" \
+  "$fixture_root/output/compat.env"
+`;
+      const result = spawnSync(posixShell!, ["-c", harness], {
+        cwd: process.cwd(),
+        encoding: "utf8",
+      });
+      expect(result.status, result.stderr).toBe(0);
+      const calls = result.stdout.trim().split(/\r?\n/u);
+      expect(calls).toHaveLength(7);
+      for (const call of calls) {
+        expect(call).toContain("|--pull|never|");
+        expect(call).toContain("|--read-only|--network|none|");
+        expect(call).toContain("|--entrypoint|node|");
+        expect(call).toContain(`|${script.match(/^NODE_TOOLING_IMAGE="([^"]+)"/mu)?.[1]}|`);
+      }
+      expect(calls[0]).toMatch(/target=.*\/deploy\/prod\|/u);
+      expect(calls[2]).toMatch(/target=.*\/current,readonly\|/u);
+      expect(calls[3]).toMatch(/target=.*\/current\|/u);
+      expect(calls[4]).toMatch(/target=.*\/current,readonly\|/u);
+      expect(calls[4]).toMatch(/target=.*\/rollback,readonly\|/u);
+      expect(calls[5]).toMatch(/target=.*\/current\|/u);
+      expect(calls[5]).not.toMatch(/target=.*\/current,readonly\|/u);
+      expect(calls[5]).toMatch(/target=.*\/rollback,readonly\|/u);
+      expect(calls[6]).toMatch(/target=.*\/rollback,readonly\|/u);
+      expect(calls[6]).toMatch(/target=.*\/output\|/u);
+    },
+    shellIntegrationTimeout,
+  );
 
   it.skipIf(!posixShell)("provides a build-only preparation command without runtime or schema mutation", () => {
     const syntax = spawnSync(posixShell!, ["-n", "deploy.sh"], {
@@ -462,7 +620,14 @@ describe("guarded zero-downtime application rollout", () => {
     expect(removal).toContain("assert_owned_canary_identity");
     expect(script).toContain("io.clean-pay.zero-downtime.owner");
     expect(removal).toContain('docker rm -f "$container_name"');
-    expect(script).not.toMatch(/\brm\s+(?:-[^\s]*r[^\s]*|--recursive)\b/);
+    const directRemovalCommands = script
+      .split(/\r?\n/u)
+      .filter((line) => /(?:^|[;&|]\s*!?\s*)rm\s+/u.test(line));
+    expect(directRemovalCommands.length).toBeGreaterThan(0);
+    for (const command of directRemovalCommands) {
+      expect(command).toContain("rm -f --");
+      expect(command).not.toMatch(/\brm\s+(?:-[^\s]*r[^\s]*|--recursive)\b/u);
+    }
     expect(script).not.toMatch(/\bdocker\s+(?:volume|system)\s+(?:rm|remove|prune)\b/);
   });
 
@@ -489,9 +654,7 @@ describe("guarded zero-downtime application rollout", () => {
     const restore = shellFunction("restore_previous_compose");
     expect(restore).toContain("TARGET_APP_IMAGE=$PREVIOUS_APP_IMAGE");
     expect(restore).toContain("TARGET_MIGRATION_IMAGE=$PREVIOUS_MIGRATION_IMAGE");
-    expect(restore).toContain(
-      'node "$ENV_GUARD_SCRIPT" restore-images "$ENV_FILE" "$ROLLBACK_ENV_FILE"',
-    );
+    expect(restore).toContain("environment_pair_command restore-images");
     expect(shellFunction("preflight_rollback_images")).toContain(
       'rollback env application image does not match the running Compose image',
     );
@@ -674,8 +837,12 @@ describe("guarded zero-downtime application rollout", () => {
         /docker exec "\$caddy_container" sha256sum \/etc\/caddy\/Caddyfile/g,
       )?.length ?? 0,
     ).toBeGreaterThanOrEqual(4);
-    expect(runbook).toContain('restore "$caddy_host" "$caddy_backup"');
-    expect(runbook).toContain('restore "$caddy_host" "$caddy_candidate"');
+    expect(runbook).toMatch(
+      /caddyfile restore \\\r?\n\s+"\$caddy_host" "\$caddy_backup"/u,
+    );
+    expect(runbook).toMatch(
+      /caddyfile restore \\\r?\n\s+"\$caddy_host" "\$caddy_candidate"/u,
+    );
     expect(runbook).toContain("caddy validate --config /tmp/Caddyfile-clean-pay-primary");
     expect(runbook).toContain("caddy validate --config /tmp/Caddyfile-clean-pay-canary");
     expect(runbook).toContain("caddy reload --config /etc/caddy/Caddyfile");
