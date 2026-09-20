@@ -19,7 +19,7 @@ export type CabinetPanelData = {
   paymentHistoryStatus: "current" | "refreshing" | "unavailable";
   support: SupportSettings | null;
   error: string | null;
-  errorRecovery: "retry" | "recover" | null;
+  errorRecovery: "retry" | "recover" | "merge" | null;
   subscriptionError: string | null;
 };
 

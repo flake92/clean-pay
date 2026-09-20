@@ -10,6 +10,7 @@ import {
 } from "@/frontend/components/cabinet-responsive-sections";
 import { hasRenewOffer } from "@/frontend/lib/subscription-offers";
 import type { CabinetViewModel } from "@/application/models/cabinet";
+import { accountLinkPath } from "@/shared/auth/account-setup-flow";
 import { providerSessionRecoveryPath } from "@/shared/auth/session-navigation";
 import {
   detailValue,
@@ -79,6 +80,17 @@ export function CabinetPanel({ model }: { model: CabinetViewModel }) {
               external
               href={providerSessionRecoveryPath("/cabinet")}
               label="Восстановить доступ"
+              outlined
+            />
+          ) : null}
+          {errorRecovery === "merge" ? (
+            // The provider-session recovery route cannot resolve an ownership
+            // conflict (it would redirect straight back here), so go to the
+            // account-link page that actually finishes the merge.
+            <LinkButton
+              external
+              href={`${accountLinkPath("/cabinet")}&auth=telegram_merge_required`}
+              label="Объединить аккаунты"
               outlined
             />
           ) : null}
