@@ -1,18 +1,30 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { getEnv } from "@/backend/config/env";
+import { createEnvForTests as getEnv } from "@/backend/config/env";
 import { verifyTurnstileToken } from "@/backend/security/turnstile";
 
 function stubValidProductionEnv() {
   const postgresPassword = "pg-runtime-9QvL2xR8mT4pK7sN6cWd";
+  const applicationPassword = "app-runtime-8Nc4Kp2Vr7Xm9Ls5Qw3H";
+  const migrationPassword = "migration-runtime-4Qp8Xs2Ln7Vr5Km9Wc3H";
+  const retentionPassword = "retention-runtime-6Wm3Kq9Vr2Xs8Lc5Np7H";
+  const holdPassword = "hold-runtime-9Vr4Kp7Xs2Lm8Nc5Qw3H";
   const values = {
     NODE_ENV: "production",
     CLEAN_PAY_BUILD_PHASE: "",
     CLEAN_PAY_BAKED_PUBLIC_APP_URL: "",
+    CLEAN_PAY_DEPLOY_SOURCE: "build",
+    CLEAN_PAY_IMAGE: "clean-pay-runtime:test",
+    CLEAN_PAY_MIGRATION_IMAGE: "clean-pay-migration-runtime:test",
+    CLEAN_PAY_RELEASE: "local",
+    CLEAN_PAY_REVISION: "local",
     POSTGRES_DB: "clean_pay",
-    POSTGRES_USER: "clean_pay",
+    POSTGRES_USER: "clean_pay_bootstrap",
     POSTGRES_PASSWORD: postgresPassword,
-    DATABASE_URL: `postgresql://clean_pay:${postgresPassword}@postgres:5432/clean_pay?schema=public`,
+    DATABASE_URL: `postgresql://clean_pay_app:${applicationPassword}@postgres:5432/clean_pay?schema=public`,
+    MIGRATION_DATABASE_URL: `postgresql://clean_pay_migration:${migrationPassword}@postgres:5432/clean_pay?schema=public`,
+    RETENTION_DATABASE_URL: `postgresql://clean_pay_retention:${retentionPassword}@postgres:5432/clean_pay?schema=public`,
+    HOLD_OPERATOR_DATABASE_URL: `postgresql://clean_pay_hold:${holdPassword}@postgres:5432/clean_pay?schema=public`,
     REDIS_URL: "redis://redis:6379/0",
     APP_URL: "https://pay.runtime-clean.dev",
     NEXT_PUBLIC_APP_URL: "https://pay.runtime-clean.dev",
@@ -22,6 +34,7 @@ function stubValidProductionEnv() {
     REMNASHOP_AUTH_SERVICE_KEY: "auth-service-runtime-7Vr3Nm8Wp2Kq5Xs9Lc4D",
     REMNAWAVE_API_BASE_URL: "https://panel.runtime-clean.dev",
     REMNAWAVE_TOKEN: "wave-runtime-7Nq3Kp9Xs4Vm2Lc8Wr6J",
+    REMNAWAVE_SUBSCRIPTION_ORIGINS: "https://subscription.runtime-clean.dev",
     WEB_JWT_SECRET: "jwt-runtime-6Vr2Kp8Wm4Xq9Lc3Ns7D5Hz1",
     WEB_REFRESH_SECRET: "refresh-runtime-5Kq8Vr2Nm7Wp4Lc9Xs3D6Hz1",
     AUDIT_IP_HASH_SECRET: "audit-runtime-4Wp7Kq2Vr9Nm5Xs8Lc3D6Hz1",
@@ -34,8 +47,10 @@ function stubValidProductionEnv() {
     TELEGRAM_OIDC_CLIENT_SECRET: "oidc-runtime-3Nm8Wp5Kq2Vr7Xs9Lc4D6Hz1",
     TELEGRAM_BOT_TOKEN: "7654321098:RuntimeBotToken_9QvL2xR8mT4pK",
     PAYMENT_RECONCILIATION_ENABLED: "false",
+    PAYMENT_DATA_RETENTION_ENABLED: "true",
     PAYMENT_RECONCILIATION_SECRET: "",
     PAYMENT_RECONCILIATION_INTERNAL_URL: "http://app:4000/api/internal/payments/reconcile",
+    PAYMENT_REDIRECT_ORIGINS: "https://yoomoney.ru,https://pay.platega.io",
     TURNSTILE_ENABLED: "true",
     TURNSTILE_SITE_KEY: "0x4AAAAARuntimeSiteKey8Wp4Jz7Lc2",
     TURNSTILE_SECRET_KEY: "turnstile-runtime-8Xs3Lc7Nm4Wp9Kq5Vr2D6Hz1",
@@ -44,6 +59,9 @@ function stubValidProductionEnv() {
     SUPPORT_EMAIL: "",
     SUPPORT_TELEGRAM_USERNAME: "",
     SUPPORT_FAQ_URL: "",
+    CHATWOOT_BASE_URL: "",
+    CHATWOOT_WEBSITE_TOKEN: "",
+    CHATWOOT_HMAC_TOKEN: "",
     CLEAN_PAY_READINESS_MAILPIT_URL: "",
     CLEAN_PAY_READINESS_REMNAWAVE_URL: "https://panel.runtime-clean.dev",
   } as const;
@@ -79,6 +97,51 @@ describe("backend env", () => {
     expect(env.cookieSameSite).toBe("strict");
     expect(env.telegramOidc.redirectUri).toBe("http://localhost:8080/auth/telegram/callback");
     expect(env.paymentReturnUrls.success).toBe("http://localhost:8080/payment/success");
+    expect(env.paymentRedirectOrigins).toEqual([
+      "https://pay.example.test",
+      "https://pay.example",
+      "https://pay.test",
+      "https://provider.test",
+    ]);
+  });
+
+  it("normalizes and validates payment redirect origins", () => {
+    vi.stubEnv(
+      "PAYMENT_REDIRECT_ORIGINS",
+      "https://yoomoney.ru, https://pay.platega.io:443",
+    );
+    expect(getEnv().paymentRedirectOrigins).toEqual([
+      "https://yoomoney.ru",
+      "https://pay.platega.io",
+    ]);
+
+    for (const invalid of [
+      "http://yoomoney.ru",
+      "https://user:password@yoomoney.ru",
+      "https://yoomoney.ru/checkout",
+      "https://yoomoney.ru?next=checkout",
+      "https://yoomoney.ru#checkout",
+    ]) {
+      vi.stubEnv("PAYMENT_REDIRECT_ORIGINS", invalid);
+      expect(() => getEnv()).toThrow("PAYMENT_REDIRECT_ORIGINS");
+    }
+
+    vi.stubEnv(
+      "PAYMENT_REDIRECT_ORIGINS",
+      "https://yoomoney.ru,https://yoomoney.ru:443",
+    );
+    expect(() => getEnv()).toThrow(
+      "PAYMENT_REDIRECT_ORIGINS must not contain duplicate origins",
+    );
+  });
+
+  it("uses the closed production payment-origin default when the override is absent", () => {
+    vi.stubEnv("PAYMENT_REDIRECT_ORIGINS", "");
+
+    expect(getEnv().paymentRedirectOrigins).toEqual([
+      "https://yoomoney.ru",
+      "https://pay.platega.io",
+    ]);
   });
 
   it("throws on missing required values and invalid booleans", () => {
@@ -183,6 +246,58 @@ describe("backend env", () => {
     expect(() => getEnv()).toThrow("TELEGRAM_OIDC_CLIENT_ID must match the bot id in TELEGRAM_BOT_TOKEN");
   });
 
+  it("allows only HTTPS subscription origins plus explicit development loopback HTTP", () => {
+    vi.stubEnv("NODE_ENV", "test");
+    vi.stubEnv(
+      "REMNAWAVE_SUBSCRIPTION_ORIGINS",
+      "https://subscriptions.example.com,http://127.0.0.1:8081",
+    );
+    expect(getEnv().remnawave.subscriptionOrigins).toEqual([
+      "https://subscriptions.example.com",
+      "http://127.0.0.1:8081",
+    ]);
+
+    vi.stubEnv("REMNAWAVE_SUBSCRIPTION_ORIGINS", "http://subscriptions.example.com");
+    expect(() => getEnv()).toThrow(
+      "REMNAWAVE_SUBSCRIPTION_ORIGINS must use HTTPS",
+    );
+
+    vi.stubEnv("REMNAWAVE_SUBSCRIPTION_ORIGINS", "http://127.evil");
+    expect(() => getEnv()).toThrow(
+      "REMNAWAVE_SUBSCRIPTION_ORIGINS must use HTTPS",
+    );
+
+    vi.stubEnv("REMNAWAVE_SUBSCRIPTION_ORIGINS", "https://user:password@subscriptions.example.com");
+    expect(() => getEnv()).toThrow(
+      "REMNAWAVE_SUBSCRIPTION_ORIGINS must contain only URL origins without credentials",
+    );
+  });
+
+  it("validates the optional Chatwoot origin and all-or-nothing tokens", () => {
+    vi.stubEnv("CHATWOOT_BASE_URL", "https://chat.clean-pay.local/");
+    vi.stubEnv("CHATWOOT_WEBSITE_TOKEN", "website_token_123456789");
+    vi.stubEnv("CHATWOOT_HMAC_TOKEN", "hmac_token_12345678901234567890");
+
+    expect(getEnv().chatwoot).toEqual({
+      baseUrl: "https://chat.clean-pay.local",
+      websiteToken: "website_token_123456789",
+      hmacToken: "hmac_token_12345678901234567890",
+    });
+
+    vi.stubEnv("CHATWOOT_HMAC_TOKEN", "");
+    expect(() => getEnv()).toThrow(
+      "CHATWOOT_BASE_URL, CHATWOOT_WEBSITE_TOKEN and CHATWOOT_HMAC_TOKEN must be configured together",
+    );
+
+    vi.stubEnv("CHATWOOT_HMAC_TOKEN", "hmac_token_12345678901234567890");
+    vi.stubEnv("CHATWOOT_BASE_URL", "https://chat.clean-pay.local/app");
+    expect(() => getEnv()).toThrow("CHATWOOT_BASE_URL must contain only an http(s) origin");
+
+    vi.stubEnv("CHATWOOT_BASE_URL", "https://chat.clean-pay.local");
+    vi.stubEnv("CHATWOOT_WEBSITE_TOKEN", "short");
+    expect(() => getEnv()).toThrow("CHATWOOT_WEBSITE_TOKEN must be a complete Chatwoot token");
+  });
+
   it("derives the Remnashop admin URL and requires strong bounded reconciliation configuration", () => {
     vi.stubEnv("PAYMENT_RECONCILIATION_ENABLED", "false");
     vi.stubEnv("REMNASHOP_ADMIN_API_BASE_URL", "");
@@ -250,10 +365,16 @@ describe("Turnstile helpers", () => {
     );
 
     vi.stubEnv("TURNSTILE_SECRET_KEY", "secret");
-    await expect(verifyTurnstileToken(null, "auth_login")).rejects.toMatchObject({ code: "FORBIDDEN", status: 403 });
+    await expect(verifyTurnstileToken(null, "auth_login")).rejects.toMatchObject({
+      code: "SECURITY_CHECK_FAILED",
+      status: 403,
+    });
 
     vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(JSON.stringify({ success: false }), { status: 200 }));
-    await expect(verifyTurnstileToken("bad", "auth_login")).rejects.toMatchObject({ code: "FORBIDDEN" });
+    await expect(verifyTurnstileToken("bad", "auth_login")).rejects.toMatchObject({
+      code: "SECURITY_CHECK_FAILED",
+      status: 403,
+    });
   });
 
   it("rejects a successful Turnstile response issued for another hostname", async () => {
@@ -264,7 +385,10 @@ describe("Turnstile helpers", () => {
       new Response(JSON.stringify({ success: true, hostname: "attacker.example", action: "auth_login" }), { status: 200 }),
     );
 
-    await expect(verifyTurnstileToken("token", "auth_login")).rejects.toMatchObject({ code: "FORBIDDEN", status: 403 });
+    await expect(verifyTurnstileToken("token", "auth_login")).rejects.toMatchObject({
+      code: "SECURITY_CHECK_FAILED",
+      status: 403,
+    });
   });
 
   it("rejects a successful token issued for another action", async () => {
@@ -275,7 +399,10 @@ describe("Turnstile helpers", () => {
       new Response(JSON.stringify({ success: true, hostname: "localhost", action: "auth_register" }), { status: 200 }),
     );
 
-    await expect(verifyTurnstileToken("token", "auth_login")).rejects.toMatchObject({ code: "FORBIDDEN", status: 403 });
+    await expect(verifyTurnstileToken("token", "auth_login")).rejects.toMatchObject({
+      code: "SECURITY_CHECK_FAILED",
+      status: 403,
+    });
   });
 
   it("rejects replay after Cloudflare consumes a single-use token", async () => {
@@ -292,7 +419,7 @@ describe("Turnstile helpers", () => {
 
     await expect(verifyTurnstileToken("single-use", "auth_login")).resolves.toBeUndefined();
     await expect(verifyTurnstileToken("single-use", "auth_login")).rejects.toMatchObject({
-      code: "FORBIDDEN",
+      code: "SECURITY_CHECK_FAILED",
       status: 403,
     });
   });

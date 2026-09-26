@@ -511,16 +511,14 @@ export async function completePaymentOperationSuccess(input: {
         operation.upstreamOwnerHash,
       );
 
-      const [recordForPayment, recordForOperation] = await Promise.all([
-        transaction.paymentRecord.findUnique({
-          where: { paymentId },
-          select: { userId: true, operationId: true },
-        }),
-        transaction.paymentRecord.findUnique({
-          where: { operationId: input.operationId },
-          select: { paymentId: true },
-        }),
-      ]);
+      const recordForPayment = await transaction.paymentRecord.findUnique({
+        where: { paymentId },
+        select: { userId: true, operationId: true },
+      });
+      const recordForOperation = await transaction.paymentRecord.findUnique({
+        where: { operationId: input.operationId },
+        select: { paymentId: true },
+      });
 
       if (
         recordForPayment &&

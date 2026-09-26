@@ -4,18 +4,18 @@ import type { AppMenuItem } from "@/frontend/types";
 import { getBranding } from "@/shared/branding";
 import { logoutAction } from "@/app/actions/session";
 import type { NavigationViewModel } from "@/application/models/navigation";
+import { resetChatwootSession } from "@/frontend/lib/chatwoot";
 
 export function useCleanPayMenu(navigation: NavigationViewModel) {
     const branding = getBranding();
 
     async function logout() {
+        resetChatwootSession();
         await logoutAction();
     }
 
     const shouldShowVerifyEmail = navigation.emailVerificationRequired;
     const shouldShowLinkAccount = navigation.authenticated;
-    const canRenewSubscription = navigation.canRenewSubscription;
-    const hasSubscription = navigation.hasSubscription;
     const accountItems: AppMenuItem[] = [
         ...(navigation.authenticated
             ? [{ label: "Профиль", icon: "pi pi-fw pi-user", to: "/profile" }]
@@ -30,15 +30,18 @@ export function useCleanPayMenu(navigation: NavigationViewModel) {
 
     const cleanPayItems: AppMenuItem[] = [
         ...(navigation.authenticated
-            ? [{ label: "Кабинет", icon: "pi pi-fw pi-home", to: "/cabinet" }]
+            ? [
+                { label: "Кабинет", icon: "pi pi-fw pi-home", to: "/cabinet" },
+                { label: "Пригласить друзей", icon: "pi pi-fw pi-gift", to: "/referral" },
+            ]
             : []),
         {
-            label: hasSubscription ? "Изменить тариф" : "Тарифы",
+            label: "Тарифы",
             icon: "pi pi-fw pi-tags",
             to: "/tariffs",
         },
-        ...(canRenewSubscription
-            ? [{ label: "Продление", icon: "pi pi-fw pi-refresh", to: "/extend" }]
+        ...(navigation.authenticated
+            ? [{ label: "Продлить", icon: "pi pi-fw pi-refresh", to: "/extend" }]
             : []),
     ];
     const sessionItem: AppMenuItem = navigation.authenticated

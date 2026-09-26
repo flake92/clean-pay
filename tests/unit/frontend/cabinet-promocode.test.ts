@@ -54,6 +54,7 @@ vi.mock("@/frontend/components/prime/link-button", () => ({
   LinkButton: ({ label }: { label: string }) => createElement("a", null, label),
 }));
 import { CabinetPanel } from "@/frontend/components/cabinet-panel";
+import type { CabinetViewModel } from "@/application/models/cabinet";
 
 (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean })
   .IS_REACT_ACT_ENVIRONMENT = true;
@@ -82,6 +83,33 @@ async function submit(form: HTMLFormElement) {
   });
 }
 
+function cabinetModel(
+  paymentHistoryStatus: "current" | "refreshing" | "unavailable" = "current",
+): CabinetViewModel {
+  return {
+    status: "ready",
+    user: { email: "user@example.com", emailVerified: true, telegramId: "777" },
+    subscription: null,
+    subscriptionError: null,
+    offers: {
+      gateways: [],
+      plans: [],
+      has_current_subscription: false,
+      current_subscription_status: null,
+    },
+    devices: { devices: [], current_count: 0, max_count: 0 },
+    payments: [],
+    paymentHistoryStatus,
+    support: {
+      enabled: false,
+      email: null,
+      telegramUsername: null,
+      faqUrl: null,
+      liveChatEnabled: false,
+    },
+  };
+}
+
 describe("cabinet promocode activation", () => {
   let container: HTMLDivElement;
   let root: Root;
@@ -96,17 +124,7 @@ describe("cabinet promocode activation", () => {
     document.body.append(container);
     root = createRoot(container);
     await act(async () => root.render(createElement(CabinetPanel, {
-      model: {
-        status: "ready",
-        user: { email: "user@example.com", emailVerified: true, telegramId: "777" },
-        subscription: null,
-        subscriptionError: null,
-        offers: { gateways: [], plans: [], has_current_subscription: false, current_subscription_status: null },
-        devices: { devices: [], current_count: 0, max_count: 0 },
-        payments: [],
-        paymentsWarning: null,
-        support: { enabled: false, email: null, telegramUsername: null, faqUrl: null },
-      },
+      model: cabinetModel(),
     })));
     await settle();
   });
@@ -129,6 +147,22 @@ describe("cabinet promocode activation", () => {
         (button) => button.textContent === "Активировать",
       ),
     ).toBe(true);
+  });
+
+  it("keeps the exact Sakai promocode form shell and control order", () => {
+    const form = container.querySelector<HTMLInputElement>("#promocode")?.closest("form");
+    expect(form?.className).toBe("mt-3 flex w-full flex-column gap-2 md:w-30rem");
+    expect(Array.from(form?.children ?? [], (element) => element.tagName)).toEqual([
+      "LABEL",
+      "DIV",
+    ]);
+    expect(form?.children[0]?.className).toBe("text-sm font-medium text-700");
+    expect(form?.children[1]?.className).toBe("p-inputgroup");
+    expect(Array.from(form?.children[1]?.children ?? [], (element) => element.tagName)).toEqual([
+      "INPUT",
+      "BUTTON",
+    ]);
+    expect(form?.querySelector<HTMLButtonElement>("button")?.type).toBe("submit");
   });
 
   it("shows validation feedback without calling the API for an empty code", async () => {
@@ -160,5 +194,17 @@ describe("cabinet promocode activation", () => {
     );
 
     expect(actionMocks.refresh).toHaveBeenCalledOnce();
+  });
+
+  it("refreshes a pending payment snapshot with a finite polling budget", async () => {
+    vi.useFakeTimers();
+    await act(async () => root.render(createElement(CabinetPanel, {
+      model: cabinetModel("refreshing"),
+    })));
+
+    await act(async () => vi.advanceTimersByTimeAsync(40_000));
+
+    expect(actionMocks.refresh).toHaveBeenCalledTimes(4);
+    vi.useRealTimers();
   });
 });

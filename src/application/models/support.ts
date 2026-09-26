@@ -3,4 +3,5 @@ export type SupportViewModel = {
   email: string | null;
   telegramUsername: string | null;
   faqUrl: string | null;
+  liveChatEnabled: boolean;
 };

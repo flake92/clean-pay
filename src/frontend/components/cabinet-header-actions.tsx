@@ -9,6 +9,7 @@ export function CabinetHeaderActions({ offers }: { offers: SubscriptionOffersRes
   return (
     <>
       <InstallAppButton />
+      <LinkButton href="/referral" icon="pi pi-gift" label="Пригласить друзей" outlined />
       <LinkButton href="/tariffs" label={hasSubscription ? "Изменить тариф" : "Тарифы"} outlined />
       {hasRenewOffer(offers) ? <LinkButton href="/extend" label="Продлить" /> : null}
     </>

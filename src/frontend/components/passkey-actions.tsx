@@ -1,86 +1,15 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import {
+  Button,
+  InputText,
+  Message,
+} from "@/frontend/components/sakai/form-foundation";
 
 import {
-  browserSupportsWebAuthn,
-  startAuthentication,
-  startRegistration,
-} from "@simplewebauthn/browser";
-import { Button } from "primereact/button";
-import { InputText } from "primereact/inputtext";
-import { Message } from "primereact/message";
-
-import {
-  beginPasskeyLoginAction,
-  beginPasskeyRegistrationAction,
-  verifyPasskeyLoginAction,
-  verifyPasskeyRegistrationAction,
-} from "@/app/actions/passkeys";
-import { navigateTo } from "@/frontend/lib/browser-navigation";
-
-function useWebAuthnSupport() {
-  const [supported, setSupported] = useState<boolean | null>(null);
-
-  useEffect(() => {
-    const timer = window.setTimeout(() => {
-      setSupported(browserSupportsWebAuthn());
-    }, 0);
-
-    return () => window.clearTimeout(timer);
-  }, []);
-
-  return supported;
-}
-
-function isUserCancelled(error: unknown) {
-  if (!(error instanceof Error)) {
-    return false;
-  }
-
-  const name = error.name.toLowerCase();
-  const message = error.message.toLowerCase();
-
-  return (
-    name.includes("notallowed") ||
-    name.includes("abort") ||
-    message.includes("not allowed") ||
-    message.includes("timed out") ||
-    message.includes("cancel")
-  );
-}
-
-function isWebAuthnTransportError(error: unknown) {
-  if (!(error instanceof Error)) {
-    return false;
-  }
-
-  const name = error.name.toLowerCase();
-  const message = error.message.toLowerCase();
-
-  return (
-    (name.includes("typeerror") && message.includes("failed to fetch")) ||
-    message.includes("bluetooth") ||
-    message.includes("networkerror")
-  );
-}
-
-function isUnavailableCredential(error: unknown) {
-  if (!(error instanceof Error)) {
-    return false;
-  }
-
-  const name = error.name.toLowerCase();
-  const message = error.message.toLowerCase();
-
-  return (
-    name.includes("unknownerror") ||
-    name.includes("notreadable") ||
-    message.includes("credential manager") ||
-    message.includes("credential not found") ||
-    message.includes("no credentials")
-  );
-}
+  usePasskeyLoginController,
+  usePasskeySetupController,
+} from "@/frontend/hooks/use-passkey-actions-controller";
 
 export function PasskeyLoginButton({
   consumeTurnstileToken,
@@ -95,59 +24,13 @@ export function PasskeyLoginButton({
   resetTurnstile?: () => void;
   turnstileEnabled?: boolean;
 }) {
-  const supported = useWebAuthnSupport();
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const loginPendingRef = useRef(false);
-
-  async function login() {
-    if (loginPendingRef.current) {
-      return;
-    }
-
-    const turnstileToken = turnstileEnabled ? consumeTurnstileToken?.() ?? null : null;
-    if (turnstileEnabled && !turnstileToken) {
-      setError("Пройдите единую проверку безопасности.");
-      return;
-    }
-    loginPendingRef.current = true;
-    setLoading(true);
-    setError(null);
-
-    try {
-      const optionsResult = await beginPasskeyLoginAction({ email, ...(turnstileToken ? { turnstileToken } : {}) });
-      resetTurnstile?.();
-
-      if (!optionsResult.ok) {
-        setError(optionsResult.message);
-        return;
-      }
-
-      const assertion = await startAuthentication({ optionsJSON: optionsResult.options });
-      const verifyResult = await verifyPasskeyLoginAction(assertion);
-
-      if (!verifyResult.ok) {
-        setError(verifyResult.message);
-        return;
-      }
-
-      window.location.assign(redirectTo);
-    } catch (error) {
-      resetTurnstile?.();
-      setError(
-        isUserCancelled(error)
-          ? "Окно быстрого входа закрыто. Можно войти по паролю."
-          : isUnavailableCredential(error)
-            ? "Сохранённый на устройстве ключ больше не связан с этим стендом. Войдите через e-mail или Telegram и создайте новый ключ в профиле."
-          : isWebAuthnTransportError(error)
-            ? "Браузер не смог связаться с ключом. Для входа через телефон включите Bluetooth на компьютере и телефоне, затем повторите попытку."
-            : "Не удалось войти быстрым способом.",
-      );
-    } finally {
-      loginPendingRef.current = false;
-      setLoading(false);
-    }
-  }
+  const { error, loading, login, supported } = usePasskeyLoginController({
+    consumeTurnstileToken,
+    email,
+    redirectTo,
+    resetTurnstile,
+    turnstileEnabled,
+  });
 
   if (supported !== true) {
     return null;
@@ -183,80 +66,51 @@ export function PasskeyLoginButton({
 
 export function PasskeySetupPanel({
   redirectTo = "/cabinet",
+  required = false,
 }: {
   redirectTo?: string;
+  required?: boolean;
 }) {
-  const supported = useWebAuthnSupport();
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [name, setName] = useState("");
-  const setupPendingRef = useRef(false);
-
-  function continueWithoutPasskey() {
-    if (setupPendingRef.current) {
-      return;
-    }
-    navigateTo(redirectTo);
-  }
-
-  async function createPasskey() {
-    if (setupPendingRef.current) {
-      return;
-    }
-    setupPendingRef.current = true;
-    setLoading(true);
-    setError(null);
-
-    try {
-      if (!browserSupportsWebAuthn()) {
-        setError("Это устройство не поддерживает быстрый вход. Продолжите в кабинете или используйте другое устройство.");
-        return;
-      }
-
-      const optionsResult = await beginPasskeyRegistrationAction();
-
-      if (!optionsResult.ok) {
-        setError(optionsResult.message);
-        return;
-      }
-
-      const attestation = await startRegistration({ optionsJSON: optionsResult.options });
-      const verifyResult = await verifyPasskeyRegistrationAction({ ...attestation, name: name.trim() || undefined });
-
-      if (!verifyResult.ok) {
-        setError(verifyResult.message);
-        return;
-      }
-
-      navigateTo(redirectTo);
-    } catch (error) {
-      setError(
-        isUserCancelled(error)
-          ? "Окно быстрого входа закрыто. Это не проблема, можно продолжить без него."
-          : isWebAuthnTransportError(error)
-            ? "Браузер не смог связаться с ключом. Для ключа на телефоне включите Bluetooth на компьютере и телефоне, держите телефон рядом и повторите попытку."
-            : error instanceof Error
-            ? error.message
-            : "Не удалось создать быстрый вход.",
-      );
-    } finally {
-      setupPendingRef.current = false;
-      setLoading(false);
-    }
-  }
+  const {
+    changeName,
+    continueWithoutPasskey,
+    createPasskey,
+    error,
+    loading,
+    name,
+    restarting,
+    restartAuthentication,
+    supported,
+  } = usePasskeySetupController({ redirectTo, required });
 
   if (supported === false) {
     return (
       <div className="flex flex-column gap-3">
         <Message
-          severity="info"
-          text="Это устройство не поддерживает быстрый вход. Вы можете пользоваться кабинетом через e-mail, пароль или Telegram."
+          severity={required ? "warn" : "info"}
+          text={
+            required
+              ? "Для завершения этого входа нужен Passkey, но устройство его не поддерживает. Откройте страницу в совместимом браузере или начните вход заново."
+              : "Это устройство не поддерживает быстрый вход. Вы можете пользоваться кабинетом через e-mail, пароль или Telegram."
+          }
         />
-        <Button
-          label="Продолжить без быстрого входа"
-          onClick={continueWithoutPasskey}
-          type="button"
-        />
+        {required ? (
+          <Button
+            disabled={restarting}
+            label="Начать вход заново"
+            loading={restarting}
+            onClick={restartAuthentication}
+            outlined
+            type="button"
+          />
+        ) : (
+          <Button
+            label="Продолжить без быстрого входа"
+            onClick={continueWithoutPasskey}
+            type="button"
+          />
+        )}
+        {error ? <Message severity="warn" text={error} /> : null}
       </div>
     );
   }
@@ -269,8 +123,9 @@ export function PasskeySetupPanel({
           <div className="font-medium text-900">Быстрый вход</div>
         </div>
         <div className="text-sm text-600 line-height-3">
-          Это необязательный способ входа через Face ID, отпечаток или PIN-код устройства.
-          Если окно не открылось или вы передумали, просто продолжите в кабинет.
+          {required
+            ? "Passkey через Face ID, отпечаток или PIN-код устройства обязателен для завершения этого безопасного входа."
+            : "Это необязательный способ входа через Face ID, отпечаток или PIN-код устройства. Если окно не открылось или вы передумали, просто продолжите в кабинет."}
         </div>
       </div>
       {error ? <Message severity="warn" text={error} /> : null}
@@ -278,33 +133,47 @@ export function PasskeySetupPanel({
         <span className="text-sm font-medium text-700">Название ключа</span>
         <InputText
           maxLength={80}
-          onChange={(event) => setName(event.target.value)}
+          onChange={changeName}
           placeholder="Например: Android Chrome или ноутбук"
           value={name}
         />
       </label>
       <div className="flex flex-column sm:flex-row gap-2">
         <Button
-          disabled={loading}
+          disabled={loading || restarting}
           icon="pi pi-lock"
           label="Настроить быстрый вход"
           loading={loading}
           onClick={createPasskey}
           type="button"
         />
-        <Button
-          disabled={loading}
-          label="Продолжить без него"
-          onClick={continueWithoutPasskey}
-          outlined
-          severity="secondary"
-          type="button"
-        />
+        {required ? (
+          <Button
+            disabled={loading || restarting}
+            label="Начать вход заново"
+            loading={restarting}
+            onClick={restartAuthentication}
+            outlined
+            severity="secondary"
+            type="button"
+          />
+        ) : (
+          <Button
+            disabled={loading}
+            label="Продолжить без него"
+            onClick={continueWithoutPasskey}
+            outlined
+            severity="secondary"
+            type="button"
+          />
+        )}
       </div>
-      <Message
-        severity="info"
-        text="Быстрый вход можно настроить позже в профиле."
-      />
+      {required ? null : (
+        <Message
+          severity="info"
+          text="Быстрый вход можно настроить позже в профиле."
+        />
+      )}
     </div>
   );
 }

@@ -8,7 +8,7 @@ const mocks = vi.hoisted(() => ({
       updateMany: vi.fn(),
     },
     paymentRecord: { findUnique: vi.fn() },
-    auditLog: { create: vi.fn() },
+    auditLog: { createMany: vi.fn() },
   },
   prisma: {
     $transaction: vi.fn(),
@@ -36,7 +36,7 @@ import {
   completeReconciledPayment,
 } from "@/backend/integrations/payments/payment-reconciliation-service";
 import { processPaymentReconciliation } from "@/application/payments/run-payment-maintenance";
-import { productionPaymentMaintenanceRunner } from "@/backend/integrations/payments/payment-maintenance-runner";
+import { productionPaymentMaintenanceRunner } from "@/app/_composition/payment-operations-runtime";
 import { paymentUpstreamOwnerHash } from "@/backend/payments/hashes";
 import { ServiceError } from "@/backend/errors/service-error";
 import { sha256 } from "@/backend/security/crypto";
@@ -147,7 +147,7 @@ describe("payment outcome reconciliation fencing", () => {
     mocks.prisma.$transaction.mockImplementation(
       async (callback: (tx: typeof mocks.tx) => unknown) => callback(mocks.tx),
     );
-    mocks.tx.auditLog.create.mockResolvedValue({ id: "audit-1" });
+    mocks.tx.auditLog.createMany.mockResolvedValue({ count: 1 });
   });
 
   it("atomically normalizes and claims a hard-crashed DISPATCHING operation with DB time", async () => {
@@ -400,7 +400,7 @@ describe("payment outcome reconciliation fencing", () => {
         }),
       }),
     );
-    expect(mocks.tx.auditLog.create).toHaveBeenCalledWith({
+    expect(mocks.tx.auditLog.createMany).toHaveBeenCalledWith({
       data: expect.objectContaining({
         action: "payment_reconciliation_manual_required",
         severity: "ERROR",
@@ -529,6 +529,6 @@ describe("payment outcome reconciliation fencing", () => {
         }),
       }),
     );
-    expect(mocks.tx.auditLog.create).toHaveBeenCalledOnce();
+    expect(mocks.tx.auditLog.createMany).toHaveBeenCalledOnce();
   });
 });

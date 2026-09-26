@@ -1,141 +1,222 @@
-/* eslint-disable react-hooks/exhaustive-deps */
-'use client';
+"use client";
 
-import { useEventListener, useUnmountEffect } from 'primereact/hooks';
-import React, { useContext, useEffect, useRef } from 'react';
-import { classNames } from 'primereact/utils';
-import AppFooter from './AppFooter';
-import AppSidebar from './AppSidebar';
-import AppTopbar from './AppTopbar';
-import { LayoutContext } from './context/layoutcontext';
-import { ChildContainerProps, LayoutState, AppTopbarRef } from '@/frontend/types';
-import { usePathname } from 'next/navigation';
-import type { NavigationViewModel } from '@/application/models/navigation';
+import { usePathname } from "next/navigation";
+import { useEventListener } from "primereact/hooks";
+import { classNames } from "primereact/utils";
+import { useContext, useEffect, useRef } from "react";
 
-const Layout = ({ children, navigation }: ChildContainerProps & { navigation: NavigationViewModel }) => {
-    const { layoutState, setLayoutState } = useContext(LayoutContext);
-    const topbarRef = useRef<AppTopbarRef>(null);
-    const sidebarRef = useRef<HTMLDivElement>(null);
+import type { NavigationViewModel } from "@/application/models/navigation";
+import type { AppTopbarRef, ChildContainerProps, LayoutState } from "@/frontend/types";
+import AppFooter from "./AppFooter";
+import AppMenu from "./AppMenu";
+import AppTopbar from "./AppTopbar";
+import { LayoutContext } from "./context/layoutcontext";
 
-    function hideMenu() {
-        setLayoutState((prevLayoutState: LayoutState) => ({
-            ...prevLayoutState,
-            overlayMenuActive: false,
-            staticMenuMobileActive: false,
-            menuHoverActive: false
+function blockBodyScroll() {
+  document.body.classList.add("blocked-scroll");
+}
+
+function unblockBodyScroll() {
+  document.body.classList.remove("blocked-scroll");
+}
+
+const Layout = ({
+  children,
+  navigation,
+}: ChildContainerProps & { navigation: NavigationViewModel }) => {
+  const { layoutState, setLayoutState } = useContext(LayoutContext);
+  const topbarRef = useRef<AppTopbarRef>(null);
+  const sidebarRef = useRef<HTMLElement>(null);
+  const pathname = usePathname();
+
+  const [bindMenuOutsideClickListener, unbindMenuOutsideClickListener] = useEventListener({
+    type: "click",
+    listener: (event) => {
+      const isOutsideClicked = !(
+        sidebarRef.current?.contains(event.target as Node)
+        || topbarRef.current?.menubutton?.contains(event.target as Node)
+      );
+
+      if (isOutsideClicked) {
+        setLayoutState((previous: LayoutState) => ({
+          ...previous,
+          staticMenuMobileActive: false,
         }));
-        unbindMenuOutsideClickListener();
-        unblockBodyScroll();
-    }
+      }
+    },
+  });
 
-    function blockBodyScroll(): void {
-        if (document.body.classList) {
-            document.body.classList.add('blocked-scroll');
-        } else {
-            document.body.className += ' blocked-scroll';
-        }
-    }
+  const [bindProfileMenuOutsideClickListener, unbindProfileMenuOutsideClickListener] = useEventListener({
+    type: "click",
+    listener: (event) => {
+      const isOutsideClicked = !(
+        topbarRef.current?.topbarmenu?.contains(event.target as Node)
+        || topbarRef.current?.topbarmenubutton?.contains(event.target as Node)
+      );
 
-    function unblockBodyScroll(): void {
-        if (document.body.classList) {
-            document.body.classList.remove('blocked-scroll');
-        } else {
-            document.body.className = document.body.className.replace(new RegExp('(^|\\b)' + 'blocked-scroll'.split(' ').join('|') + '(\\b|$)', 'gi'), ' ');
-        }
-    }
-
-    const [bindMenuOutsideClickListener, unbindMenuOutsideClickListener] = useEventListener({
-        type: 'click',
-        listener: (event) => {
-            const isOutsideClicked = !(
-                sidebarRef.current?.isSameNode(event.target as Node) ||
-                sidebarRef.current?.contains(event.target as Node) ||
-                topbarRef.current?.menubutton?.isSameNode(event.target as Node) ||
-                topbarRef.current?.menubutton?.contains(event.target as Node)
-            );
-
-            if (isOutsideClicked) {
-                hideMenu();
-            }
-        }
-    });
-
-    const pathname = usePathname();
-    useEffect(() => {
-        hideMenu();
-        setLayoutState((prevLayoutState: LayoutState) => ({
-            ...prevLayoutState,
-            profileSidebarVisible: false
+      if (isOutsideClicked) {
+        setLayoutState((previous: LayoutState) => ({
+          ...previous,
+          profileSidebarVisible: false,
         }));
-    }, [pathname]);
+      }
+    },
+  });
 
-    const [bindProfileMenuOutsideClickListener, unbindProfileMenuOutsideClickListener] = useEventListener({
-        type: 'click',
-        listener: (event) => {
-            const isOutsideClicked = !(
-                topbarRef.current?.topbarmenu?.isSameNode(event.target as Node) ||
-                topbarRef.current?.topbarmenu?.contains(event.target as Node) ||
-                topbarRef.current?.topbarmenubutton?.isSameNode(event.target as Node) ||
-                topbarRef.current?.topbarmenubutton?.contains(event.target as Node)
-            );
+  useEffect(() => {
+    setLayoutState((previous: LayoutState) => ({
+      ...previous,
+      profileSidebarVisible: false,
+      staticMenuMobileActive: false,
+    }));
+  }, [pathname, setLayoutState]);
 
-            if (isOutsideClicked) {
-                setLayoutState((prevLayoutState: LayoutState) => ({
-                    ...prevLayoutState,
-                    profileSidebarVisible: false
-                }));
-                unbindProfileMenuOutsideClickListener();
-            }
-        }
-    });
+  useEffect(() => {
+    const closeMobileMenuOnDesktop = () => {
+      if (window.innerWidth <= 991) return;
+      setLayoutState((previous: LayoutState) =>
+        previous.staticMenuMobileActive
+          ? { ...previous, staticMenuMobileActive: false }
+          : previous
+      );
+    };
 
-    useEffect(() => {
-        if (layoutState.overlayMenuActive || layoutState.staticMenuMobileActive) {
-            bindMenuOutsideClickListener();
-        }
+    closeMobileMenuOnDesktop();
+    window.addEventListener("resize", closeMobileMenuOnDesktop);
+    return () => window.removeEventListener("resize", closeMobileMenuOnDesktop);
+  }, [setLayoutState]);
 
-        if (layoutState.staticMenuMobileActive) {
-            blockBodyScroll();
-        } else {
-            unblockBodyScroll();
-        }
-    }, [layoutState.overlayMenuActive, layoutState.staticMenuMobileActive]);
+  useEffect(() => {
+    if (!layoutState.staticMenuMobileActive) {
+      unblockBodyScroll();
+      return;
+    }
 
-    useEffect(() => {
-        if (layoutState.profileSidebarVisible) {
-            bindProfileMenuOutsideClickListener();
-        }
-    }, [layoutState.profileSidebarVisible]);
+    bindMenuOutsideClickListener();
+    blockBodyScroll();
+    return () => {
+      unbindMenuOutsideClickListener();
+      unblockBodyScroll();
+    };
+  }, [
+    bindMenuOutsideClickListener,
+    layoutState.staticMenuMobileActive,
+    unbindMenuOutsideClickListener,
+  ]);
 
-    useUnmountEffect(() => {
-        unbindMenuOutsideClickListener();
-        unbindProfileMenuOutsideClickListener();
-        unblockBodyScroll();
-    });
+  useEffect(() => {
+    if (!layoutState.staticMenuMobileActive) return;
 
-    const containerClass = classNames('layout-wrapper', {
-        'layout-static': true,
-        'layout-static-inactive': layoutState.staticMenuDesktopInactive,
-        'layout-overlay-active': layoutState.overlayMenuActive,
-        'layout-mobile-active': layoutState.staticMenuMobileActive,
-        'p-ripple-disabled': true
-    });
+    const handleKeyboardNavigation = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        setLayoutState((previous: LayoutState) => ({
+          ...previous,
+          staticMenuMobileActive: false,
+        }));
+        topbarRef.current?.menubutton?.focus();
+        return;
+      }
 
-    return (
-        <React.Fragment>
-            <div className={containerClass}>
-                <AppTopbar navigation={navigation} ref={topbarRef} />
-                <div id="app-sidebar" ref={sidebarRef} className="layout-sidebar">
-                    <AppSidebar navigation={navigation} />
-                </div>
-                <div className="layout-main-container">
-                    <div className="layout-main">{children}</div>
-                    <AppFooter />
-                </div>
-                <div className="layout-mask"></div>
-            </div>
-        </React.Fragment>
-    );
+      if (event.key !== "Tab") return;
+
+      const menuButton = topbarRef.current?.menubutton;
+      const sidebar = sidebarRef.current;
+      if (!menuButton || !sidebar) return;
+      const sidebarControls = Array.from(
+        sidebar.querySelectorAll<HTMLElement>(
+          'a[href], button:not([disabled]), [tabindex]:not([tabindex="-1"])',
+        ),
+      ).filter((element) => {
+        const style = window.getComputedStyle(element);
+        return style.display !== "none" && style.visibility !== "hidden";
+      });
+      const firstControl = sidebarControls[0];
+      const lastControl = sidebarControls.at(-1);
+      if (!firstControl || !lastControl) return;
+
+      if (event.shiftKey && document.activeElement === menuButton) {
+        event.preventDefault();
+        lastControl.focus();
+      } else if (!event.shiftKey && document.activeElement === menuButton) {
+        event.preventDefault();
+        firstControl.focus();
+      } else if (event.shiftKey && document.activeElement === firstControl) {
+        event.preventDefault();
+        menuButton.focus();
+      } else if (!event.shiftKey && document.activeElement === lastControl) {
+        event.preventDefault();
+        menuButton.focus();
+      } else if (
+        document.activeElement !== menuButton &&
+        !sidebar.contains(document.activeElement)
+      ) {
+        event.preventDefault();
+        firstControl.focus();
+      }
+    };
+
+    document.addEventListener("keydown", handleKeyboardNavigation);
+    return () => document.removeEventListener("keydown", handleKeyboardNavigation);
+  }, [layoutState.staticMenuMobileActive, setLayoutState]);
+
+  useEffect(() => {
+    if (
+      !layoutState.profileSidebarVisible ||
+      layoutState.staticMenuMobileActive
+    ) return;
+
+    bindProfileMenuOutsideClickListener();
+    const closeProfileMenu = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      event.preventDefault();
+      setLayoutState((previous: LayoutState) => ({
+        ...previous,
+        profileSidebarVisible: false,
+      }));
+      topbarRef.current?.topbarmenubutton?.focus();
+    };
+    document.addEventListener("keydown", closeProfileMenu);
+    return () => {
+      unbindProfileMenuOutsideClickListener();
+      document.removeEventListener("keydown", closeProfileMenu);
+    };
+  }, [
+    bindProfileMenuOutsideClickListener,
+    layoutState.profileSidebarVisible,
+    layoutState.staticMenuMobileActive,
+    setLayoutState,
+    unbindProfileMenuOutsideClickListener,
+  ]);
+
+  const containerClass = classNames("layout-wrapper", {
+    "layout-static": true,
+    "layout-static-inactive": layoutState.staticMenuDesktopInactive,
+    "layout-mobile-active": layoutState.staticMenuMobileActive,
+    "p-ripple-disabled": true,
+  });
+
+  return (
+    <div className={containerClass}>
+      <a className="skip-link" href="#main-content">
+        К основному содержимому
+      </a>
+      <AppTopbar navigation={navigation} ref={topbarRef} />
+      <nav
+        aria-label="Основная навигация"
+        className="layout-sidebar"
+        id="app-sidebar"
+        ref={sidebarRef}
+      >
+        <AppMenu navigation={navigation} />
+      </nav>
+      <div className="layout-main-container">
+        <main className="layout-main" id="main-content" tabIndex={-1}>{children}</main>
+        <AppFooter />
+      </div>
+      <div className="layout-mask" />
+    </div>
+  );
 };
 
 export default Layout;

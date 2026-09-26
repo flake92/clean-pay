@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "status": "immutable_scope_clarification",
+  "forensicRecord": {
+    "file": "pristine-migration-bootstrap-failure-v1.json",
+    "bytes": 1298,
+    "sha256": "9477f99ae9ec57a622bcca0582fffa0de9cfea0819a4332d6689d4e90199226c"
+  },
+  "gateStatus": "invalid_for_journey_gate",
+  "scope": {
+    "failedComponent": "journey database migration bootstrap image",
+    "publicDeterministicV5BaselineUnaffected": true,
+    "publicDeterministicV5RunnerDigest": "sha256:e0640e36c6221ba8f2dc174ebbea3961fda59f6320aad56d2f071b1c51a75ffc",
+    "publicRawArtifactCount": 126,
+    "publicRawAggregateSha256": "bf449337e7222adc093f9adb7c1b3d7f2c122af74720bf1e1dfacb34fb69f4c3"
+  }
+}

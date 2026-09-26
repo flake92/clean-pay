@@ -57,3 +57,35 @@ export interface PasskeyCommands {
   createAuthenticatedSession(userId: string): Promise<{ id: string }>;
   auditLogin(credential: PasskeyCredential, sessionId: string): Promise<void>;
 }
+
+export type PasskeyLoginCommands = Pick<
+  PasskeyCommands,
+  | "assertLoginOptionsRateLimit"
+  | "assertLoginVerificationRateLimit"
+  | "auditLogin"
+  | "consumeLoginChallenge"
+  | "createAuthenticatedSession"
+  | "findCredential"
+  | "findLoginAccount"
+  | "generateLoginOptions"
+  | "loginChallenge"
+  | "recordAuthentication"
+  | "storeLoginChallenge"
+  | "verifyAuthentication"
+  | "verifyHuman"
+  | "withLoginOptionsConcurrency"
+>;
+
+export type PasskeyRegistrationCommands = Pick<
+  PasskeyCommands,
+  | "auditRegistration"
+  | "consumeRegistrationChallenge"
+  | "generateRegistrationOptions"
+  | "loadRegistrationActor"
+  | "markRegistrationComplete"
+  | "persistRegistration"
+  | "registrationChallenge"
+  | "storeRegistrationChallenge"
+  | "upgradeRegistrationSession"
+  | "verifyRegistration"
+>;

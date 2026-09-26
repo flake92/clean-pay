@@ -1,0 +1,91 @@
+{
+  "schemaVersion": 1,
+  "baselineId": "f5cb6f543d85256e7733a1ade6a4f451d86cf378-deterministic-v3",
+  "status": "canonical",
+  "purpose": "candidate behavioral equality gate",
+  "source": {
+    "commit": "f5cb6f543d85256e7733a1ade6a4f451d86cf378",
+    "tree": "6647fc51c61018ba46aae95da21e534434028fbe",
+    "pristineArchiveSha256": "8f424f5d4839d2aa421849bb2c7f8f48420ee675",
+    "productionImage": {
+      "tag": "clean-pay:baseline-f5cb6f543d85-prod-pristine",
+      "digest": "sha256:e0640e36c6221ba8f2dc174ebbea3961fda59f6320aad56d2f071b1c51a75ffc"
+    }
+  },
+  "runtime": {
+    "engine": "chromium",
+    "browserVersion": "151.0.7922.34",
+    "playwrightVersion": "1.62.1",
+    "chromiumRevision": "1234"
+  },
+  "captureExecution": {
+    "workers": 1,
+    "fullyParallel": false,
+    "launchArgs": [
+      "--disable-gpu"
+    ],
+    "rendererPolicy": "software raster; exact PNG bytes only",
+    "screenshotAcquisition": {
+      "count": 3,
+      "acceptance": "byte-identical majority of at least two",
+      "allDifferent": "fail closed"
+    }
+  },
+  "supersedes": {
+    "baselineId": "f5cb6f543d85256e7733a1ade6a4f451d86cf378-deterministic-v2",
+    "status": "invalid_for_gate",
+    "artifactSet": {
+      "artifactCount": 126,
+      "aggregateSha256": "04f89e738e2695c6c810925297cf06cc5c4f1647da28e64981ceeef7bba315ca",
+      "aggregateFormat": "sorted path\\0bytes\\0sha256\\n"
+    },
+    "metadataSha256": "9ee2e9c85582a37f54f6a2d1e43548a81064e2aba7e63a4a85c01ed3340d0c4c",
+    "policySha256": [
+      "426aed73e59731cbd740814920650294bd09b1bf4ae2aaa2432fac465a1e1b49",
+      "43981de5e6f5076f7c3e6ac1e69a1744ceb4cd0562800f82ea2f739cb140d896"
+    ]
+  },
+  "deterministicDependencies": {
+    "turnstile": {
+      "contract": {
+        "version": 1,
+        "interceptedUrl": "https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit",
+        "request": "GET script only; every near-miss continues to the network",
+        "api": [
+          "render",
+          "reset",
+          "remove"
+        ],
+        "state": "challenge-pending",
+        "callbacks": "never invoked",
+        "token": "never created"
+      },
+      "sourceSha256": "7c4ff13d9675cf2333a106408e532459a99bf18dbee4581fc896b77d0dad88a0"
+    }
+  },
+  "comparison": {
+    "rawArtifactsPreserved": true,
+    "policyVersion": 5,
+    "carriedForwardFrom": [
+      "f5cb6f543d85256e7733a1ade6a4f451d86cf378-deterministic-v2/comparison-policy-v4.json",
+      "f5cb6f543d85256e7733a1ade6a4f451d86cf378-deterministic-v2/comparison-policy-v5.json"
+    ],
+    "pngEquality": "byte-exact normal-state PNG",
+    "semanticAllowlist": "only the exact candidate accessibility contracts recorded in policy v4",
+    "screenshotStability": "only the byte-identical majority contract recorded in policy v5"
+  },
+  "expectedCapture": {
+    "projects": [
+      "chromium-390x844",
+      "chromium-768x1024",
+      "chromium-1440x900"
+    ],
+    "routesPerProject": 14,
+    "rawArtifactsPerRoute": [
+      "characterization.json",
+      "console.json",
+      "viewport.png"
+    ],
+    "expectedRawArtifactCount": 126
+  }
+}

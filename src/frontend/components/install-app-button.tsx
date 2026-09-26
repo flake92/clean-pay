@@ -1,46 +1,43 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useState } from "react";
 
 import { IosInstallGuide } from "@/frontend/components/ios-install-guide";
-import {
-  loadTelegramWebAppScript,
-  openTelegramExternalLink,
-  wasOpenedInTelegramWebApp,
-} from "@/frontend/lib/telegram-webapp";
+import { useInstallAppController } from "@/frontend/hooks/use-install-app-controller";
+import { useModalDialogFocus } from "@/frontend/hooks/use-modal-dialog-focus";
+import { getBranding } from "@/shared/branding";
 
-type BeforeInstallPromptEvent = Event & {
-  prompt: () => Promise<void>;
-  userChoice: Promise<{ outcome: "accepted" | "dismissed" }>;
-};
+function InstallInstructionsDialog({
+  children,
+  onClose,
+  title,
+  titleId,
+}: {
+  children: React.ReactNode;
+  onClose: () => void;
+  title: string;
+  titleId: string;
+}) {
+  const dialogRef = useModalDialogFocus(onClose);
 
-function isAppleMobileDevice() {
-  if (typeof navigator === "undefined") return false;
-  return /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.userAgent.includes("Mac") && navigator.maxTouchPoints > 1);
-}
-
-function isAndroidDevice() {
-  if (typeof navigator === "undefined") return false;
-  return /Android/i.test(navigator.userAgent);
-}
-
-function isEmbeddedMobileBrowser() {
-  if (typeof navigator === "undefined") return false;
-
-  return wasOpenedInTelegramWebApp() || /Telegram|FBAN|FBAV|Instagram|Line\/|; wv\)|\bwv\b/i.test(navigator.userAgent);
-}
-
-function androidBrowserName() {
-  if (/SamsungBrowser/i.test(navigator.userAgent)) return "Samsung Internet";
-  if (/YaBrowser/i.test(navigator.userAgent)) return "Яндекс Браузер";
-  if (/OPR|Opera/i.test(navigator.userAgent)) return "Opera";
-  if (/Firefox/i.test(navigator.userAgent)) return "Firefox";
-  return "браузер";
-}
-
-function isStandalone() {
-  return window.matchMedia("(display-mode: standalone)").matches || ("standalone" in navigator && (navigator as Navigator & { standalone?: boolean }).standalone === true);
+  return (
+    <div
+      aria-labelledby={titleId}
+      aria-modal="true"
+      ref={dialogRef}
+      role="dialog"
+      tabIndex={-1}
+      style={{ background: "rgba(0, 0, 0, 0.45)", inset: 0, padding: "1rem", position: "fixed", zIndex: 1100 }}
+    >
+      <div style={{ background: "white", borderRadius: "12px", margin: "20vh auto", maxWidth: "28rem", padding: "1.5rem" }}>
+        <h2 className="mt-0" id={titleId}>{title}</h2>
+        {children}
+        <button type="button" className="p-button p-component" onClick={onClose}>
+          <span className="p-button-label">Понятно</span>
+        </button>
+      </div>
+    </div>
+  );
 }
 
 export function InstallAppButton({
@@ -50,84 +47,23 @@ export function InstallAppButton({
   alwaysVisible?: boolean;
   autoOpenIosGuide?: boolean;
 }) {
-  const [installEvent, setInstallEvent] = useState<BeforeInstallPromptEvent | null>(null);
-  const [showIosGuide, setShowIosGuide] = useState(false);
-  const [showAndroidGuide, setShowAndroidGuide] = useState(false);
-  const [showEmbeddedGuide, setShowEmbeddedGuide] = useState(false);
-  const [message, setMessage] = useState<string | null>(null);
-  const [installed, setInstalled] = useState(false);
-  const [mobilePlatform, setMobilePlatform] = useState<"android" | "ios" | "other" | null>(null);
-  const [embeddedBrowser, setEmbeddedBrowser] = useState(false);
-
-  useEffect(() => {
-    const platformTimer = window.setTimeout(() => {
-      const isIos = isAppleMobileDevice();
-      const requestedPlatform = new URLSearchParams(window.location.search).get("platform");
-      setInstalled((current) => current || isStandalone());
-      setMobilePlatform(isIos ? "ios" : isAndroidDevice() ? "android" : "other");
-      const embedded = isEmbeddedMobileBrowser();
-      setEmbeddedBrowser(embedded);
-
-      if (
-        autoOpenIosGuide &&
-        (isIos || requestedPlatform === "ios") &&
-        !embedded &&
-        !isStandalone()
-      ) {
-        setShowIosGuide(true);
-      }
-
-      if (embedded) {
-        void loadTelegramWebAppScript().catch(() => undefined);
-      }
-    }, 0);
-    const onBeforeInstallPrompt = (event: Event) => {
-      event.preventDefault();
-      setMessage(null);
-      setInstallEvent(event as BeforeInstallPromptEvent);
-    };
-    const onInstalled = () => {
-      setMessage(null);
-      setInstallEvent(null);
-      setInstalled(true);
-    };
-    window.addEventListener("beforeinstallprompt", onBeforeInstallPrompt);
-    window.addEventListener("appinstalled", onInstalled);
-
-    if ("serviceWorker" in navigator) {
-      void navigator.serviceWorker
-        .register("/sw.js", { scope: "/", updateViaCache: "none" })
-        .then((registration) => registration.update())
-        .catch(() => undefined);
-    }
-
-    return () => { window.clearTimeout(platformTimer); window.removeEventListener("beforeinstallprompt", onBeforeInstallPrompt); window.removeEventListener("appinstalled", onInstalled); };
-  }, [autoOpenIosGuide]);
-
-  function openExternalInstallPage() {
-    const installUrl = new URL("/install", window.location.origin);
-    installUrl.searchParams.set("source", "telegram");
-    installUrl.searchParams.set("platform", isAppleMobileDevice() ? "ios" : isAndroidDevice() ? "android" : "other");
-
-    if (!openTelegramExternalLink(installUrl.toString())) {
-      setShowEmbeddedGuide(true);
-    }
-  }
-
-  async function install() {
-    setMessage(null);
-    if (embeddedBrowser) { openExternalInstallPage(); return; }
-    if (isAppleMobileDevice()) { setShowIosGuide(true); return; }
-    if (!installEvent && isAndroidDevice()) { setShowAndroidGuide(true); return; }
-    if (!installEvent) {
-      setMessage("Если системное окно установки не появилось, откройте меню браузера и выберите «Установить приложение».");
-      return;
-    }
-    await installEvent.prompt();
-    const choice = await installEvent.userChoice;
-    setInstallEvent(null);
-    if (choice.outcome === "dismissed") setMessage(null);
-  }
+  const branding = getBranding();
+  const {
+    androidBrowserName,
+    embeddedBrowser,
+    install,
+    installEvent,
+    installPending,
+    installed,
+    message,
+    mobilePlatform,
+    setShowAndroidGuide,
+    setShowEmbeddedGuide,
+    setShowIosGuide,
+    showAndroidGuide,
+    showEmbeddedGuide,
+    showIosGuide,
+  } = useInstallAppController({ autoOpenIosGuide });
 
   if (installed) {
     if (!alwaysVisible) return null;
@@ -135,9 +71,9 @@ export function InstallAppButton({
     return (
       <div className="flex flex-column align-items-center gap-3 text-center" role="status">
         <i className="pi pi-check-circle text-green-500" style={{ fontSize: "2rem" }} />
-        <strong className="text-900 text-xl">Clean Pay уже установлен</strong>
+        <strong className="text-900 text-xl">{branding.name} уже установлен</strong>
         <span className="text-600 line-height-3">
-          Ярлык уже находится на главном экране. Если хотите установить его заново, сначала удалите существующее приложение Clean Pay.
+          Ярлык уже находится на главном экране. Если хотите установить его заново, сначала удалите существующее приложение {branding.name}.
         </span>
         <Link className="p-button p-component no-underline" href="/cabinet" prefetch={false}>
           <span className="p-button-icon p-c pi pi-home" />
@@ -147,33 +83,45 @@ export function InstallAppButton({
     );
   }
 
-  if (!alwaysVisible && mobilePlatform !== "android" && mobilePlatform !== "ios" && !installEvent) return null;
+  if (
+    !alwaysVisible
+    && mobilePlatform !== "android"
+    && mobilePlatform !== "ios"
+    && !installEvent
+    && !message
+  ) return null;
 
   return (
     <>
-      <button type="button" className="p-button p-component p-button-outlined" onClick={() => void install()}>
+      <button
+        aria-busy={installPending}
+        className="p-button p-component p-button-outlined"
+        disabled={installPending}
+        onClick={() => void install()}
+        type="button"
+      >
         <span className="p-button-icon p-c pi pi-mobile" />
         <span className="p-button-label">{embeddedBrowser ? "Открыть установку в браузере" : "Установить приложение"}</span>
       </button>
       {message ? <p className="m-0 text-sm text-600">{message}</p> : null}
       {showEmbeddedGuide ? (
-        <div role="dialog" aria-modal="true" aria-labelledby="install-embedded-title" style={{ background: "rgba(0, 0, 0, 0.45)", inset: 0, padding: "1rem", position: "fixed", zIndex: 1100 }}>
-          <div style={{ background: "white", borderRadius: "12px", margin: "20vh auto", maxWidth: "28rem", padding: "1.5rem" }}>
-            <h2 id="install-embedded-title" className="mt-0">Открыть во внешнем браузере</h2>
-            <p>Telegram не разрешает устанавливать ярлыки внутри встроенного окна. Нажмите меню ⋮ в правом верхнем углу, выберите «Открыть в браузере», затем снова нажмите «Установить приложение».</p>
-            <button type="button" className="p-button p-component" onClick={() => setShowEmbeddedGuide(false)}><span className="p-button-label">Понятно</span></button>
-          </div>
-        </div>
+        <InstallInstructionsDialog
+          onClose={() => setShowEmbeddedGuide(false)}
+          title="Открыть во внешнем браузере"
+          titleId="install-embedded-title"
+        >
+          <p>Telegram не разрешает устанавливать ярлыки внутри встроенного окна. Нажмите меню ⋮ в правом верхнем углу, выберите «Открыть в браузере», затем снова нажмите «Установить приложение».</p>
+        </InstallInstructionsDialog>
       ) : null}
       {showIosGuide ? <IosInstallGuide onClose={() => setShowIosGuide(false)} /> : null}
       {showAndroidGuide ? (
-        <div role="dialog" aria-modal="true" aria-labelledby="install-android-title" style={{ background: "rgba(0, 0, 0, 0.45)", inset: 0, padding: "1rem", position: "fixed", zIndex: 1100 }}>
-          <div style={{ background: "white", borderRadius: "12px", margin: "20vh auto", maxWidth: "28rem", padding: "1.5rem" }}>
-            <h2 id="install-android-title" className="mt-0">Добавить приложение</h2>
-            <p>В {androidBrowserName()} откройте меню браузера и выберите «Установить приложение» или «Добавить на главный экран».</p>
-            <button type="button" className="p-button p-component" onClick={() => setShowAndroidGuide(false)}><span className="p-button-label">Понятно</span></button>
-          </div>
-        </div>
+        <InstallInstructionsDialog
+          onClose={() => setShowAndroidGuide(false)}
+          title="Добавить приложение"
+          titleId="install-android-title"
+        >
+          <p>В {androidBrowserName()} откройте меню браузера и выберите «Установить приложение» или «Добавить на главный экран».</p>
+        </InstallInstructionsDialog>
       ) : null}
     </>
   );

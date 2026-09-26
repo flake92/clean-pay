@@ -143,7 +143,64 @@ describe("failed() error message mapping", () => {
     const commands = mockCommands({
       authenticateEmail: vi.fn().mockRejectedValueOnce(loginFailure).mockRejectedValueOnce(new LinkAccountGatewayError("EMAIL_ALREADY_EXISTS")),
     });
-    await expect(linkAccountEmail(commands, { email: "user@example.com", password: "wrong" })).resolves.toMatchObject({ ok: false, code: "AUTH_FAILED" });
+    await expect(linkAccountEmail(commands, { email: "user@example.com", password: "wrong" })).resolves.toEqual({
+      ok: false,
+      code: "AUTH_FAILED",
+      message: "Неверный e-mail или пароль.",
+    });
+    expect(commands.authenticateEmail).toHaveBeenNthCalledWith(1, {
+      operation: "login",
+      email: "user@example.com",
+      password: "wrong",
+    });
+    expect(commands.authenticateEmail).toHaveBeenNthCalledWith(2, {
+      operation: "register",
+      email: "user@example.com",
+      password: "wrong",
+    });
+    expect(commands.authenticateEmail).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not mask a register upstream failure as a wrong password", async () => {
+    const commands = mockCommands({
+      authenticateEmail: vi.fn()
+        .mockRejectedValueOnce(new LinkAccountGatewayError("AUTH_FAILED"))
+        .mockRejectedValueOnce(new LinkAccountGatewayError("UPSTREAM_UNAVAILABLE")),
+    });
+
+    await expect(linkAccountEmail(commands, {
+      email: "user@example.com",
+      password: "wrong",
+    })).resolves.toEqual({
+      ok: false,
+      code: "UPSTREAM_UNAVAILABLE",
+      message: "Не удалось связать e-mail с аккаунтом.",
+    });
+    expect(commands.authenticateEmail).toHaveBeenCalledTimes(2);
+    expect(commands.stagePendingEmail).not.toHaveBeenCalled();
+    expect(commands.requestProviderVerification).not.toHaveBeenCalled();
+    expect(commands.mergeProviderAccounts).not.toHaveBeenCalled();
+  });
+
+  it("returns actionable rate-limit feedback without calling the provider", async () => {
+    const commands = mockCommands({
+      assertLinkRateLimit: vi.fn(async () => {
+        throw new LinkAccountGatewayError("RATE_LIMITED");
+      }),
+    });
+
+    await expect(linkAccountEmail(commands, {
+      email: "user@example.com",
+      password: "wrong",
+    })).resolves.toEqual({
+      ok: false,
+      code: "RATE_LIMITED",
+      message: "Слишком много попыток. Попробуйте позже.",
+    });
+    expect(commands.authenticateEmail).not.toHaveBeenCalled();
+    expect(commands.stagePendingEmail).not.toHaveBeenCalled();
+    expect(commands.requestProviderVerification).not.toHaveBeenCalled();
+    expect(commands.mergeProviderAccounts).not.toHaveBeenCalled();
   });
 
   it("fails closed if the actor changes after provider authentication", async () => {
@@ -157,8 +214,25 @@ describe("failed() error message mapping", () => {
       loadProviderProfile: vi.fn(async () => ({ email: "user@example.com", emailVerified: true })),
     });
     await expect(linkAccountEmail(commands, { email: "user@example.com", password: "password" })).resolves.toEqual({ ok: true, kind: "linked" });
-    expect(commands.linkCurrentAccount).toHaveBeenCalledWith(expect.anything(), { upstreamMerged: false, ownerFenceHeld: true });
+    expect(commands.linkCurrentAccount).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ upstreamMerged: false, ownerFenceHeld: true }));
+    expect(commands.stagePendingEmail).toHaveBeenCalledWith(expect.objectContaining({ ownerTransitionStarted: true }));
+    expect(vi.mocked(commands.withOwnerChangeFence).mock.invocationCallOrder[0])
+      .toBeLessThan(vi.mocked(commands.stagePendingEmail).mock.invocationCallOrder[0]!);
+    expect(vi.mocked(commands.stagePendingEmail).mock.invocationCallOrder[0])
+      .toBeLessThan(vi.mocked(commands.linkCurrentAccount).mock.invocationCallOrder[0]!);
     expect(commands.requestProviderVerification).not.toHaveBeenCalled();
+  });
+
+  it("does not overwrite a durable transition when another owner fence wins", async () => {
+    const commands = mockCommands({
+      loadProviderProfile: vi.fn(async () => ({ email: "user@example.com", emailVerified: true })),
+      withOwnerChangeFence: vi.fn(async () => { throw new LinkAccountGatewayError("CONFLICT"); }),
+    });
+    await expect(linkAccountEmail(commands, { email: "user@example.com", password: "password" }))
+      .resolves.toMatchObject({ ok: false, code: "CONFLICT" });
+    expect(commands.stagePendingEmail).not.toHaveBeenCalled();
+    expect(commands.attachTelegram).not.toHaveBeenCalled();
+    expect(commands.linkCurrentAccount).not.toHaveBeenCalled();
   });
 
   it("requires real verification if a newly registered provider reports e-mail as already verified", async () => {
@@ -330,6 +404,24 @@ describe("failed() error message mapping", () => {
     expect(result).toEqual({
       ok: false,
       code: "INTERNAL_ERROR",
+      message: "Не удалось объединить аккаунты.",
+    });
+  });
+
+  it("does not trust a duck-typed public message from an unknown failure", async () => {
+    const commands = mockCommands({
+      confirmTelegramMerge: vi.fn(async () => {
+        throw {
+          code: "UPSTREAM_ERROR",
+          publicMessage: "provider debug secret",
+        };
+      }),
+    });
+
+    const result = await confirmLinkedTelegram(commands);
+    expect(result).toEqual({
+      ok: false,
+      code: "UPSTREAM_ERROR",
       message: "Не удалось объединить аккаунты.",
     });
   });

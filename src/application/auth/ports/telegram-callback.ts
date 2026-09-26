@@ -5,8 +5,15 @@ export type TelegramCallbackInput =
 
 export type TelegramProviderSession = { context: unknown };
 
+export type TelegramCallbackDurableOwnership = {
+  authStateId: string;
+  stateHash: string;
+  codeHash: string;
+  claimToken: string;
+};
+
 export type ConsumedTelegramCallback = {
-  user: { id: string; upstreamAccountId: string | null };
+  user: TelegramLocalUser;
   redirectTo: string | null;
   providerSession: TelegramProviderSession | null;
   linked: boolean;
@@ -24,6 +31,7 @@ export type VerifiedTelegramCallback = {
     photoUrl: string | null;
     providerSession: TelegramProviderSession | null;
   };
+  durable?: TelegramCallbackDurableOwnership;
 };
 
 export type TelegramLocalUser = {
@@ -73,7 +81,16 @@ export interface TelegramCallbackGateway {
     userId: string; telegramId: string; telegramUsername: string | null; sourceEmail: string | null;
     targetEmail: string; targetTelegramId: string | null; sourceAccountId: string; targetAccountId: string;
   }): Promise<{ token: string }>;
-  applyTelegramIdentity(input: { targetUserId: string | null; existingTelegramUserId: string | null; telegramId: string; telegramUsername: string | null; fullName: string | null; photoUrl: string | null }): Promise<TelegramLocalUser>;
+  applyTelegramIdentity(input: {
+    targetUserId: string | null;
+    existingTelegramUserId: string | null;
+    expectedExistingUpstreamAccountId: string | null;
+    provenProviderAccountId: string | null;
+    telegramId: string;
+    telegramUsername: string | null;
+    fullName: string | null;
+    photoUrl: string | null;
+  }): Promise<TelegramLocalUser>;
   markAuthStateUser(authStateId: string, userId: string): Promise<void>;
   auditIdentityResolved(input: { linked: boolean; userId: string }): Promise<void>;
   clearTemporaryAuth(): Promise<void>;
@@ -88,12 +105,15 @@ export interface TelegramCallbackGateway {
     session: TelegramProviderSession;
     ownerFenceHeld: boolean;
     invalidateSiblingTokens: boolean;
+    expectedIdentity: import("@/application/auth/ports/provider-account-identity").ExpectedProviderAccountIdentity;
   }): Promise<TelegramCallbackSession>;
   reconcileProviderSession(session: TelegramProviderSession): Promise<TelegramCallbackSession>;
   withOwnerChangeFence<T>(input: {
     userIds: string[];
     upstreamAccountIds: string[];
     telegramIds: string[];
+    operationKey: string;
+    targetUpstreamAccountId: string;
     work: () => Promise<T>;
   }): Promise<T>;
   logAttachFailure(error: unknown, telegramId: string): void;

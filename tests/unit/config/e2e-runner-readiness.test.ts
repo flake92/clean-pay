@@ -1,3 +1,4 @@
+import { Buffer } from "node:buffer";
 import { readFileSync } from "node:fs";
 
 import { describe, expect, it } from "vitest";
@@ -6,7 +7,9 @@ const runner = readFileSync("scripts/e2e-devcontainer.mjs", "utf8");
 const shellRunner = readFileSync("scripts/e2e-devcontainer.sh", "utf8");
 const compose = readFileSync(".devcontainer/docker-compose.yml", "utf8");
 const ciWorkflow = readFileSync(".github/workflows/ci.yml", "utf8");
-const remnashopRevision = "1262f98cd3904ea0e4ddbe4628ceecf56c5f598b";
+const dependabot = readFileSync(".github/dependabot.yml", "utf8");
+const productionRemnashopEnv = readFileSync("deploy/prod/remnashop.env.example", "utf8");
+const remnashopRevision = "7d27eeefffefb65af702e1c6ef7ed5fc985873c2";
 
 const hostPortContract = [
   ["CLEAN_PAY_DEVCONTAINER_APP_HOST_PORT", "4000", "4000"],
@@ -37,6 +40,14 @@ describe("devcontainer e2e runner readiness", () => {
     expect(runner).toContain('label: "Devcontainer image build/start"');
     expect(runner).toContain("attempts: 3");
     expect(runner).toContain("attempt * 2_000");
+    expect(runner).toContain("beforeRetry: () => cleanupComposeStack(composeArgs)");
+  });
+
+  it("removes the host E2E stack unless it was explicitly retained", () => {
+    expect(runner).toContain('process.env.KEEP_E2E_STACK !== "1"');
+    expect(runner).toContain("process.exitCode = status || cleanupStatus");
+    expect(shellRunner).toContain("remnashop-cache");
+    expect(shellRunner).toContain("remnashop-postgres");
   });
 
   it("allows every published host port to be isolated without changing defaults", () => {
@@ -52,6 +63,14 @@ describe("devcontainer e2e runner readiness", () => {
     }
   });
 
+  it("binds every configurable development publication to host loopback", () => {
+    const configuredPorts = [...compose.matchAll(
+      /^\s+- "127\.0\.0\.1:\$\{(CLEAN_PAY_DEVCONTAINER_[A-Z_]+):-([0-9]+)\}:([0-9]+)"$/gm,
+    )].map((match) => [match[1], match[2], match[3]]).sort();
+
+    expect(configuredPorts).toEqual([...hostPortContract].sort());
+  });
+
   it("keeps service URLs container-local when host ports are isolated", () => {
     expect(runner).toContain('name === "CLEAN_PAY_E2E_BASE_URL"');
     expect(runner).toContain('? "http://localhost:4000"');
@@ -59,6 +78,66 @@ describe("devcontainer e2e runner readiness", () => {
     expect(runner).toContain('? "http://smtp:8025"');
     expect(runner).toContain('name === "CLEAN_PAY_E2E_OIDC_URL"');
     expect(runner).toContain('? "http://telegram-oidc-mock:8090"');
+  });
+
+  it("uses a unique one-shot project and ephemeral ports by default", () => {
+    expect(runner).toContain("`clean-pay-e2e-${process.pid}-${randomUUID().slice(0, 8)}`");
+    expect(runner).toContain('(explicitProjectName ? fallback : "0")');
+    expect(runner).not.toContain('?? "clean-pay-dev"');
+    expect(shellRunner).toContain(
+      "CLEAN_PAY_DEVCONTAINER_PROJECT:?CLEAN_PAY_DEVCONTAINER_PROJECT must be set by the E2E runner",
+    );
+    expect(ciWorkflow).toContain(
+      "CLEAN_PAY_DEVCONTAINER_PROJECT: clean-pay-e2e-${{ github.run_id }}-${{ github.run_attempt }}",
+    );
+    expect(ciWorkflow).toContain('-p "$CLEAN_PAY_DEVCONTAINER_PROJECT"');
+  });
+
+  it("allows plaintext SMTP only inside the explicit Mailpit fixture", () => {
+    expect(compose).toContain('EMAIL_ALLOW_INSECURE_SMTP: "true"');
+    expect(compose).toContain("EMAIL_HOST: smtp");
+    expect(productionRemnashopEnv).toContain("EMAIL_ALLOW_INSECURE_SMTP=false");
+    expect(productionRemnashopEnv).toContain("EMAIL_USE_TLS=true");
+  });
+
+  it("uses fixture secrets accepted by every Remnashop configuration guard", () => {
+    const guardedSecrets = [
+      ["APP_CRYPT_KEY", 44],
+      ["APP_API_KEY", 24],
+      ["APP_AUTH_SERVICE_KEY", 24],
+      ["APP_JWT_SECRET", 32],
+      ["BOT_SECRET_TOKEN", 32],
+      ["REMNAWAVE_WEBHOOK_SECRET", 32],
+      ["DATABASE_PASSWORD", 24],
+    ] as const;
+    const configuredSecrets: string[] = [];
+
+    for (const [name, minimumLength] of guardedSecrets) {
+      const value = compose.match(new RegExp(`^\\s+${name}:\\s*"?([^\\s"#]+)"?\\s*$`, "m"))?.[1];
+
+      expect(value, `${name} must be present`).toBeDefined();
+      expect(value!.length, `${name} length`).toBeGreaterThanOrEqual(minimumLength);
+      expect(new Set(value).size, `${name} distinct characters`).toBeGreaterThanOrEqual(8);
+      expect(value!.replace(/[^a-z0-9]/gi, "").toLowerCase(), `${name} placeholder`).not.toMatch(
+        /changeme|replaceme|example|placeholder/,
+      );
+      expect(value, `${name} repeated pattern`).not.toMatch(/^(.{1,8})\1+$/);
+      configuredSecrets.push(value!);
+    }
+
+    expect(new Set(configuredSecrets).size).toBe(configuredSecrets.length);
+    const cryptKey = configuredSecrets[0]!;
+    expect(cryptKey).toMatch(/^[A-Za-z0-9+/]{43}=$/);
+    expect(Buffer.from(cryptKey, "base64")).toHaveLength(32);
+    expect(compose).not.toMatch(/^\s+REDIS_PASSWORD:/m);
+    expect(compose.match(/^\s+REMNASHOP_API_KEY:\s*([^\s#]+)\s*$/m)?.[1]).toBe(
+      compose.match(/^\s+APP_API_KEY:\s*([^\s#]+)\s*$/m)?.[1],
+    );
+    expect(compose.match(/^\s+REMNASHOP_AUTH_SERVICE_KEY:\s*([^\s#]+)\s*$/m)?.[1]).toBe(
+      compose.match(/^\s+APP_AUTH_SERVICE_KEY:\s*([^\s#]+)\s*$/m)?.[1],
+    );
+    const databasePassword = compose.match(/^\s+DATABASE_PASSWORD:\s*([^\s#]+)\s*$/m)?.[1];
+    expect(compose).toContain(`POSTGRES_PASSWORD: ${databasePassword}`);
   });
 
   it("uses one project-scoped Remnashop image across every service", () => {
@@ -79,28 +158,64 @@ describe("devcontainer e2e runner readiness", () => {
   it("keeps the default E2E source hermetic and accepts newer compatible schemas", () => {
     expect(runner).toContain('process.env.REMNASHOP_DISCOVER_HOST_SOURCE === "1"');
     expect(runner).toContain('"REMNASHOP_MINIMUM_ALEMBIC_REVISION"');
-    expect(shellRunner).toContain('REMNASHOP_MINIMUM_ALEMBIC_REVISION:-0050');
+    expect(shellRunner).toContain('REMNASHOP_MINIMUM_ALEMBIC_REVISION:-0059');
     expect(shellRunner).toContain('10#$current_revision >= 10#$minimum_revision');
-    expect(shellRunner).not.toContain('current_revision <> \'0050\'');
+    expect(shellRunner).not.toContain('current_revision <> \'0059\'');
   });
 
-  it("pins E2E to the compatible Remnashop revision with container migrations", () => {
+  it("pins the default E2E source to the exact reviewed reminder head", () => {
     expect(compose).toContain(`https://github.com/flake92/remnashop.git#${remnashopRevision}`);
-    expect(compose).toContain(`BUILD_COMMIT: ${remnashopRevision}`);
+    expect(compose).toContain(
+      `BUILD_COMMIT: \${REMNASHOP_BUILD_REVISION:-${remnashopRevision}}`,
+    );
+    expect(compose).toContain("BUILD_BRANCH: codex/email-reminders-default-deploy-20260913");
     expect(compose).not.toContain("b9da68a651e9ab0b7ed52d030e13754311614759");
   });
 
-  it("keeps actionable E2E diagnostics and current GitHub action runtimes in CI", () => {
+  it("uses the reviewed reminder implementation from that exact commit", () => {
+    expect(ciWorkflow).toContain("repository: flake92/remnashop");
+    expect(ciWorkflow).toContain(`ref: ${remnashopRevision}`);
+    expect(ciWorkflow).not.toContain("remnashop-pr135-email-reminders.patch");
+    expect(ciWorkflow).toContain("REMNASHOP_HOST_SOURCE:");
+    expect(ciWorkflow).toContain(`REMNASHOP_BUILD_REVISION: ${remnashopRevision}`);
+    expect(runner).toContain('"REMNASHOP_BUILD_REVISION"');
+  });
+
+  it("keeps actionable E2E diagnostics and immutable GitHub action runtimes in CI", () => {
     expect(ciWorkflow).toContain('CLEAN_PAY_E2E_DIAGNOSTICS: "1"');
     expect(ciWorkflow).not.toContain('CLEAN_PAY_E2E_DIAGNOSTICS: "0"');
-    expect(ciWorkflow).not.toMatch(/actions\/(?:checkout|setup-node)@v4/);
-    expect(ciWorkflow).toContain("actions/checkout@v5");
-    expect(ciWorkflow).toContain("actions/setup-node@v5");
-    expect(ciWorkflow.match(/node-version-file: \.node-version/g)).toHaveLength(3);
+    const actionReferences = [
+      ...ciWorkflow.matchAll(/^\s*(?:-\s*)?uses:\s+([^\s#]+)(?:\s+#\s*(\S.*))?$/gm),
+    ];
+
+    expect(actionReferences.length).toBeGreaterThan(0);
+    for (const [, reference, versionComment] of actionReferences) {
+      expect(reference).toMatch(/^[^@\s]+@[0-9a-f]{40}$/);
+      expect(versionComment).toMatch(/^v\d/);
+    }
+
+    expect(ciWorkflow).toContain(
+      "actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0",
+    );
+    expect(ciWorkflow).toContain(
+      "actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0",
+    );
+    const setupNodeActions = actionReferences.filter(([, reference]) =>
+      reference.startsWith("actions/setup-node@"));
+    expect(setupNodeActions.length).toBeGreaterThan(0);
+    expect(ciWorkflow.match(/node-version-file: \.node-version/g)).toHaveLength(
+      setupNodeActions.length,
+    );
     expect(ciWorkflow).toContain("workflow_dispatch:");
     expect(ciWorkflow).toContain("sh -n deploy.sh start.sh scripts/*.sh deploy/prod/*.sh");
     expect(ciWorkflow).toContain("docker compose --env-file deploy/prod/.env");
     expect(ciWorkflow).toContain("timeout --signal=TERM --kill-after=30s 12m npm run test:e2e");
+  });
+
+  it("keeps pinned GitHub Actions current through Dependabot", () => {
+    expect(dependabot).toContain("package-ecosystem: github-actions");
+    expect(dependabot).toContain('directory: "/"');
+    expect(dependabot).toContain("interval: weekly");
   });
 
   it("pre-creates the Next.js build directory for the unprivileged container user", () => {

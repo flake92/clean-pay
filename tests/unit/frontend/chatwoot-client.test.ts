@@ -1,0 +1,538 @@
+/** @vitest-environment jsdom */
+
+import { beforeEach, describe, expect, it, vi } from "vitest";
+
+import type { ChatwootWidgetConfig } from "@/application/models/chatwoot";
+import {
+  applyChatwootManagedLabels,
+  clearChatwootSupportContextCache,
+  confirmChatwootIdentity,
+  confirmChatwootIdentityOwnership,
+  enterChatwootAuthenticatedMode,
+  enterChatwootGuestMode,
+  failChatwootIdentity,
+  getChatwootPendingIdentityAttempt,
+  identifyChatwootUser,
+  isChatwootIdentityConfirmation,
+  loadChatwootSupportContextCached,
+  loadChatwootSdk,
+  resetChatwootSession,
+} from "@/frontend/lib/chatwoot";
+
+const config: ChatwootWidgetConfig = {
+  baseUrl: "https://chat.example.com",
+  identityFingerprint: "1111111111111111111111111111111111111111111111111111111111111111",
+  websiteToken: "website_token_123456789",
+  user: {
+    identifier: "user-123",
+    identifierHash: "signed-identifier",
+    name: "Clean Pay User",
+    email: "verified@example.com",
+    customAttributes: {
+      clean_pay_user_id: "user-123",
+      telegram_id: "7654321",
+      telegram_username: "clean_pay_user",
+    },
+  },
+};
+
+function chatwootApi() {
+  return {
+    baseUrl: config.baseUrl,
+    websiteToken: config.websiteToken,
+    hasLoaded: true,
+    identifier: config.user.identifier,
+    user: {
+      name: config.user.name,
+      email: config.user.email ?? undefined,
+      identifier_hash: config.user.identifierHash,
+      custom_attributes: config.user.customAttributes,
+    },
+    resetTriggered: true,
+    setUser: vi.fn(),
+    setLabel: vi.fn(),
+    removeLabel: vi.fn(),
+    toggleBubbleVisibility: vi.fn(),
+    reset: vi.fn(),
+  };
+}
+
+function confirmIdentity() {
+  document.cookie = "cw_conversation=authenticated; Path=/";
+  document.cookie = `cw_user_${config.websiteToken}=identified; Path=/`;
+  expect(confirmChatwootIdentity()).toBe(true);
+}
+
+describe("Chatwoot browser lifecycle", () => {
+  beforeEach(() => {
+    window.$chatwoot = undefined;
+    window.chatwootSDK = undefined;
+    window.chatwootSettings = undefined;
+    window.cleanPayChatwootAuthorized = undefined;
+    window.cleanPayChatwootIdentity = undefined;
+    window.cleanPayChatwootOwnership = undefined;
+    window.cleanPayChatwootPendingIdentity = undefined;
+    window.cleanPayChatwootFailedIdentity = undefined;
+    window.localStorage.clear();
+    clearChatwootSupportContextCache();
+    document.getElementById("clean-pay-chatwoot-sdk")?.remove();
+    document.cookie = "cw_conversation=; Path=/; Max-Age=0";
+    document.cookie = `cw_user_${config.websiteToken}=; Path=/; Max-Age=0`;
+    vi.clearAllMocks();
+  });
+
+  it("identifies only an authenticated user and sends attributes atomically", () => {
+    const api = chatwootApi();
+    window.$chatwoot = api;
+
+    expect(identifyChatwootUser(config)).toBe("unavailable");
+    expect(api.setUser).not.toHaveBeenCalled();
+
+    enterChatwootAuthenticatedMode();
+    expect(identifyChatwootUser(config)).toBe("pending");
+
+    expect(api.toggleBubbleVisibility).toHaveBeenCalledWith("hide");
+    expect(api.setUser).toHaveBeenCalledWith("user-123", {
+      name: "Clean Pay User",
+      email: "verified@example.com",
+      identifier_hash: "signed-identifier",
+      custom_attributes: config.user.customAttributes,
+    });
+    confirmIdentity();
+    expect(identifyChatwootUser(config)).toBe("ready");
+    expect(api.toggleBubbleVisibility).toHaveBeenCalledWith("hide");
+    expect(api.toggleBubbleVisibility.mock.invocationCallOrder[0]).toBeLessThan(
+      api.setUser.mock.invocationCallOrder[0],
+    );
+    expect(api.setUser.mock.invocationCallOrder[0]).toBeLessThan(
+      api.toggleBubbleVisibility.mock.invocationCallOrder[1],
+    );
+    expect(api.setUser).toHaveBeenCalledTimes(1);
+
+    expect(identifyChatwootUser(config)).toBe("ready");
+    expect(api.setUser).toHaveBeenCalledTimes(1);
+  });
+
+  it("forces an atomic signed identity update when custom attributes change", () => {
+    const api = chatwootApi();
+    window.$chatwoot = api;
+    enterChatwootAuthenticatedMode();
+    identifyChatwootUser(config);
+    confirmIdentity();
+
+    const updated = {
+      ...config,
+      identityFingerprint: "2222222222222222222222222222222222222222222222222222222222222222",
+      user: {
+        ...config.user,
+        customAttributes: { ...config.user.customAttributes, telegram_id: "999" },
+      },
+    };
+    expect(identifyChatwootUser(updated)).toBe("pending");
+
+    expect(api.setUser).toHaveBeenCalledTimes(2);
+    expect(api.setUser).toHaveBeenLastCalledWith("user-123", expect.objectContaining({
+      custom_attributes: updated.user.customAttributes,
+    }));
+    expect(document.cookie).not.toContain(`cw_user_${config.websiteToken}=`);
+  });
+
+  it("requires a new signed identity confirmation when the Chatwoot origin changes", () => {
+    const api = chatwootApi();
+    window.$chatwoot = api;
+    enterChatwootAuthenticatedMode();
+    identifyChatwootUser(config);
+    confirmIdentity();
+
+    expect(identifyChatwootUser({
+      ...config,
+      baseUrl: "https://new-chat.example.com",
+      identityFingerprint: "3333333333333333333333333333333333333333333333333333333333333333",
+    })).toBe("pending");
+    expect(api.setUser).toHaveBeenCalledTimes(2);
+    expect(api.toggleBubbleVisibility).toHaveBeenLastCalledWith("hide");
+  });
+
+  it("serializes a newer context behind the pending signed identity request", () => {
+    const api = chatwootApi();
+    window.$chatwoot = api;
+    enterChatwootAuthenticatedMode();
+
+    expect(identifyChatwootUser(config)).toBe("pending");
+    expect(identifyChatwootUser(config, { subscription_plan: "Premium" }))
+      .toBe("pending");
+    expect(api.setUser).toHaveBeenCalledTimes(1);
+
+    confirmIdentity();
+    expect(identifyChatwootUser(config, { subscription_plan: "Premium" }))
+      .toBe("pending");
+    expect(api.setUser).toHaveBeenCalledTimes(2);
+    expect(api.setUser).toHaveBeenLastCalledWith("user-123", expect.objectContaining({
+      custom_attributes: {
+        ...config.user.customAttributes,
+        subscription_plan: "Premium",
+      },
+    }));
+  });
+
+  it("persists only a bounded ownership fingerprint and restores the same conversation", () => {
+    const api = chatwootApi();
+    window.$chatwoot = api;
+    enterChatwootAuthenticatedMode();
+
+    expect(identifyChatwootUser(config)).toBe("pending");
+    const attemptId = getChatwootPendingIdentityAttempt()!.attemptId;
+    document.cookie = "cw_conversation=authenticated; Path=/";
+    document.cookie = `cw_user_${config.websiteToken}=identified; Path=/`;
+
+    expect(confirmChatwootIdentityOwnership(attemptId)).toBe(true);
+    expect(identifyChatwootUser(config)).toBe("ready");
+    expect(api.toggleBubbleVisibility).toHaveBeenLastCalledWith("hide");
+    expect(window.localStorage.length).toBe(1);
+    const persisted = Array.from(
+      { length: window.localStorage.length },
+      (_, index) => window.localStorage.getItem(window.localStorage.key(index)!) ?? "",
+    ).join("\n");
+    expect(persisted).not.toContain("authenticated");
+    expect(persisted).not.toContain(config.user.identifier);
+    expect(persisted).not.toContain(config.user.identifierHash);
+
+    // Simulate a browser reload and the observed Chatwoot behaviour where its
+    // transport cookie disappears while the same conversation remains.
+    window.cleanPayChatwootIdentity = undefined;
+    window.cleanPayChatwootOwnership = undefined;
+    window.cleanPayChatwootPendingIdentity = undefined;
+    window.cleanPayChatwootFailedIdentity = undefined;
+    document.cookie = `cw_user_${config.websiteToken}=; Path=/; Max-Age=0`;
+    expect(identifyChatwootUser(config)).toBe("ready");
+    expect(api.setUser).toHaveBeenCalledTimes(1);
+    expect(api.toggleBubbleVisibility).toHaveBeenLastCalledWith("hide");
+  });
+
+  it("never restores a persisted proof for another conversation or signed actor", () => {
+    const api = chatwootApi();
+    window.$chatwoot = api;
+    enterChatwootAuthenticatedMode();
+
+    identifyChatwootUser(config);
+    const attemptId = getChatwootPendingIdentityAttempt()!.attemptId;
+    document.cookie = "cw_conversation=authenticated; Path=/";
+    document.cookie = `cw_user_${config.websiteToken}=identified; Path=/`;
+    expect(confirmChatwootIdentityOwnership(attemptId)).toBe(true);
+
+    window.cleanPayChatwootIdentity = undefined;
+    window.cleanPayChatwootOwnership = undefined;
+    window.cleanPayChatwootPendingIdentity = undefined;
+    window.cleanPayChatwootFailedIdentity = undefined;
+    document.cookie = "cw_conversation=different; Path=/";
+    document.cookie = `cw_user_${config.websiteToken}=; Path=/; Max-Age=0`;
+
+    expect(identifyChatwootUser(config)).toBe("pending");
+    expect(api.toggleBubbleVisibility).toHaveBeenLastCalledWith("hide");
+
+    window.cleanPayChatwootOwnership = undefined;
+    window.cleanPayChatwootPendingIdentity = undefined;
+    document.cookie = "cw_conversation=authenticated; Path=/";
+    const otherActor = {
+      ...config,
+      identityFingerprint: "4444444444444444444444444444444444444444444444444444444444444444",
+      user: {
+        ...config.user,
+        identifier: "user-456",
+        identifierHash: "other-signed-identifier",
+      },
+    };
+
+    expect(identifyChatwootUser(otherActor)).toBe("pending");
+    expect(api.toggleBubbleVisibility).toHaveBeenLastCalledWith("hide");
+    expect(api.setUser).toHaveBeenLastCalledWith(
+      "user-456",
+      expect.objectContaining({ identifier_hash: "other-signed-identifier" }),
+    );
+  });
+
+  it("keeps verified ownership usable when a late metadata error removes the SDK cookie", () => {
+    const api = chatwootApi();
+    window.$chatwoot = api;
+    enterChatwootAuthenticatedMode();
+
+    identifyChatwootUser(config);
+    const attemptId = getChatwootPendingIdentityAttempt()!.attemptId;
+    document.cookie = "cw_conversation=authenticated; Path=/";
+    document.cookie = `cw_user_${config.websiteToken}=identified; Path=/`;
+    expect(confirmChatwootIdentityOwnership(attemptId)).toBe(true);
+
+    // Chatwoot 4.16 can remove this transport cookie after Clean Pay has
+    // already proved that the conversation belongs to the authenticated user.
+    // The bounded ownership proof keeps the first-party support action available
+    // without persisting the signed hash, token, or optional metadata payload.
+    document.cookie = `cw_user_${config.websiteToken}=; Path=/; Max-Age=0`;
+    expect(identifyChatwootUser(config)).toBe("ready");
+    expect(getChatwootPendingIdentityAttempt()).toMatchObject({
+      phase: "ownership_confirmed",
+    });
+    expect(api.toggleBubbleVisibility).toHaveBeenLastCalledWith("hide");
+    expect(window.localStorage.length).toBe(1);
+  });
+
+  it("does not reuse an ownership proof for a different conversation", () => {
+    const api = chatwootApi();
+    window.$chatwoot = api;
+    enterChatwootAuthenticatedMode();
+
+    identifyChatwootUser(config);
+    const attemptId = getChatwootPendingIdentityAttempt()!.attemptId;
+    document.cookie = "cw_conversation=authenticated; Path=/";
+    document.cookie = `cw_user_${config.websiteToken}=identified; Path=/`;
+    expect(confirmChatwootIdentityOwnership(attemptId)).toBe(true);
+
+    document.cookie = "cw_conversation=different; Path=/";
+    document.cookie = `cw_user_${config.websiteToken}=; Path=/; Max-Age=0`;
+    expect(identifyChatwootUser(config)).toBe("failed");
+    expect(getChatwootPendingIdentityAttempt()).toBeUndefined();
+    expect(api.toggleBubbleVisibility).toHaveBeenLastCalledWith("hide");
+  });
+
+  it("identifies with support attributes in the same signed set-user command", () => {
+    const api = chatwootApi();
+    window.$chatwoot = api;
+    enterChatwootAuthenticatedMode();
+
+    identifyChatwootUser(config, {
+      subscription_plan: "Premium",
+      last_payment_status: "FAILED",
+    });
+
+    expect(api.setUser).toHaveBeenCalledWith("user-123", expect.objectContaining({
+      custom_attributes: {
+        ...config.user.customAttributes,
+        subscription_plan: "Premium",
+        last_payment_status: "FAILED",
+      },
+    }));
+  });
+
+  it("accepts identity confirmation only from the configured Chatwoot iframe", () => {
+    const frame = document.createElement("iframe");
+    frame.id = "chatwoot_live_chat_widget";
+    document.body.appendChild(frame);
+    const event = new MessageEvent("message", {
+      origin: config.baseUrl,
+      source: frame.contentWindow,
+      data: 'chatwoot-widget:{"event":"setAuthCookie","data":{"widgetAuthToken":"token"}}',
+    });
+
+    expect(isChatwootIdentityConfirmation(event, config.baseUrl)).toBe(true);
+    expect(isChatwootIdentityConfirmation(new MessageEvent("message", {
+      origin: "https://attacker.example",
+      source: frame.contentWindow,
+      data: event.data,
+    }), config.baseUrl)).toBe(false);
+    frame.remove();
+  });
+
+  it("adds or removes only managed conversation labels", () => {
+    const api = chatwootApi();
+    window.$chatwoot = api;
+    enterChatwootAuthenticatedMode();
+
+    applyChatwootManagedLabels({
+      customAttributes: {
+        subscription_plan: "Premium",
+        last_payment_status: "FAILED",
+      },
+      managedLabels: [
+        { name: "payment_problem", enabled: true },
+        { name: "subscription_expired", enabled: false },
+      ],
+    });
+
+    expect(api.setLabel).toHaveBeenCalledWith("payment_problem");
+    expect(api.removeLabel).toHaveBeenCalledWith("subscription_expired");
+  });
+
+  it("never applies context before signed authentication mode is active", () => {
+    const api = chatwootApi();
+    window.$chatwoot = api;
+
+    applyChatwootManagedLabels({
+      customAttributes: { subscription_plan: "Premium" },
+      managedLabels: [{ name: "payment_problem", enabled: true }],
+    });
+
+    expect(api.setLabel).not.toHaveBeenCalled();
+  });
+
+  it("isolates optional context failures from the base widget", () => {
+    const api = chatwootApi();
+    api.setLabel.mockImplementation(() => { throw new Error("unsupported"); });
+    window.$chatwoot = api;
+    enterChatwootAuthenticatedMode();
+
+    expect(() => applyChatwootManagedLabels({
+      customAttributes: { subscription_status: "ACTIVE" },
+      managedLabels: [
+        { name: "payment_problem", enabled: true },
+        { name: "subscription_expired", enabled: false },
+      ],
+    })).not.toThrow();
+    expect(window.cleanPayChatwootAuthorized).toBe(true);
+  });
+
+  it("latches a late SDK failure to the desired identity", () => {
+    const api = chatwootApi();
+    window.$chatwoot = api;
+    enterChatwootAuthenticatedMode();
+
+    failChatwootIdentity(config, { subscription_status: "ACTIVE" });
+
+    expect(identifyChatwootUser(config, { subscription_status: "ACTIVE" }))
+      .toBe("failed");
+    expect(api.setUser).not.toHaveBeenCalled();
+    expect(document.cookie).not.toContain(`cw_user_${config.websiteToken}=`);
+  });
+
+  it("coalesces support-context loads briefly and clears them on logout", async () => {
+    const loader = vi.fn(async () => ({
+      customAttributes: { subscription_status: "ACTIVE" },
+      managedLabels: [],
+    }));
+
+    const first = loadChatwootSupportContextCached("user-123", loader, 1_000);
+    const second = loadChatwootSupportContextCached("user-123", loader, 1_001);
+
+    expect(first).toBe(second);
+    await expect(first).resolves.toMatchObject({
+      customAttributes: { subscription_status: "ACTIVE" },
+    });
+    expect(loader).toHaveBeenCalledTimes(1);
+
+    resetChatwootSession();
+    await loadChatwootSupportContextCached("user-123", loader, 1_002);
+    expect(loader).toHaveBeenCalledTimes(2);
+  });
+
+  it("isolates browser support context by user and bounds retained entries", async () => {
+    const loaders = Array.from({ length: 17 }, (_, index) => vi.fn(async () => ({
+      customAttributes: { clean_pay_user_id: `user-${index}` },
+      managedLabels: [],
+    })));
+
+    for (let index = 0; index < loaders.length; index += 1) {
+      await loadChatwootSupportContextCached(
+        `user-${index}`,
+        loaders[index],
+        1_000,
+      );
+    }
+
+    const currentUser = await loadChatwootSupportContextCached(
+      "user-16",
+      loaders[16],
+      1_001,
+    );
+    expect(currentUser?.customAttributes.clean_pay_user_id).toBe("user-16");
+    expect(loaders[16]).toHaveBeenCalledOnce();
+
+    await loadChatwootSupportContextCached("user-0", loaders[0], 1_001);
+    expect(loaders[0]).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not let an expired rejection delete a newer cache generation", async () => {
+    let rejectExpired!: (error: Error) => void;
+    const expired = new Promise<never>((_resolve, reject) => {
+      rejectExpired = reject;
+    });
+    let resolveCurrent!: (value: {
+      customAttributes: Record<string, string>;
+      managedLabels: [];
+    }) => void;
+    const current = new Promise<{
+      customAttributes: Record<string, string>;
+      managedLabels: [];
+    }>((resolve) => {
+      resolveCurrent = resolve;
+    });
+    const expiredLoader = vi.fn(() => expired);
+    const currentLoader = vi.fn(() => current);
+
+    const expiredLoad = loadChatwootSupportContextCached(
+      "same-user",
+      expiredLoader,
+      1_000,
+    );
+    const currentLoad = loadChatwootSupportContextCached(
+      "same-user",
+      currentLoader,
+      61_000,
+    );
+    rejectExpired(new Error("expired request failed"));
+    await expect(expiredLoad).rejects.toThrow("expired request failed");
+
+    expect(loadChatwootSupportContextCached(
+      "same-user",
+      currentLoader,
+      61_001,
+    )).toBe(currentLoad);
+    expect(currentLoader).toHaveBeenCalledOnce();
+    resolveCurrent({ customAttributes: {}, managedLabels: [] });
+    await expect(currentLoad).resolves.toEqual({
+      customAttributes: {},
+      managedLabels: [],
+    });
+  });
+
+  it("resets before logout and keeps cleanup safe if the third-party SDK throws", () => {
+    const api = chatwootApi();
+    api.reset.mockImplementation(() => {
+      throw new Error("broken iframe");
+    });
+    window.$chatwoot = api;
+    window.cleanPayChatwootAuthorized = true;
+    enterChatwootAuthenticatedMode();
+    identifyChatwootUser(config);
+    document.cookie = "cw_conversation=conversation; Path=/";
+    document.cookie = `cw_user_${config.websiteToken}=contact; Path=/`;
+
+    expect(() => resetChatwootSession()).not.toThrow();
+
+    expect(window.cleanPayChatwootAuthorized).toBe(false);
+    expect(window.cleanPayChatwootIdentity).toBeUndefined();
+    expect(window.localStorage).toHaveLength(0);
+    expect(api.toggleBubbleVisibility).toHaveBeenCalledWith("hide");
+    expect(api.identifier).toBeUndefined();
+    expect(api.user).toBeUndefined();
+    expect(api.hasLoaded).toBe(false);
+    expect(api.resetTriggered).toBe(false);
+    expect(document.cookie).not.toContain("cw_conversation=");
+    expect(document.cookie).not.toContain(`cw_user_${config.websiteToken}=`);
+  });
+
+  it("clears orphaned Chatwoot cookies on a fresh guest page", () => {
+    document.cookie = "cw_conversation=conversation; Path=/";
+    document.cookie = "cw_user_orphaned_token=contact; Path=/";
+
+    enterChatwootGuestMode();
+
+    expect(document.cookie).not.toContain("cw_conversation=");
+    expect(document.cookie).not.toContain("cw_user_orphaned_token=");
+  });
+
+  it("loads the standard SDK once and supports a clean retry after failure", async () => {
+    const failedLoad = loadChatwootSdk(config.baseUrl);
+    const failedScript = document.getElementById("clean-pay-chatwoot-sdk") as HTMLScriptElement;
+    expect(failedScript.src).toBe("https://chat.example.com/packs/js/sdk.js");
+    failedScript.dispatchEvent(new Event("error"));
+    await expect(failedLoad).rejects.toThrow("Support chat failed to load");
+    expect(document.getElementById("clean-pay-chatwoot-sdk")).toBeNull();
+
+    const successfulLoad = loadChatwootSdk(config.baseUrl);
+    const script = document.getElementById("clean-pay-chatwoot-sdk") as HTMLScriptElement;
+    window.chatwootSDK = { run: vi.fn() };
+    script.dispatchEvent(new Event("load"));
+
+    await expect(successfulLoad).resolves.toBeUndefined();
+    await expect(loadChatwootSdk(config.baseUrl)).resolves.toBeUndefined();
+    expect(document.querySelectorAll("#clean-pay-chatwoot-sdk")).toHaveLength(1);
+  });
+});

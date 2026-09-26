@@ -1,238 +1,99 @@
 "use client";
 
-import { useRef, useState } from "react";
-import type { FormEvent } from "react";
-import { useRouter } from "next/navigation";
-import { Button } from "primereact/button";
-import { Column } from "primereact/column";
-import { DataTable } from "primereact/datatable";
-import { InputText } from "primereact/inputtext";
-import { Message } from "primereact/message";
 import { ProgressBar } from "primereact/progressbar";
 import { Tag } from "primereact/tag";
 
 import { LinkButton } from "@/frontend/components/prime/link-button";
-import { SubscriptionDeviceDetails } from "@/frontend/components/subscription-device-details";
 import {
-  formatSubscriptionDevice,
-} from "@/frontend/lib/device-display";
+  CabinetDevicesSection,
+  CabinetPaymentHistorySection,
+} from "@/frontend/components/cabinet-responsive-sections";
 import { hasRenewOffer } from "@/frontend/lib/subscription-offers";
-import type {
-  DevicesResponse,
-  SubscriptionOffersResponse,
-} from "@/shared/domain/subscriptions";
 import type { CabinetViewModel } from "@/application/models/cabinet";
-import {
-  activatePromocodeAction,
-  deleteAllDevicesAction,
-  deleteDeviceAction,
-  reissueSubscriptionAction,
-} from "@/app/actions/cabinet";
-import { logoutAction } from "@/app/actions/session";
+import { accountLinkPath } from "@/shared/auth/account-setup-flow";
+import { providerSessionRecoveryPath } from "@/shared/auth/session-navigation";
 import {
   detailValue,
-  deviceDeleteLabel,
   formatBytes,
   formatDate,
   formatDeviceLimit,
   formatTrafficLimit,
-  paymentStatusLabel,
   statusLabel,
   statusSeverity,
   trafficLimitStrategyLabel,
-  type CabinetUser,
-  type CurrentSubscription,
-  type PaymentRecord,
-  type SubscriptionDeviceView,
-  type SupportSettings,
 } from "@/frontend/components/cabinet-presentation";
+import {
+  selectCabinetPanelData,
+  selectCabinetPanelPresentation,
+} from "@/frontend/components/cabinet-panel-transitions";
 import { DetailLine, Metric } from "@/frontend/components/cabinet-view-parts";
+import {
+  Button,
+  Message,
+} from "@/frontend/components/sakai/form-foundation";
+import { CabinetPromocodeFields } from "@/frontend/components/cabinet-promocode-fields";
+import { useCabinetPanelController } from "@/frontend/hooks/use-cabinet-panel-controller";
 
 export function CabinetPanel({ model }: { model: CabinetViewModel }) {
-  const router = useRouter();
-  const initial = model.status === "ready" ? model : null;
-  const user: CabinetUser | null = initial?.user ?? null;
-  const subscription: CurrentSubscription | null = initial?.subscription ?? null;
-  const offers: SubscriptionOffersResponse | null = initial?.offers ?? null;
-  const devices: DevicesResponse | null = initial?.devices ?? null;
-  const payments: PaymentRecord[] = initial?.payments ?? [];
-  const paymentsError = initial?.paymentsWarning ?? null;
-  const support: SupportSettings | null = initial?.support ?? null;
-  const error = model.status === "error" ? model.message : null;
-  const subscriptionError = initial?.subscriptionError ?? null;
-  const [copyStatus, setCopyStatus] = useState<string | null>(null);
-  const [actionMessage, setActionMessage] = useState<string | null>(null);
-  const [promocodeMessage, setPromocodeMessage] = useState<string | null>(null);
-  const [pendingAction, setPendingAction] = useState<string | null>(null);
-  const pendingActionRef = useRef<string | null>(null);
-  const [promocode, setPromocode] = useState("");
-
-  function beginPendingAction(action: string) {
-    if (pendingActionRef.current) {
-      return false;
-    }
-
-    pendingActionRef.current = action;
-    setPendingAction(action);
-    return true;
-  }
-
-  function finishPendingAction(action: string) {
-    if (pendingActionRef.current !== action) {
-      return;
-    }
-
-    pendingActionRef.current = null;
-    setPendingAction(null);
-  }
-
-  async function logout() {
-    await logoutAction();
-  }
-
-  async function copySubscriptionUrl() {
-    if (!subscription?.url) {
-      return;
-    }
-
-    try {
-      await navigator.clipboard.writeText(subscription.url);
-      setCopyStatus("Ссылка скопирована");
-    } catch {
-      setCopyStatus("Не удалось скопировать");
-    }
-  }
-
-  async function deleteDevice(hwid: string) {
-    if (pendingActionRef.current) {
-      return;
-    }
-
-    const confirmed = window.confirm("Удалить это устройство из подписки?");
-
-    if (!confirmed) {
-      return;
-    }
-
-    const action = `delete-device-${hwid}`;
-    if (!beginPendingAction(action)) {
-      return;
-    }
-    setActionMessage(null);
-
-    try {
-      const result = await deleteDeviceAction(hwid);
-      setActionMessage(result.message);
-      if (result.status === "success") router.refresh();
-    } catch (err) {
-      setActionMessage(err instanceof Error ? err.message : "Не удалось удалить устройство.");
-    } finally {
-      finishPendingAction(action);
-    }
-  }
-
-  async function deleteAllDevices() {
-    if (pendingActionRef.current) {
-      return;
-    }
-
-    const confirmed = window.confirm("Удалить все устройства из подписки?");
-
-    if (!confirmed) {
-      return;
-    }
-
-    const action = "delete-all-devices";
-    if (!beginPendingAction(action)) {
-      return;
-    }
-    setActionMessage(null);
-
-    try {
-      const result = await deleteAllDevicesAction();
-      setActionMessage(result.message);
-      if (result.status === "success") router.refresh();
-    } catch (err) {
-      setActionMessage(err instanceof Error ? err.message : "Не удалось удалить устройства.");
-    } finally {
-      finishPendingAction(action);
-    }
-  }
-
-  async function reissueSubscription() {
-    if (pendingActionRef.current) {
-      return;
-    }
-
-    const confirmed = window.confirm(
-      "Перевыпуск подписки отключит все текущие устройства. Продолжить?",
-    );
-
-    if (!confirmed) {
-      return;
-    }
-
-    const action = "reissue";
-    if (!beginPendingAction(action)) {
-      return;
-    }
-    setActionMessage(null);
-
-    try {
-      const result = await reissueSubscriptionAction();
-      setActionMessage(result.message);
-      if (result.status === "success") router.refresh();
-    } catch (err) {
-      setActionMessage(err instanceof Error ? err.message : "Не удалось перевыпустить подписку.");
-    } finally {
-      finishPendingAction(action);
-    }
-  }
-
-  async function activatePromocode(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-
-    if (pendingActionRef.current) {
-      return;
-    }
-
-    const code = promocode.trim();
-
-    if (!code) {
-      setPromocodeMessage("Введите промокод.");
-      return;
-    }
-
-    const action = "promocode";
-    if (!beginPendingAction(action)) {
-      return;
-    }
-    setPromocodeMessage(null);
-
-    try {
-      const result = await activatePromocodeAction(code);
-      setPromocodeMessage(result.message);
-      if (result.status === "success") {
-        setPromocode("");
-        router.refresh();
-      }
-    } catch (err) {
-      setPromocodeMessage(err instanceof Error ? err.message : "Не удалось активировать промокод.");
-    } finally {
-      finishPendingAction(action);
-    }
-  }
+  const {
+    devices,
+    error,
+    errorRecovery,
+    offers,
+    paymentHistoryStatus,
+    payments,
+    subscription,
+    subscriptionError,
+    support,
+    user,
+  } = selectCabinetPanelData(model);
+  const {
+    actionMessage,
+    activatePromocode,
+    copyStatus,
+    copySubscriptionUrl,
+    deleteAllDevices,
+    deleteDevice,
+    logout,
+    pendingAction,
+    promocode,
+    promocodeMessage,
+    reissueSubscription,
+    setPromocode,
+  } = useCabinetPanelController({
+    paymentHistoryStatus,
+    subscription,
+  });
 
   if (error) {
     return (
       <div className="card">
         <Message severity="error" text={error} />
-        <div className="mt-3">
+        <div className="mt-3 flex flex-wrap gap-2">
           <LinkButton
             external
-            href="/login?redirect_to=%2Fcabinet"
-            label="Войти"
+            href="/cabinet"
+            label="Повторить"
           />
+          {errorRecovery === "recover" ? (
+            <LinkButton
+              external
+              href={providerSessionRecoveryPath("/cabinet")}
+              label="Восстановить доступ"
+              outlined
+            />
+          ) : null}
+          {errorRecovery === "merge" ? (
+            // The provider-session recovery route cannot resolve an ownership
+            // conflict (it would redirect straight back here), so go to the
+            // account-link page that actually finishes the merge.
+            <LinkButton
+              external
+              href={`${accountLinkPath("/cabinet")}&auth=telegram_merge_required`}
+              label="Объединить аккаунты"
+              outlined
+            />
+          ) : null}
         </div>
       </div>
     );
@@ -242,31 +103,30 @@ export function CabinetPanel({ model }: { model: CabinetViewModel }) {
     return <Message severity="info" text="Загрузка кабинета..." />;
   }
 
-  const usedTraffic = subscription?.used_traffic_bytes ?? null;
-  const trafficLimit = subscription?.traffic_limit ?? 0;
-  const usagePercent =
-    usedTraffic !== null && trafficLimit > 0
-      ? Math.min(100, Math.round((usedTraffic / trafficLimit) * 100))
-      : null;
-  const deviceCount = devices?.current_count ?? null;
-  const maxDevices = devices?.max_count ?? subscription?.device_limit ?? null;
-  const deviceViews: SubscriptionDeviceView[] =
-    devices?.devices.map((device, index) => {
-      const presentation = formatSubscriptionDevice(device);
-
-      return {
-        device,
-        presentation,
-        deleteLabel: deviceDeleteLabel(presentation, index + 1),
-      };
-    }) ?? [];
-  const hasEmail = Boolean(user.email);
-  const isEmailVerified = hasEmail && Boolean(user.emailVerified ?? user.is_email_verified);
-  const shouldShowVerifyEmail = hasEmail && !isEmailVerified;
-  const shouldShowLinkAccount = !user.email || !user.telegramId;
+  const {
+    deviceCount,
+    hasEmail,
+    isEmailVerified,
+    maxDevices,
+    shouldShowLinkAccount,
+    shouldShowVerifyEmail,
+    usagePercent,
+    usedTraffic,
+  } = selectCabinetPanelPresentation({ devices, subscription, user });
 
   return (
     <div className="grid">
+      {shouldShowVerifyEmail ? (
+        <div className="col-12">
+          <Message
+            severity="warn"
+            text={`E-mail${user.email ? ` ${user.email}` : ""} ещё не подтверждён. Вернитесь к вводу кода из письма или запросите новый код — доступ к кабинету при этом не ограничен.`}
+          />
+          <div className="mt-2">
+            <LinkButton href="/verify-email" label="Ввести код или запросить новый" outlined />
+          </div>
+        </div>
+      ) : null}
       <div className="col-12 lg:col-6 xl:col-3">
         <Metric icon="pi pi-shield" label="Подписка" tone="blue" value={subscription?.plan_name ?? "Не активна"} />
       </div>
@@ -376,7 +236,7 @@ export function CabinetPanel({ model }: { model: CabinetViewModel }) {
 
       <div className="col-12 xl:col-4">
         <div className="card">
-          <h5>Профиль</h5>
+          <h2 className="text-xl">Профиль</h2>
           <div className="grid">
             <div className="col-12">
               <DetailLine label="E-mail" value={user.email ?? "Не привязан"} />
@@ -406,26 +266,15 @@ export function CabinetPanel({ model }: { model: CabinetViewModel }) {
 
       <div className="col-12">
         <div className="card">
-          <h5>Промокод</h5>
+          <h2 className="text-xl">Промокод</h2>
           {promocodeMessage ? <Message severity="info" text={promocodeMessage} /> : null}
           <form className="mt-3 flex w-full flex-column gap-2 md:w-30rem" onSubmit={activatePromocode}>
-            <label className="text-sm font-medium text-700" htmlFor="promocode">
-              Введите промокод
-            </label>
-            <div className="p-inputgroup">
-              <InputText
-                id="promocode"
-                onChange={(event) => setPromocode(event.target.value)}
-                placeholder="Введите код"
-                value={promocode}
-              />
-              <Button
-                disabled={pendingAction !== null}
-                label="Активировать"
-                loading={pendingAction === "promocode"}
-                type="submit"
-              />
-            </div>
+            <CabinetPromocodeFields
+              disabled={pendingAction !== null}
+              loading={pendingAction === "promocode"}
+              onValueChange={setPromocode}
+              value={promocode}
+            />
           </form>
         </div>
       </div>
@@ -433,7 +282,7 @@ export function CabinetPanel({ model }: { model: CabinetViewModel }) {
       {subscription ? (
       <div className="col-12 xl:col-6">
           <div className="card">
-            <h5>Детали подписки</h5>
+            <h2 className="text-xl">Детали подписки</h2>
             {actionMessage ? <Message severity="info" text={actionMessage} /> : null}
             <div className="grid">
               <div className="col-12 md:col-6">
@@ -460,162 +309,23 @@ export function CabinetPanel({ model }: { model: CabinetViewModel }) {
         ) : null}
 
       {devices ? (
-      <div className="col-12 xl:col-6">
-        <div className="card">
-          <h5>Устройства</h5>
-          {deviceViews.length > 0 ? (
-            <div className="cabinet-mobile-list">
-              {deviceViews.map(({ device, presentation, deleteLabel }) => (
-                <article className="cabinet-mobile-record" key={device.hwid}>
-                  <div className="cabinet-mobile-record__header">
-                    <div>
-                      <div className="cabinet-mobile-record__title">
-                        {presentation.summary}
-                      </div>
-                    </div>
-                    <Button
-                      aria-label={deleteLabel}
-                      disabled={pendingAction !== null}
-                      icon="pi pi-trash"
-                      loading={pendingAction === `delete-device-${device.hwid}`}
-                      onClick={() => deleteDevice(device.hwid)}
-                      outlined
-                      severity="danger"
-                      type="button"
-                    />
-                  </div>
-                  <SubscriptionDeviceDetails presentation={presentation} />
-                </article>
-              ))}
-            </div>
-          ) : (
-            <Message severity="info" text="Подключенных устройств пока нет." />
-          )}
-          <DataTable
-            className="cabinet-desktop-table"
-            emptyMessage="Подключенных устройств пока нет."
-            responsiveLayout="scroll"
-            value={deviceViews}
-          >
-            <Column
-              body={(view: SubscriptionDeviceView) =>
-                view.presentation.deviceType
-              }
-              header="Тип устройства"
-            />
-            <Column
-              body={(view: SubscriptionDeviceView) => view.presentation.os}
-              header="ОС"
-            />
-            <Column
-              body={(view: SubscriptionDeviceView) => view.presentation.client}
-              header="Клиент"
-            />
-            <Column
-              body={(view: SubscriptionDeviceView) => (
-                <Button
-                  aria-label={view.deleteLabel}
-                  disabled={pendingAction !== null}
-                  icon="pi pi-trash"
-                  label="Удалить"
-                  loading={pendingAction === `delete-device-${view.device.hwid}`}
-                  onClick={() => deleteDevice(view.device.hwid)}
-                  outlined
-                  severity="danger"
-                  size="small"
-                  type="button"
-                />
-              )}
-              header=""
-            />
-          </DataTable>
-        </div>
-      </div>
+        <CabinetDevicesSection
+          devices={devices}
+          onDelete={deleteDevice}
+          pendingAction={pendingAction}
+        />
       ) : null}
 
-      <div className="col-12">
-      <div className="card">
-        <h5>История платежей</h5>
-        {paymentsError ? <Message severity="warn" text={paymentsError} /> : null}
-        {payments.length > 0 ? (
-          <div className="cabinet-mobile-list">
-            {payments.map((payment) => (
-              <article className="cabinet-mobile-record" key={payment.payment_id}>
-                <div className="cabinet-mobile-record__header">
-                  <div>
-                    <div className="cabinet-mobile-record__title">{payment.plan_name ?? payment.purchase_type}</div>
-                    <div className="cabinet-mobile-record__id">{payment.payment_id}</div>
-                  </div>
-                  <Tag
-                    severity={payment.is_free ? "info" : statusSeverity(payment.status)}
-                    value={payment.is_free ? "Бесплатно" : paymentStatusLabel(payment.status)}
-                  />
-                </div>
-                <dl className="cabinet-mobile-record__details">
-                  <div>
-                    <dt>Дата</dt>
-                    <dd>{formatDate(payment.created_at)}</dd>
-                  </div>
-                  <div>
-                    <dt>Gateway</dt>
-                    <dd>{payment.gateway_type}</dd>
-                  </div>
-                  <div>
-                    <dt>Сумма</dt>
-                    <dd>
-                      {payment.final_amount} {payment.currency}
-                    </dd>
-                  </div>
-                </dl>
-              </article>
-            ))}
-          </div>
-        ) : !paymentsError ? (
-          <Message severity="info" text="Платежей через web-кабинет пока нет." />
-        ) : null}
-        <DataTable
-          className="cabinet-desktop-table"
-          emptyMessage={paymentsError ?? "Платежей через web-кабинет пока нет."}
-          responsiveLayout="scroll"
-          value={payments}
-        >
-          <Column
-            body={(payment: PaymentRecord) => (
-              <div>
-                <div className="font-medium">{payment.plan_name ?? payment.purchase_type}</div>
-                <div className="mt-1 text-xs text-500 break-all">{payment.payment_id}</div>
-              </div>
-            )}
-            header="Платёж"
-          />
-          <Column body={(payment: PaymentRecord) => formatDate(payment.created_at)} header="Дата" />
-          <Column field="gateway_type" header="Gateway" />
-          <Column
-            body={(payment: PaymentRecord) => (
-              <span>
-                {payment.final_amount} {payment.currency}
-              </span>
-            )}
-            header="Сумма"
-          />
-          <Column
-            body={(payment: PaymentRecord) => (
-              <Tag
-                severity={payment.is_free ? "info" : statusSeverity(payment.status)}
-                value={payment.is_free ? "Бесплатно" : paymentStatusLabel(payment.status)}
-              />
-            )}
-            header="Статус"
-          />
-        </DataTable>
-      </div>
-      </div>
+      <CabinetPaymentHistorySection
+        payments={payments}
+        status={paymentHistoryStatus}
+      />
 
       {support?.enabled &&
       (support.email || support.telegramUsername || support.faqUrl) ? (
       <div className="col-12">
         <div className="card">
-          <h5>Поддержка</h5>
+          <h2 className="text-xl">Поддержка</h2>
           <div className="flex flex-wrap gap-2">
             {support.email ? (
               <LinkButton href={`mailto:${support.email}`} label="Написать на почту" outlined />

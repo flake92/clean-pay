@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 const sessionMock = vi.hoisted(() => ({
   getCurrentSession: vi.fn(),
@@ -32,7 +32,7 @@ function jsonResponse(body: unknown, setCookie: string[] = []) {
 
 describeWithPostgres("Telegram recovery PostgreSQL serialization", () => {
   let prisma: typeof import("@/backend/database/prisma")["prisma"];
-  let getAuthorizedRemnashopTokens: typeof import("@/backend/integrations/remnashop/client")["getAuthorizedRemnashopTokens"];
+  let getAuthorizedRemnashopTokens: typeof import("@/app/_composition/telegram-session-recovery")["getAuthorizedRemnashopTokens"];
   let revealRemnashopToken: typeof import("@/backend/integrations/remnashop/token-protection")["revealRemnashopToken"];
   let protectRemnashopToken: typeof import("@/backend/integrations/remnashop/token-protection")["protectRemnashopToken"];
   let paymentUpstreamOwnerHash: typeof import("@/backend/payments/hashes")["paymentUpstreamOwnerHash"];
@@ -45,7 +45,7 @@ describeWithPostgres("Telegram recovery PostgreSQL serialization", () => {
 
     ({ prisma } = await import("@/backend/database/prisma"));
     ({ getAuthorizedRemnashopTokens } = await import(
-      "@/backend/integrations/remnashop/client"
+      "@/app/_composition/telegram-session-recovery"
     ));
     ({ revealRemnashopToken, protectRemnashopToken } = await import(
       "@/backend/integrations/remnashop/token-protection"
@@ -116,13 +116,23 @@ describeWithPostgres("Telegram recovery PostgreSQL serialization", () => {
           });
         }
 
+        if (url.endsWith("/subscription/current")) {
+          return jsonResponse(null);
+        }
+
         throw new Error(`Unexpected request: ${url}`);
       }),
     );
   }, 120_000);
 
+  beforeEach(() => {
+    vi.stubEnv("REMNAWAVE_API_BASE_URL", "https://remnawave.test");
+    vi.stubEnv("REMNAWAVE_TOKEN", "test-remnawave-token");
+  });
+
   afterAll(async () => {
     vi.unstubAllGlobals();
+    vi.unstubAllEnvs();
 
     if (prisma && userIds.length > 0) {
       await prisma.paymentOperation.deleteMany({
@@ -204,6 +214,9 @@ describeWithPostgres("Telegram recovery PostgreSQL serialization", () => {
         remnashopRefreshTokenEncrypted: protectRemnashopToken("stale-refresh"),
         remnashopAccessExpiresAt: new Date(Date.now() + 10 * 60_000),
         remnashopRefreshExpiresAt: new Date(Date.now() + 60 * 60_000),
+        remnashopRefreshClaimTokenHash: "stale-claim",
+        remnashopRefreshLeaseExpiresAt: new Date(Date.now() + 60_000),
+        remnashopRefreshRecoveryEncrypted: protectRemnashopToken("stale-recovery"),
       },
     });
     const operation = await prisma.paymentOperation.create({
@@ -235,9 +248,10 @@ describeWithPostgres("Telegram recovery PostgreSQL serialization", () => {
     let issued = 0;
     let mergeCommitted = false;
     let mergeCalls = 0;
+    let mergeRequest: Record<string, unknown> | null = null;
     vi.stubGlobal(
       "fetch",
-      vi.fn(async (input: string | URL | Request) => {
+      vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
         const url = String(input);
 
         if (url.endsWith("/auth/telegram")) {
@@ -277,6 +291,7 @@ describeWithPostgres("Telegram recovery PostgreSQL serialization", () => {
         if (url.endsWith("/users/merge?dry_run=false")) {
           mergeCalls += 1;
           mergeCommitted = true;
+          mergeRequest = JSON.parse(String(init?.body)) as Record<string, unknown>;
 
           return jsonResponse({
             dry_run: false,
@@ -295,6 +310,11 @@ describeWithPostgres("Telegram recovery PostgreSQL serialization", () => {
           });
         }
 
+
+        if (url.endsWith("/subscription/current")) {
+          return jsonResponse(null);
+        }
+
         throw new Error(`Unexpected request: ${url}`);
       }),
     );
@@ -310,6 +330,13 @@ describeWithPostgres("Telegram recovery PostgreSQL serialization", () => {
       1,
     );
     expect(mergeCalls).toBe(1);
+    expect(mergeRequest).toMatchObject({
+      source_user_id: Number(sourceUpstreamId),
+      target_user_id: Number(targetUpstreamId),
+      email_resolution: "KEEP_TARGET",
+      telegram_resolution: "KEEP_SOURCE",
+      payment_resolution: "REKEY_SOURCE",
+    });
 
     const [storedUser, storedOperation, storedHistory, storedSibling] =
       await Promise.all([
@@ -342,21 +369,24 @@ describeWithPostgres("Telegram recovery PostgreSQL serialization", () => {
     expect(storedHistory.generation).toBe(8);
     expect(storedSibling.remnashopAccessTokenEncrypted).toBeNull();
     expect(storedSibling.remnashopRefreshTokenEncrypted).toBeNull();
+    expect(storedSibling.remnashopRefreshClaimTokenHash).toBeNull();
+    expect(storedSibling.remnashopRefreshLeaseExpiresAt).toBeNull();
+    expect(storedSibling.remnashopRefreshRecoveryEncrypted).toBeNull();
   }, 60_000);
 
   it("merges a durable pending e-mail owner when the current local owner already points to Telegram", async () => {
     const suffix = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
-    const sourceUpstreamId = "301";
-    const targetUpstreamId = "302";
+    const durableTargetUpstreamId = "301";
+    const telegramSourceUpstreamId = "302";
     const email = `pending-owner-${suffix}@example.com`;
     const telegramId = `765432${Date.now().toString().slice(-5)}`;
     const [currentUser, emailOwner] = await Promise.all([
       prisma.webUser.create({
         data: {
-          remnashopUserId: targetUpstreamId,
+          remnashopUserId: telegramSourceUpstreamId,
           emailVerified: false,
           authPending: true,
-          pendingRemnashopUserId: sourceUpstreamId,
+          pendingRemnashopUserId: durableTargetUpstreamId,
           pendingRemnashopEmail: email,
           telegramId,
           telegramUsername: "pending_merge_user",
@@ -364,7 +394,7 @@ describeWithPostgres("Telegram recovery PostgreSQL serialization", () => {
       }),
       prisma.webUser.create({
         data: {
-          remnashopUserId: sourceUpstreamId,
+          remnashopUserId: durableTargetUpstreamId,
           email,
           emailVerified: true,
         },
@@ -387,15 +417,24 @@ describeWithPostgres("Telegram recovery PostgreSQL serialization", () => {
 
     let mergeCommitted = false;
     let issued = 0;
+    let mergeRequest: Record<string, unknown> | null = null;
+    let remnawaveSync: Record<string, unknown> | null = null;
+    let remnawaveIdentity: Record<string, unknown> = {
+      uuid: `rw-${suffix}`,
+      email,
+      telegramId: null,
+    };
     vi.stubGlobal(
       "fetch",
-      vi.fn(async (input: string | URL | Request) => {
+      vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
         const url = String(input);
 
         if (url.endsWith("/auth/telegram")) {
           issued += 1;
           const accessToken = jwt({
-            sub: targetUpstreamId,
+            sub: mergeCommitted
+              ? durableTargetUpstreamId
+              : telegramSourceUpstreamId,
             exp: 1_900_002_000 + issued,
           });
 
@@ -428,13 +467,14 @@ describeWithPostgres("Telegram recovery PostgreSQL serialization", () => {
 
         if (url.endsWith("/users/merge?dry_run=false")) {
           mergeCommitted = true;
+          mergeRequest = JSON.parse(String(init?.body)) as Record<string, unknown>;
 
           return jsonResponse({
             dry_run: false,
-            source_user_id: Number(sourceUpstreamId),
-            target_user_id: Number(targetUpstreamId),
+            source_user_id: Number(telegramSourceUpstreamId),
+            target_user_id: Number(durableTargetUpstreamId),
             target: {
-              id: Number(targetUpstreamId),
+              id: Number(durableTargetUpstreamId),
               email,
               telegram_id: Number(telegramId),
               is_email_verified: true,
@@ -444,6 +484,21 @@ describeWithPostgres("Telegram recovery PostgreSQL serialization", () => {
             conflicts: [],
             requires_relogin: true,
           });
+        }
+
+
+        if (url.endsWith("/subscription/current")) {
+          return jsonResponse({ user_remna_id: `rw-${suffix}` });
+        }
+
+        if (url.endsWith("/users") && init?.method === "PATCH") {
+          remnawaveSync = JSON.parse(String(init.body)) as Record<string, unknown>;
+          remnawaveIdentity = { ...remnawaveSync };
+          return jsonResponse({ response: {} });
+        }
+
+        if (url.endsWith(`/users/rw-${suffix}`) && (!init?.method || init.method === "GET")) {
+          return jsonResponse({ response: remnawaveIdentity });
         }
 
         throw new Error(`Unexpected request: ${url}`);
@@ -456,7 +511,7 @@ describeWithPostgres("Telegram recovery PostgreSQL serialization", () => {
       session: {
         user: {
           id: currentUser.id,
-          remnashopUserId: targetUpstreamId,
+          remnashopUserId: durableTargetUpstreamId,
           email,
           emailVerified: true,
           authPending: false,
@@ -472,13 +527,25 @@ describeWithPostgres("Telegram recovery PostgreSQL serialization", () => {
     ]);
     expect(deletedSource).toBe(0);
     expect(storedCurrent).toMatchObject({
-      remnashopUserId: targetUpstreamId,
+      remnashopUserId: durableTargetUpstreamId,
       email,
       emailVerified: true,
       authPending: false,
       pendingRemnashopUserId: null,
       pendingRemnashopEmail: null,
       telegramId,
+    });
+    expect(mergeRequest).toMatchObject({
+      source_user_id: Number(telegramSourceUpstreamId),
+      target_user_id: Number(durableTargetUpstreamId),
+      email_resolution: "KEEP_TARGET",
+      telegram_resolution: "KEEP_SOURCE",
+      payment_resolution: "REKEY_SOURCE",
+    });
+    expect(remnawaveSync).toEqual({
+      uuid: `rw-${suffix}`,
+      email,
+      telegramId: Number(telegramId),
     });
   }, 60_000);
 });

@@ -1,0 +1,124 @@
+{
+  "schemaVersion": 1,
+  "baselineId": "f5cb6f543d85256e7733a1ade6a4f451d86cf378-journey-v5",
+  "status": "accepted_for_gate",
+  "source": {
+    "revision": "f5cb6f543d85256e7733a1ade6a4f451d86cf378",
+    "imageDigest": "sha256:6909a1b980f72038c732d02f1e29074b16be2c2ce333e8c02ba569d3f2324ded",
+    "imageTag": "clean-pay:baseline-f5cb6f543d85-journey-synthetic-v1-pristine",
+    "migrationImageDigest": "sha256:5092b1aaf6cbc61722cf9ddbfb17a99dc0c1011b3734865b04931eb40adabc3b",
+    "migrationImageTag": "clean-pay-migration:baseline-f5cb6f543d85-journey-synthetic-v1-v2-pristine",
+    "publicBuildContract": {
+      "version": "1",
+      "sha256": "5dc1c21d1db2b433736d50c008065d9dfa3adc1ff338fb403569913881b80673"
+    },
+    "fixtureContract": {
+      "version": "journey-v5",
+      "sha256": "7b62f993647d20582018297505f8557d201962a9bd768a5438dd3b8fa06cb5f9"
+    },
+    "browser": {
+      "engine": "chromium",
+      "version": "151.0.7922.34",
+      "playwright": "1.62.1",
+      "launchArgs": [
+        "--disable-gpu",
+        "--disable-gpu-compositing",
+        "--disable-gpu-rasterization",
+        "--disable-skia-runtime-opts",
+        "--disable-lcd-text",
+        "--disable-font-subpixel-positioning",
+        "--font-render-hinting=none",
+        "--disable-oop-rasterization",
+        "--ignore-certificate-errors",
+        "--host-resolver-rules=MAP challenges.cloudflare.com <isolated-loopback>, MAP chatwoot.browser.clean-pay.dev <isolated-loopback>, MAP checkout.browser.clean-pay.dev <isolated-loopback>, MAP oauth.telegram.org <isolated-loopback>, MAP panel.ci.clean-pay.dev <isolated-loopback>, MAP pay.ci.clean-pay.dev <isolated-loopback>, MAP remnashop.browser.clean-pay.dev <isolated-loopback>, MAP subscription.ci.clean-pay.dev <isolated-loopback>, EXCLUDE 127.0.0.1, MAP * ~NOTFOUND"
+      ],
+      "syntheticHostnames": [
+        "challenges.cloudflare.com",
+        "chatwoot.browser.clean-pay.dev",
+        "checkout.browser.clean-pay.dev",
+        "oauth.telegram.org",
+        "panel.ci.clean-pay.dev",
+        "pay.ci.clean-pay.dev",
+        "remnashop.browser.clean-pay.dev",
+        "subscription.ci.clean-pay.dev"
+      ],
+      "tlsPolicy": {
+        "connectProxy": "loopback-only-exact-host-connect-443",
+        "mode": "ignore-ephemeral-caddy-ca-errors",
+        "scope": "isolated-synthetic-hostnames",
+        "unexpectedDns": "fail-closed"
+      }
+    }
+  },
+  "syntheticReset": {
+    "caseScoped": true,
+    "caseCount": 18,
+    "sequence": "strictly increasing 1..18",
+    "aggregateFormat": "project\\0journey\\0canonical-json\\n",
+    "aggregateSha256": "9b6f63d2aae764dc8067920d0c4308dfad52a99d06a3a348a5079509983e44b8"
+  },
+  "captureMatrix": {
+    "projects": [
+      "journey-390x844",
+      "journey-768x1024",
+      "journey-1440x900"
+    ],
+    "journeyCasesPerProject": [
+      "public-responsive-keyboard-install-offline-support",
+      "email-register-verify-and-login",
+      "telegram-oidc-cabinet-profile-link-referral-passkey",
+      "email-account-links-and-merges-telegram",
+      "tariffs-payment-returns-extend-idempotency",
+      "telegram-webapp-browser-boundary"
+    ],
+    "browserCaseCount": 18,
+    "checkpointPngCount": 105,
+    "rawArtifactCount": 141,
+    "contractTests": [
+      "DB observer refuses every database outside an exact disposable journey scope",
+      "accepts exact PII-free journey boundary schemas",
+      "rejects unknown labels, extra fields, PII, and lifecycle near misses",
+      "queries the callback receipt at its exact path scope",
+      "projects generated journey values by referential symbol while retaining structure",
+      "keeps stable journey payload fields and dynamic formats observable",
+      "does not apply generated-value projection outside the exact journey envelope",
+      "projects only the exact approved first-Tab skip-link state",
+      "accepts exact pixels only inside the declared skip-link paint bounds",
+      "keeps screenshot route, checkpoint, focus, and style near misses fail-closed",
+      "publishes no canonical baseline and refuses a reused capture staging directory",
+      "validates OIDC PKCE, Basic auth, redirect, single use, and sanitized ledger order",
+      "rejects authorize and token contract near misses",
+      "two reset/seed cycles restore every mutable provider and OIDC state",
+      "preserves a verified email identity across login and isolates Telegram auth",
+      "enforces synthetic credentials and models merge, password, and Remnawave identity DTOs",
+      "accepts only exact single-use Turnstile action tokens and synthetic secret",
+      "payment idempotency survives lost and rate-limited committed responses and rejects key reuse",
+      "Chatwoot contact probe validates the synthetic inbox and records only credential shape",
+      "emits an exact redacted HAR 1.2 contract",
+      "rejects every HAR field that does not derive from raw redacted evidence",
+      "materializes two deterministic self-contained role environments",
+      "refuses external env sources and leaves no role files",
+      "preserves only the exact fixture-owned Turnstile state byte-for-byte",
+      "rejects wrong origins and extra or unsafe fixture storage keys",
+      "rejects malformed, extended, or non-sequential Turnstile state"
+    ],
+    "contractTestCount": 26
+  },
+  "comparison": {
+    "rawArtifactsPreserved": true,
+    "pngEquality": "byte-exact except the exact keyboard skip-link paint-bounds policy",
+    "har": "HAR 1.2 fields derive exactly from the redacted recorder before projection",
+    "serverActions": "count, order, payload digest, status, and provider mutation effects are exact",
+    "databaseEffects": "table names and row counts are exact; no row values are captured"
+  },
+  "artifactSet": {
+    "artifactCount": 141,
+    "aggregateSha256": "948ba842ca0832972ba71abeb151c3d6d0d1f9a3c83e7b8d10b6fb0b7d9c4e2e",
+    "aggregateFormat": "sorted path\\0bytes\\0sha256\\n"
+  },
+  "inventory": {
+    "file": "artifact-inventory.json",
+    "sha256": "41ac0df78d30eae2843237121187a03090c66a7ad0771128fcc8e75a966277e7"
+  },
+  "completionMarker": "written only after the locked Playwright command exits successfully"
+}

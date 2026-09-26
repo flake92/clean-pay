@@ -1,7 +1,10 @@
-import { loadSupportViewModel } from "@/application/support/load-support";
-import { productionSupportReader } from "@/backend/integrations/support/support-reader";
+import {
+  loadSupportViewModel,
+  supportPageDescription,
+} from "@/application/support/load-support";
+import { productionSupportReader } from "@/app/_composition/support-runtime";
 import { AppShell } from "@/app/_components/app-shell";
-import { PageHeader } from "@/frontend/components/layout";
+import { PageHeader } from "@/frontend/components/page-header";
 import { SupportPanel } from "@/frontend/components/support-panel";
 
 export default function SupportPage() {
@@ -11,7 +14,7 @@ export default function SupportPage() {
     <AppShell>
       <div className="grid max-w-4xl gap-6">
         <PageHeader
-          description="Контакты поддержки пока не опубликованы."
+          description={supportPageDescription(support)}
           title="Поддержка"
         />
         <SupportPanel support={support} />

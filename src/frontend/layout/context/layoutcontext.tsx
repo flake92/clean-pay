@@ -1,39 +1,51 @@
-'use client';
-import { useState, createContext } from 'react';
-import { LayoutState, ChildContainerProps, LayoutContextProps } from '@/frontend/types';
+"use client";
+
+import { createContext, useState } from "react";
+
+import type {
+  ChildContainerProps,
+  LayoutContextProps,
+  LayoutState,
+} from "@/frontend/types";
+
 export const LayoutContext = createContext({} as LayoutContextProps);
 
 export const LayoutProvider = ({ children }: ChildContainerProps) => {
-    const [layoutState, setLayoutState] = useState<LayoutState>({
-        staticMenuDesktopInactive: false,
-        overlayMenuActive: false,
-        profileSidebarVisible: false,
-        staticMenuMobileActive: false,
-        menuHoverActive: false
-    });
+  const [layoutState, setLayoutState] = useState<LayoutState>({
+    staticMenuDesktopInactive: false,
+    profileSidebarVisible: false,
+    staticMenuMobileActive: false,
+  });
 
-    const onMenuToggle = () => {
-        if (isDesktop()) {
-            setLayoutState((prevLayoutState) => ({ ...prevLayoutState, staticMenuDesktopInactive: !prevLayoutState.staticMenuDesktopInactive }));
-        } else {
-            setLayoutState((prevLayoutState) => ({ ...prevLayoutState, staticMenuMobileActive: !prevLayoutState.staticMenuMobileActive }));
-        }
-    };
+  const onMenuToggle = () => {
+    if (window.innerWidth > 991) {
+      setLayoutState((previous) => ({
+        ...previous,
+        staticMenuDesktopInactive: !previous.staticMenuDesktopInactive,
+      }));
+    } else {
+      setLayoutState((previous) => ({
+        ...previous,
+        staticMenuMobileActive: !previous.staticMenuMobileActive,
+      }));
+    }
+  };
 
-    const showProfileSidebar = () => {
-        setLayoutState((prevLayoutState) => ({ ...prevLayoutState, profileSidebarVisible: !prevLayoutState.profileSidebarVisible }));
-    };
+  const showProfileSidebar = () => {
+    setLayoutState((previous) => ({
+      ...previous,
+      profileSidebarVisible: !previous.profileSidebarVisible,
+    }));
+  };
 
-    const isDesktop = () => {
-        return window.innerWidth > 991;
-    };
-
-    const value: LayoutContextProps = {
-        layoutState,
-        setLayoutState,
-        onMenuToggle,
-        showProfileSidebar
-    };
-
-    return <LayoutContext.Provider value={value}>{children}</LayoutContext.Provider>;
+  return (
+    <LayoutContext.Provider value={{
+      layoutState,
+      setLayoutState,
+      onMenuToggle,
+      showProfileSidebar,
+    }}>
+      {children}
+    </LayoutContext.Provider>
+  );
 };

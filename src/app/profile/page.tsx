@@ -1,24 +1,37 @@
 import { Card } from "primereact/card";
 
 import { loadProfileViewModel } from "@/application/profile/load-profile";
-import { productionAuthProfileGateway } from "@/backend/integrations/auth/auth-profile-gateway";
+import {
+  requestAuthProfileGateway,
+  requestEmailReminderPreferenceReader,
+} from "@/app/_composition/request-scoped-readers";
 import { AppShell } from "@/app/_components/app-shell";
-import { PageHeader } from "@/frontend/components/layout";
+import { PageHeader } from "@/frontend/components/page-header";
 import { ProfilePanel } from "@/frontend/components/profile-panel";
 import { getBranding } from "@/shared/branding";
+import {
+  providerSessionRecoveryPath,
+  sessionRefreshPath,
+} from "@/shared/auth/session-navigation";
 import { redirect } from "next/navigation";
 
 export const dynamic = "force-dynamic";
 
 export default async function ProfilePage() {
   const branding = getBranding();
-  const model = await loadProfileViewModel(productionAuthProfileGateway);
-  if (model.status === "unauthorized") redirect("/login");
+  const model = await loadProfileViewModel(
+    requestAuthProfileGateway,
+    requestEmailReminderPreferenceReader,
+  );
+  if (model.status === "unauthorized") redirect(sessionRefreshPath("/profile"));
+  if (model.status === "provider-session-recovery-required") {
+    redirect(providerSessionRecoveryPath("/profile"));
+  }
   const turnstileEnabled = process.env.TURNSTILE_ENABLED === "true";
   const turnstileSiteKey = process.env.TURNSTILE_SITE_KEY;
 
   return (
-    <AppShell requireAuth>
+    <AppShell requireAuth returnTo="/profile">
       <div className="flex flex-column gap-6">
         <PageHeader
           description={`Данные аккаунта, e-mail и пароль управляются через ${branding.name}.`}

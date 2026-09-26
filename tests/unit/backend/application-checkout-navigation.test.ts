@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import { executePayment, loadCheckout } from "@/application/payments/checkout";
 import { loadNavigationShell } from "@/application/navigation/load-navigation";
-import type { AuthProfileGateway, AuthProfileSession } from "@/application/auth/ports/auth-profile";
+import { AuthProfileError, type AuthProfileGateway, type AuthProfileSession } from "@/application/auth/ports/auth-profile";
 import type { CheckoutReader, PaymentCommands } from "@/application/payments/ports/checkout";
 
 function session(overrides: Partial<AuthProfileSession["user"]> = {}): AuthProfileSession {
@@ -52,6 +52,32 @@ describe("checkout and navigation application policy", () => {
     await expect(loadCheckout(reader, broken)).resolves.toMatchObject({ status: "error" });
   });
 
+  it("routes a recoverable provider session without showing a login card", async () => {
+    const recoverable = auth(session({}));
+    vi.mocked(recoverable.loadCurrentSession).mockResolvedValueOnce({
+      ...session({}),
+      hasUpstreamTokens: true,
+    });
+    vi.mocked(recoverable.authorizeCurrentSession).mockRejectedValueOnce(
+      new AuthProfileError("PROVIDER_SESSION_RECOVERY_REQUIRED"),
+    );
+
+    await expect(loadCheckout(reader, recoverable)).resolves.toEqual({
+      status: "provider-session-recovery-required",
+    });
+
+    const recoveryReader: CheckoutReader = {
+      loadOffers: vi.fn(async () => {
+        throw Object.assign(new Error("stored bundle unavailable"), {
+          code: "PROVIDER_SESSION_RECOVERY_REQUIRED",
+        });
+      }),
+    };
+    await expect(loadCheckout(recoveryReader, auth())).resolves.toEqual({
+      status: "provider-session-recovery-required",
+    });
+  });
+
   it("refuses payment commands without an idempotency key", async () => {
     const commands = { purchase: vi.fn(), extend: vi.fn() } as unknown as PaymentCommands;
     await expect(executePayment(commands, { kind: "purchase", request, idempotencyKey: "" })).resolves.toMatchObject({
@@ -71,7 +97,7 @@ describe("checkout and navigation application policy", () => {
 
   it.each([
     ["OFFER_CHANGED", false], ["PLAN_UNAVAILABLE", false], ["PAYMENT_GATEWAY_UNAVAILABLE", false],
-    ["IDEMPOTENCY_KEY_REUSED", false], ["VALIDATION_ERROR", false],
+    ["IDEMPOTENCY_KEY_INVALID", false], ["IDEMPOTENCY_KEY_REUSED", false], ["VALIDATION_ERROR", false],
     ["EMAIL_REQUIRED", true], ["EMAIL_NOT_VERIFIED", true], ["RATE_LIMITED", true],
     ["UPSTREAM_UNAVAILABLE", true],
   ])("maps payment failure %s and key retention=%s", async (code, retainIdempotencyKey) => {
@@ -83,6 +109,19 @@ describe("checkout and navigation application policy", () => {
     });
   });
 
+  it("asks for a fresh page after rejecting an invalid idempotency key", async () => {
+    const commands = {
+      purchase: vi.fn(async () => { throw Object.assign(new Error("invalid key"), { code: "IDEMPOTENCY_KEY_INVALID" }); }),
+      extend: vi.fn(),
+    } as unknown as PaymentCommands;
+    await expect(executePayment(commands, { kind: "purchase", request, idempotencyKey: "bad-key" })).resolves.toEqual({
+      ok: false,
+      code: "IDEMPOTENCY_KEY_INVALID",
+      message: "Не удалось безопасно начать оплату. Обновите страницу и попробуйте снова.",
+      retainIdempotencyKey: false,
+    });
+  });
+
   it("uses a generic retryable result for untyped failures", async () => {
     const commands = { purchase: vi.fn(async () => { throw new Error("private detail"); }), extend: vi.fn() } as unknown as PaymentCommands;
     await expect(executePayment(commands, { kind: "purchase", request, idempotencyKey: "key-1" })).resolves.toMatchObject({
@@ -90,17 +129,26 @@ describe("checkout and navigation application policy", () => {
     });
   });
 
-  it("builds authenticated and guest navigation without upstream calls", async () => {
+  it("builds navigation from the local session without an upstream dependency", async () => {
     await expect(loadNavigationShell(auth(session({ emailVerified: false })))).resolves.toEqual({
-      authenticated: true, emailVerificationRequired: true, hasSubscription: false, canRenewSubscription: false,
+      navigation: {
+        authenticated: true, emailVerificationRequired: true,
+      },
+      supportIdentity: {
+        userId: "user-1", email: "user@example.com", emailVerified: false,
+        telegramId: null, telegramUsername: null, fullName: null, displayName: null,
+      },
     });
+
     await expect(loadNavigationShell(auth(null))).resolves.toEqual({
-      authenticated: false, emailVerificationRequired: false, hasSubscription: false, canRenewSubscription: false,
+      navigation: {
+        authenticated: false, emailVerificationRequired: false,
+      },
+      supportIdentity: null,
     });
+
     const broken = auth();
     vi.mocked(broken.loadCurrentSession).mockRejectedValueOnce(new Error("offline"));
-    await expect(loadNavigationShell(broken)).resolves.toEqual({
-      authenticated: false, emailVerificationRequired: false, hasSubscription: false, canRenewSubscription: false,
-    });
+    await expect(loadNavigationShell(broken)).rejects.toThrow("offline");
   });
 });

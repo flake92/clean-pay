@@ -1,98 +1,40 @@
 "use client";
 
-import { useEffect, useRef, useTransition } from "react";
-import { useRouter } from "next/navigation";
-import { Message } from "primereact/message";
 import { Tag } from "primereact/tag";
-import { Button } from "primereact/button";
+
+import { Button, Message } from "@/frontend/components/sakai/form-foundation";
 
 import { LinkButton } from "@/frontend/components/prime/link-button";
-import { shouldPollPaymentOperation } from "@/frontend/lib/payment-idempotency";
 import {
-  paymentPollDelayMs,
-  paymentReturnOutcome,
-  shouldPollPaymentReturn,
-} from "@/frontend/lib/payment-return";
-import type { PaymentStatusPageModel, PaymentStatusViewModel } from "@/application/models/payment-status";
+  formatPaymentReturnDate as formatDate,
+  paymentReturnHeading as heading,
+  paymentReturnSeverity as paymentSeverity,
+  paymentReturnStatusLabel as paymentStatusLabel,
+} from "@/frontend/components/payment-return-status-state";
+import { usePaymentReturnStatusController } from "@/frontend/hooks/use-payment-return-status-controller";
+import { shouldPollPaymentOperation } from "@/frontend/lib/payment-idempotency";
+import type { PaymentStatusPageModel } from "@/application/models/payment-status";
 
 type Props = {
   kind: "success" | "fail" | "pending";
   model: PaymentStatusPageModel;
+  operationId: string | null;
+  paymentId: string | null;
 };
 
-function formatDate(value: string) {
-  return new Intl.DateTimeFormat("ru-RU", {
-    dateStyle: "medium",
-    timeStyle: "short",
-  }).format(new Date(value));
-}
-
-function heading(data: PaymentStatusViewModel | null) {
-  const outcome = paymentReturnOutcome(data);
-
-  if (outcome === "success") return "Оплата подтверждена";
-  if (outcome === "failed") return "Оплата не завершена";
-  if (outcome === "pending") return "Платёж обрабатывается";
-  if (outcome === "unknown") return "Статус платежа требует проверки";
-
-  return "Проверяем статус платежа";
-}
-
-function paymentStatusLabel(status: string) {
-  const labels: Record<string, string> = {
-    pending: "Ожидает",
-    completed: "Оплачен",
-    failed: "Ошибка",
-    canceled: "Отменён",
-    refunded: "Возврат",
-    unknown: "Неизвестно",
-  };
-
-  return labels[status] ?? status;
-}
-
-function paymentSeverity(status: string): "success" | "warning" | "danger" | "info" {
-  if (status === "completed") {
-    return "success";
-  }
-
-  if (status === "pending") {
-    return "warning";
-  }
-
-  if (status === "failed" || status === "canceled") {
-    return "danger";
-  }
-
-  return "info";
-}
-
-export function PaymentReturnStatus({ kind, model }: Props) {
-  const router = useRouter();
-  const [loading, startRefresh] = useTransition();
-  const pollAttemptRef = useRef(0);
-  const data = model.status === "ready" ? model.data : null;
-  const error = model.status === "error" ? model.message : null;
-
-  useEffect(() => {
-    if (!data || !shouldPollPaymentReturn(data)) {
-      pollAttemptRef.current = 0;
-      return;
-    }
-
-    const attempt = pollAttemptRef.current;
-    const timer = window.setTimeout(() => {
-      pollAttemptRef.current = attempt + 1;
-      startRefresh(() => router.refresh());
-    }, paymentPollDelayMs(attempt, data.operation?.retry_after_seconds));
-
-    return () => window.clearTimeout(timer);
-  }, [data, router]);
+export function PaymentReturnStatus({ kind, model, operationId, paymentId }: Props) {
+  const {
+    autoPollingStopped,
+    data,
+    error,
+    loading,
+    refreshManually,
+  } = usePaymentReturnStatusController({ model, operationId, paymentId });
 
   return (
     <div className="flex flex-column gap-6">
-      <h1 className="text-3xl font-semibold m-0">{heading(data)}</h1>
-        <div className="flex flex-column gap-4">
+      <h2 className="text-3xl font-semibold m-0">{heading(data)}</h2>
+      <div className="flex flex-column gap-4">
         {error ? <Message severity="warn" text={`Результат пока неизвестен. ${error}`} /> : null}
         {loading && !data ? <Message severity="info" text="Проверка..." /> : null}
         {data?.operation?.status === "manual_required" ? (
@@ -107,6 +49,12 @@ export function PaymentReturnStatus({ kind, model }: Props) {
             text={`Операция ${data.operation.operation_id} ещё проверяется. Новую оплату создавать не нужно.`}
           />
         ) : null}
+        {autoPollingStopped ? (
+          <Message
+            severity="warn"
+            text="Автоматическая проверка приостановлена, чтобы не обновлять страницу бесконечно. Нажмите «Обновить статус» для новой проверки; повторную оплату создавать не нужно."
+          />
+        ) : null}
         {data?.operation?.status === "retry_ready" ? (
           <Message
             severity="warn"
@@ -119,21 +67,21 @@ export function PaymentReturnStatus({ kind, model }: Props) {
               <Metric label="Платёж" value={data.payment.payment_id} />
             </div>
             <div className="col-12 md:col-6">
-            <div className="surface-50 border-1 border-200 border-round-lg p-3 h-full">
-              <div className="text-xs uppercase text-500">Статус</div>
-              <div className="mt-2">
-                <Tag
-                  severity={paymentSeverity(data.payment.status)}
-                  value={paymentStatusLabel(data.payment.status)}
-                />
+              <div className="surface-50 border-1 border-200 border-round-lg p-3 h-full">
+                <div className="text-xs uppercase text-500">Статус</div>
+                <div className="mt-2">
+                  <Tag
+                    severity={paymentSeverity(data.payment.status)}
+                    value={paymentStatusLabel(data.payment.status)}
+                  />
+                </div>
               </div>
             </div>
-            </div>
             <div className="col-12 md:col-6">
-            <Metric
-              label="Сумма"
-              value={`${data.payment.final_amount} ${data.payment.currency}`}
-            />
+              <Metric
+                label="Сумма"
+                value={`${data.payment.final_amount} ${data.payment.currency}`}
+              />
             </div>
             <div className="col-12 md:col-6">
               <Metric label="Дата" value={formatDate(data.payment.created_at)} />
@@ -149,13 +97,13 @@ export function PaymentReturnStatus({ kind, model }: Props) {
             text={`Текущая подписка: ${data.subscription.plan_name}, до ${formatDate(data.subscription.expire_at)}.`}
           />
         ) : null}
-        </div>
+      </div>
       <div className="flex flex-wrap gap-2">
         <Button
           icon="pi pi-refresh"
           label="Обновить статус"
           loading={loading}
-          onClick={() => startRefresh(() => router.refresh())}
+          onClick={refreshManually}
           outlined
           type="button"
         />

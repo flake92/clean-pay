@@ -17,7 +17,7 @@ import type { PasskeyCommands } from "@/application/auth/ports/passkey-commands"
 import type { TelegramWebAppGateway } from "@/application/auth/ports/telegram-webapp";
 import type { EmailVerificationCommands } from "@/application/auth/ports/email-verification";
 import type { TelegramAccountMergeGateway } from "@/application/auth/ports/telegram-account-merge";
-import type { AuthProfileGateway } from "@/application/auth/ports/auth-profile";
+import { AuthProfileError, type AuthProfileGateway } from "@/application/auth/ports/auth-profile";
 import type { PasskeyManagementGateway } from "@/application/auth/ports/passkey-management";
 import {
   activateCabinetPromocode,
@@ -88,8 +88,13 @@ function paymentMaintenance(): PaymentMaintenanceRunner {
     releaseReconciliation: vi.fn(async () => undefined), markReconciliationManual: vi.fn(async () => undefined),
     failReconciliation: vi.fn(async () => "released" as const), classifyReconciliationError: vi.fn(() => ({ kind: "other" as const })),
     listHistoryCandidates: vi.fn(async () => []), claimHistory: vi.fn(async () => null), authorizeHistory: vi.fn(async () => ({ context: {} })),
-    historyPageSize: vi.fn(async () => 100), loadHistoryPage: vi.fn(async () => ({ context: {} })),
-    completeHistoryPage: vi.fn(async () => ({ applied: 0, hasMore: false })), failHistory: vi.fn(async () => undefined), now: vi.fn(() => Date.now()),
+    historyPageSize: vi.fn(async () => 100), findPendingHistoryPaymentIds: vi.fn(async () => []),
+    loadExactHistoryPayment: vi.fn(async () => null), persistExactHistoryPayment: vi.fn(async () => undefined),
+    loadLegacyHistory: vi.fn(async () => ({ context: {} })),
+    loadHistoryPage: vi.fn(async () => ({ context: {} })),
+    completeHistoryPage: vi.fn(async () => ({ applied: 0, hasMore: false })),
+    classifyHistoryError: vi.fn(() => ({ kind: "unexpected" as const })),
+    deferHistory: vi.fn(async () => undefined), failHistory: vi.fn(async () => undefined), now: vi.fn(() => Date.now()),
   };
 }
 
@@ -107,6 +112,8 @@ function cabinetCommands(overrides: Partial<CabinetCommands> = {}): CabinetComma
 describe("application facades", () => {
   it("validates and normalizes Telegram WebApp input before the port", async () => {
     const gateway: TelegramWebAppGateway = {
+      preflightCapacity: vi.fn(async () => undefined),
+      withUpstreamConcurrency: vi.fn(async (_action, work) => work()),
       authenticateProvider: vi.fn(async () => ({ context: {} })),
       verifiedIdentity: vi.fn(async () => ({ telegramId: "777", context: {} })),
       rateLimit: vi.fn(async () => undefined),
@@ -122,6 +129,8 @@ describe("application facades", () => {
       })),
       createSession: vi.fn(async () => ({ id: "session-1" })),
       recoverSession: vi.fn(async () => undefined),
+      revokeSession: vi.fn(async () => undefined),
+      clearSessionCookies: vi.fn(async () => undefined),
     };
 
     await expect(authenticateTelegramWebApp(gateway, "   ")).resolves.toMatchObject({ ok: false, code: "VALIDATION_ERROR" });
@@ -207,6 +216,7 @@ describe("application facades", () => {
       withOwnerChangeFence: vi.fn(async (_confirmation, work) => work()), loadCurrentOwner: vi.fn(), authenticateTelegram: vi.fn(),
       preflight: vi.fn(), mergeProviderAccounts: vi.fn(), synchronizeSubscriptionIdentity: vi.fn(), linkCurrentAccount: vi.fn(),
       complete: vi.fn(), cancel: vi.fn(async () => true), release: vi.fn(), refreshLocalSession: vi.fn(),
+      reconcileCompletedOwnerChange: vi.fn(async () => undefined),
     };
 
     await expect(confirmLinkedTelegram(mergeGateway)).resolves.toEqual({ ok: true, kind: "merge-confirmed" });
@@ -233,6 +243,64 @@ describe("application facades", () => {
     vi.mocked(commands.deleteAllDevices).mockRejectedValueOnce(new Error("provider detail"));
     await expect(deleteAllCabinetDevices(commands)).resolves.toEqual({ status: "error", message: "Не удалось удалить устройства." });
   });
+
+  it.each([
+    ".",
+    "..",
+    " . ",
+    " .. ",
+    "/",
+    "\\",
+    "device/other",
+    "device\\other",
+    "%2e",
+    "%2E%2e",
+    "%2f",
+    "%5C",
+    "%252E",
+    "%252F",
+    "%255c",
+    ".%252e",
+    "device/%252e%252e/other",
+    "%25%32%65",
+    "%25%32%66",
+    "%25%35%43",
+    "%",
+    "%2",
+    "%GG",
+    "%C0%AE",
+    "%00",
+  ])("rejects unsafe path-based device HWID %j before calling the command port", async (hwid) => {
+    const commands = cabinetCommands();
+
+    await expect(deleteCabinetDevice(commands, hwid)).resolves.toEqual({
+      status: "error",
+      message: "Это устройство нельзя безопасно удалить отдельно.",
+    });
+    expect(commands.deleteDevice).not.toHaveBeenCalled();
+  });
+
+  it.each(["", "   "])("rejects empty device HWID %j before calling the command port", async (hwid) => {
+    const commands = cabinetCommands();
+
+    await expect(deleteCabinetDevice(commands, hwid)).resolves.toEqual({
+      status: "error",
+      message: "Некорректный идентификатор устройства.",
+    });
+    expect(commands.deleteDevice).not.toHaveBeenCalled();
+  });
+
+  it.each(["device.one", "device%2Eone", "device%252Eone"])(
+    "does not reject an ordinary path-stable HWID %j",
+    async (hwid) => {
+      const commands = cabinetCommands();
+
+      await expect(deleteCabinetDevice(commands, hwid)).resolves.toMatchObject({
+        status: "success",
+      });
+      expect(commands.deleteDevice).toHaveBeenCalledWith(hwid);
+    },
+  );
 
   it("keeps session termination behind the cabinet command port", async () => {
     const commands = cabinetCommands();
@@ -298,27 +366,64 @@ describe("application facades", () => {
       loadSupport: vi.fn(async () => { throw new Error("support unavailable"); }),
     };
     const history: PaymentHistoryGateway = {
-      authorize: vi.fn(async () => { throw new Error("sync unavailable"); }), loadCapabilities: vi.fn(async () => null),
-      findPendingPaymentIds: vi.fn(async () => []), loadExactTransaction: vi.fn(async () => null), persistExactTransaction: vi.fn(async () => undefined),
-      loadLegacyTransactions: vi.fn(async () => []), persistLegacyTransactions: vi.fn(async () => undefined),
-      loadRecent: vi.fn(async () => []), logExactFailure: vi.fn(), logDegraded: vi.fn(),
+      loadRecent: vi.fn(async () => []),
+      readSnapshotStatus: vi.fn(async () => "current" as const),
     };
-    const maintenance = paymentMaintenance();
 
-    await expect(loadCabinetViewModel(reader, authGateway(), history, maintenance)).resolves.toMatchObject({
+    await expect(loadCabinetViewModel(reader, authGateway(), history)).resolves.toMatchObject({
       status: "ready",
       offers,
       devices: null,
-      paymentsWarning: "История показана из сохранённых данных. Обновление статусов временно недоступно.",
+      paymentHistoryStatus: "current",
       support: { enabled: false },
     });
     expect(history.loadRecent).toHaveBeenCalledWith("user-1", 20);
 
-    await expect(loadCabinetViewModel(reader, authGateway({ loadCurrentSession: vi.fn(async () => null) }), history, maintenance)).resolves.toEqual({ status: "unauthorized" });
+    await expect(loadCabinetViewModel(reader, authGateway({ loadCurrentSession: vi.fn(async () => null) }), history)).resolves.toEqual({ status: "unauthorized" });
+
+    await expect(loadCabinetViewModel(reader, authGateway({
+      loadCurrentSession: vi.fn(async () => {
+        throw new AuthProfileError("PROVIDER_SESSION_RECOVERY_REQUIRED");
+      }),
+    }), history)).resolves.toEqual({
+      status: "provider-session-recovery-required",
+    });
+
+    const recoveryReader: CabinetReader = {
+      ...reader,
+      loadSubscription: vi.fn(async () => {
+        throw Object.assign(new Error("stored bundle unavailable"), {
+          code: "PROVIDER_SESSION_RECOVERY_REQUIRED",
+        });
+      }),
+    };
+    await expect(loadCabinetViewModel(
+      recoveryReader,
+      authGateway(),
+      history,
+    )).resolves.toEqual({ status: "provider-session-recovery-required" });
 
     await expect(loadCabinetViewModel(reader, authGateway({
       loadCurrentSession: vi.fn(async () => { throw new Error("database unavailable"); }),
-    }), history, maintenance)).resolves.toMatchObject({ status: "error" });
+    }), history)).resolves.toMatchObject({ status: "error", recovery: "recover" });
+
+    // An unresolved account transition must never look like an anonymous
+    // failure: the user is offered the recovery route that explains it.
+    await expect(loadCabinetViewModel(reader, authGateway({
+      loadCurrentSession: vi.fn(async () => {
+        throw new AuthProfileError("ACCOUNT_MERGE_REQUIRED");
+      }),
+    }), history)).resolves.toMatchObject({
+      status: "error",
+      recovery: "merge",
+      message: expect.stringContaining("Объединить аккаунты"),
+    });
+
+    await expect(loadCabinetViewModel(reader, authGateway({
+      loadCurrentSession: vi.fn(async () => {
+        throw new AuthProfileError("UPSTREAM_UNAVAILABLE");
+      }),
+    }), history)).resolves.toMatchObject({ status: "error", recovery: "retry" });
   });
 
   it("returns a safe fallback when subscription reissue fails unexpectedly", async () => {
@@ -329,13 +434,22 @@ describe("application facades", () => {
     await expect(reissueCabinetSubscription(commands)).resolves.toMatchObject({ status: "error" });
   });
 
-  it("uses safe fallbacks for navigation and payment status", async () => {
+  it("loads local navigation and keeps a safe payment-status fallback", async () => {
     const shellGateway = authGateway();
     await expect(loadNavigationShell(shellGateway)).resolves.toEqual({
-      authenticated: true,
-      emailVerificationRequired: false,
-      hasSubscription: false,
-      canRenewSubscription: false,
+      navigation: {
+        authenticated: true,
+        emailVerificationRequired: false,
+      },
+      supportIdentity: {
+        userId: "user-1",
+        email: "u@example.com",
+        emailVerified: true,
+        telegramId: null,
+        telegramUsername: null,
+        fullName: null,
+        displayName: null,
+      },
     });
     expect(shellGateway.authorizeCurrentSession).not.toHaveBeenCalled();
     expect(shellGateway.loadProviderProfile).not.toHaveBeenCalled();
@@ -374,7 +488,7 @@ describe("application facades", () => {
       loadActor: vi.fn(async () => ({
         context: {}, userId: "user-1", email: "u@example.com", emailVerified: false,
         telegramId: null, pendingUpstreamAccountId: null, pendingEmail: null,
-        authorizedUpstreamAccountId: "upstream-1", telegramUsername: null,
+        authorizedUpstreamAccountId: "upstream-1", localUpstreamAccountId: "upstream-1", telegramUsername: null,
       })),
       assertRequestLimits: vi.fn(async () => undefined),
       requestProviderCode: vi.fn(async () => ({ targetEmail: "u@example.com" })),
@@ -417,8 +531,75 @@ describe("application facades", () => {
 
   it("loads profile data through its reader port", async () => {
     const user = { authType: "email", email: "u@example.com", emailVerified: true, pendingEmail: null, telegramId: null };
-    await expect(loadProfileViewModel(authGateway())).resolves.toEqual({ status: "ready", user });
+    await expect(loadProfileViewModel(authGateway())).resolves.toEqual({
+      status: "ready",
+      user,
+      emailReminders: { status: "unavailable" },
+    });
+    await expect(loadProfileViewModel(authGateway(), {
+      load: vi.fn(async () => ({
+        enabled: true,
+        emailEligible: true,
+        senderEmail: "no-reply@example.com",
+        daysBefore: [7, 3, 1],
+      })),
+    })).resolves.toMatchObject({
+      status: "ready",
+      emailReminders: { status: "ready", enabled: true },
+    });
+    await expect(loadProfileViewModel(authGateway(), {
+      load: vi.fn(async () => {
+        throw new Error("Remnashop preference endpoint unavailable");
+      }),
+    })).resolves.toMatchObject({
+      status: "ready",
+      emailReminders: { status: "unavailable" },
+    });
     await expect(loadProfileViewModel(authGateway({ loadCurrentSession: vi.fn(async () => null) }))).resolves.toEqual({ status: "unauthorized" });
+    await expect(loadProfileViewModel(authGateway({
+      loadCurrentSession: vi.fn(async () => {
+        throw new AuthProfileError("PROVIDER_SESSION_RECOVERY_REQUIRED");
+      }),
+    }))).resolves.toEqual({ status: "provider-session-recovery-required" });
     await expect(loadProfileViewModel(authGateway({ loadCurrentSession: vi.fn(async () => { throw new Error(); }) }))).resolves.toMatchObject({ status: "error" });
+  });
+
+  it("starts the optional reminder read without adding its timeout after the profile read", async () => {
+    let releaseProfile: (() => void) | undefined;
+    const profileBlocked = new Promise<void>((resolve) => {
+      releaseProfile = resolve;
+    });
+    const remindersLoad = vi.fn(async () => ({
+      enabled: false,
+      emailEligible: true,
+      senderEmail: "no-reply@example.com",
+      daysBefore: [7, 3, 1],
+    }));
+    const modelPromise = loadProfileViewModel(
+      authGateway({
+        loadCurrentSession: vi.fn(async () => {
+          await profileBlocked;
+          return {
+            context: {}, id: "session-1", userId: "user-1", authMethod: "EMAIL" as const,
+            hasUpstreamTokens: false,
+            user: {
+              email: "u@example.com", emailVerified: true, telegramId: null,
+              telegramUsername: null, fullName: null, displayName: null,
+              upstreamUserId: null, pendingUpstreamUserId: null, pendingEmail: null,
+              accountSyncPending: false,
+            },
+          };
+        }),
+      }),
+      { load: remindersLoad },
+    );
+
+    await vi.waitFor(() => expect(remindersLoad).toHaveBeenCalledOnce());
+    releaseProfile?.();
+
+    await expect(modelPromise).resolves.toMatchObject({
+      status: "ready",
+      emailReminders: { status: "ready", enabled: false },
+    });
   });
 });

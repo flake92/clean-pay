@@ -50,11 +50,54 @@ describe("application auth profile policy", () => {
     expect(port.authorizeCurrentSession).not.toHaveBeenCalled();
   });
 
+  it("keeps a passkey session authenticated while its provider tokens are being restored", async () => {
+    const local = session({
+      hasUpstreamTokens: false,
+      authMethod: "PASSKEY",
+      user: {
+        ...session().user,
+        emailVerified: true,
+        upstreamUserId: "upstream-1",
+        telegramId: "777",
+      },
+    });
+    const port = gateway({ loadCurrentSession: vi.fn(async () => local) });
+
+    await expect(resolveAuthProfile(port)).resolves.toMatchObject({
+      authType: "passkey",
+      email: "u@example.com",
+      emailVerified: true,
+      telegramId: "777",
+    });
+    expect(port.authorizeCurrentSession).not.toHaveBeenCalled();
+  });
+
   it.each(["EMAIL_REQUIRED", "PASSKEY_REQUIRED"])("falls back locally on %s", async (code) => {
     const port = gateway({ authorizeCurrentSession: vi.fn(async () => { throw new AuthProfileError(code); }) });
     await expect(resolveAuthProfile(port)).resolves.toMatchObject({ email: "u@example.com", emailVerified: false });
     expect(port.loadProviderProfile).not.toHaveBeenCalled();
   });
+
+  it.each(["authorization", "profile"])(
+    "classifies a provider %s rejection as a recoverable provider session",
+    async (stage) => {
+      const port = gateway(stage === "authorization"
+        ? {
+            authorizeCurrentSession: vi.fn(async () => {
+              throw new AuthProfileError("UNAUTHORIZED");
+            }),
+          }
+        : {
+            loadProviderProfile: vi.fn(async () => {
+              throw new AuthProfileError("UNAUTHORIZED");
+            }),
+          });
+
+      await expect(resolveAuthProfile(port)).rejects.toMatchObject({
+        code: "PROVIDER_SESSION_RECOVERY_REQUIRED",
+      });
+    },
+  );
 
   it("reconciles matching verified provider proof and refreshes access", async () => {
     const port = gateway();
@@ -63,6 +106,22 @@ describe("application auth profile policy", () => {
     });
     expect(port.confirmVerifiedEmail).toHaveBeenCalledWith("user-1");
     expect(port.refreshCurrentAccess).toHaveBeenCalledOnce();
+  });
+
+  it("defers verified-email reconciliation for render-only adapters", async () => {
+    const port = gateway({ canReconcileVerifiedEmail: false });
+
+    await expect(resolveAuthProfile(port)).resolves.toMatchObject({
+      email: "u@example.com",
+      emailVerified: false,
+      accountSyncPending: false,
+    });
+    expect(port.confirmVerifiedEmail).not.toHaveBeenCalled();
+    expect(port.refreshCurrentAccess).not.toHaveBeenCalled();
+    expect(port.debug).toHaveBeenCalledWith(
+      "auth_me_verified_email_reconciliation_deferred",
+      { sessionId: "session-1", userId: "user-1" },
+    );
   });
 
   it("does not reconcile an unresolved Telegram merge or a different pending owner", async () => {
@@ -101,6 +160,8 @@ describe("application auth profile policy", () => {
       .resolves.toEqual({ status: "unauthorized" });
     await expect(safeReadiness(gateway({ authorizeCurrentSession: vi.fn(async () => { throw new AuthProfileError("ACCOUNT_MERGE_REQUIRED"); }) })))
       .resolves.toEqual({ status: "merge-conflict" });
+    await expect(safeReadiness(gateway({ authorizeCurrentSession: vi.fn(async () => { throw new AuthProfileError("PROVIDER_SESSION_RECOVERY_REQUIRED"); }) })))
+      .resolves.toEqual({ status: "provider-session-recovery-required" });
     await expect(safeReadiness(gateway({ authorizeCurrentSession: vi.fn(async () => { throw new Error("offline"); }) })))
       .resolves.toEqual({ status: "unavailable" });
   });
