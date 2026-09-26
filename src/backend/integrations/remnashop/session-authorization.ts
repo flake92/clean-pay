@@ -9,8 +9,14 @@ import {
   remnashopRefreshTokens,
 } from "@/backend/integrations/remnashop/api-client";
 import { acquireRemnashopTokensForSession } from "@/backend/integrations/remnashop/session-token-lifecycle";
-import { attachRemnashopTokensForTelegramSession } from "@/backend/integrations/remnashop/telegram-session-recovery";
-import { protectRemnashopToken } from "@/backend/integrations/remnashop/token-protection";
+import {
+  missingRemnashopTelegramRecovery,
+  type RemnashopTelegramRecovery,
+} from "@/backend/integrations/remnashop/telegram-session-recovery-dependency";
+import {
+  protectRemnashopToken,
+  revealRemnashopToken,
+} from "@/backend/integrations/remnashop/token-protection";
 import {
   assertEmailVerificationPolicy,
   getCurrentSession,
@@ -19,11 +25,10 @@ import {
 import { authDebugLog } from "@/backend/observability/auth-debug-log";
 import { normalizeRemnashopError } from "@/backend/integrations/remnashop/errors";
 
-export { attachRemnashopTokensForTelegramSession } from "@/backend/integrations/remnashop/telegram-session-recovery";
-
 export async function recoverRemnashopTelegramSession(
   sessionId: string,
   userId: string,
+  recoverTelegramSession: RemnashopTelegramRecovery = missingRemnashopTelegramRecovery,
 ) {
   const session = await prisma.webSession.findFirst({
     where: {
@@ -42,8 +47,36 @@ export async function recoverRemnashopTelegramSession(
     );
   }
 
+  // Recovery may have committed its provider-token update immediately before
+  // the callback worker crashed. Treat that exact committed session as the
+  // durable recovery checkpoint: a lease retry decrypts the already-stored
+  // bundle and never dispatches a second provider authentication/merge flow.
+  const now = new Date();
+  if (
+    session.remnashopAccessTokenEncrypted
+    && session.remnashopRefreshTokenEncrypted
+    && session.remnashopAccessExpiresAt
+    && session.remnashopAccessExpiresAt > now
+    && session.remnashopRefreshExpiresAt
+    && session.remnashopRefreshExpiresAt > now
+  ) {
+    authDebugLog("telegram_callback_recovery_already_committed", {
+      sessionId: session.id,
+      userId: session.userId,
+    });
+    return {
+      accessToken: revealRemnashopToken(
+        session.remnashopAccessTokenEncrypted,
+      ),
+      refreshToken: revealRemnashopToken(
+        session.remnashopRefreshTokenEncrypted,
+      ),
+      session,
+    };
+  }
+
   try {
-    const recovered = await attachRemnashopTokensForTelegramSession(session);
+    const recovered = await recoverTelegramSession(session);
 
     if (!recovered) {
       throw new ServiceError(
@@ -111,6 +144,10 @@ async function attachRemnashopTokensForVerifiedEmailSession(
       remnashopRefreshTokenEncrypted: protectedRefreshToken,
       remnashopAccessExpiresAt: accessExpiresAt,
       remnashopRefreshExpiresAt: refreshExpiresAt,
+      remnashopRefreshClaimTokenHash: null,
+      remnashopRefreshLeaseExpiresAt: null,
+      remnashopRefreshDispatchedAt: null,
+      remnashopRefreshRecoveryEncrypted: null,
     },
   });
   if (stored.count !== 1) {
@@ -143,11 +180,23 @@ async function attachRemnashopTokensForVerifiedEmailSession(
   };
 }
 
+export type RemnashopAuthorizationOptions = {
+  allowUnverifiedEmail?: boolean;
+  forceRefresh?: boolean;
+  readSession?: typeof getCurrentSession;
+  refreshAccessCookie?: typeof refreshCurrentAccessCookie;
+  recoverTelegramSession?: RemnashopTelegramRecovery;
+};
+
 export async function getAuthorizedRemnashopTokens({
   allowUnverifiedEmail = false,
-}: { allowUnverifiedEmail?: boolean } = {}) {
+  forceRefresh = false,
+  readSession = getCurrentSession,
+  refreshAccessCookie = refreshCurrentAccessCookie,
+  recoverTelegramSession = missingRemnashopTelegramRecovery,
+}: RemnashopAuthorizationOptions = {}) {
   authDebugLog("remnashop_tokens_authorize_started", { allowUnverifiedEmail });
-  const localSession = await getCurrentSession();
+  const localSession = await readSession();
 
   if (!localSession) {
     authDebugLog("remnashop_tokens_authorize_failed", { reason: "missing_session" });
@@ -191,7 +240,7 @@ export async function getAuthorizedRemnashopTokens({
     )
   ) {
     const restoredTelegramSession =
-      await attachRemnashopTokensForTelegramSession(localSession);
+      await recoverTelegramSession(localSession);
 
     if (restoredTelegramSession) {
       authorized = {
@@ -206,6 +255,7 @@ export async function getAuthorizedRemnashopTokens({
     authorized = await acquireRemnashopTokensForSession({
       session: localSession,
       refresh: remnashopRefreshTokens,
+      ...(forceRefresh ? { forceRefresh: true } : {}),
     });
     authorizationSource = authorized?.source ?? null;
   }
@@ -216,7 +266,7 @@ export async function getAuthorizedRemnashopTokens({
     localSession.user.email &&
     localSession.user.emailVerified
   ) {
-    const recoverySession = await getCurrentSession();
+    const recoverySession = await readSession();
     if (
       !recoverySession ||
       recoverySession.id !== localSession.id ||
@@ -236,7 +286,7 @@ export async function getAuthorizedRemnashopTokens({
     // Token acquisition can atomically clear an expired/corrupt legacy bundle.
     // Reload before Telegram recovery so the transaction compares against the
     // committed cleanup rather than the stale request snapshot.
-    const recoverySession = await getCurrentSession();
+    const recoverySession = await readSession();
 
     if (
       !recoverySession ||
@@ -253,7 +303,7 @@ export async function getAuthorizedRemnashopTokens({
     let restoredTelegramSession;
     try {
       restoredTelegramSession =
-        await attachRemnashopTokensForTelegramSession(recoverySession);
+        await recoverTelegramSession(recoverySession);
     } catch (error) {
       const concurrentRecoveryWon =
         error instanceof ServiceError &&
@@ -263,7 +313,7 @@ export async function getAuthorizedRemnashopTokens({
         throw error;
       }
 
-      const convergedSession = await getCurrentSession();
+      const convergedSession = await readSession();
       if (
         !convergedSession ||
         convergedSession.id !== localSession.id ||
@@ -358,7 +408,7 @@ export async function getAuthorizedRemnashopTokens({
         where: { id: session.userId },
         data: { emailVerified: true },
       });
-      await refreshCurrentAccessCookie();
+      await refreshAccessCookie();
       session.user.emailVerified = true;
       authDebugLog("remnashop_tokens_authorize_email_verified_synced", {
         sessionId: session.id,

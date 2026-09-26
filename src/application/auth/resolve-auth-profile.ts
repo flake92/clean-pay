@@ -71,10 +71,11 @@ export async function resolveAuthProfile(gateway: AuthProfileGateway): Promise<A
     throw new AuthProfileError("UNAUTHORIZED");
   }
 
-  const canResolveProvider = session.hasUpstreamTokens || Boolean(
-    session.user.upstreamUserId || session.user.telegramId,
-  );
-  if (!canResolveProvider) {
+  // A provider identity is not a provider session. Passkey login can restore
+  // the local account before an upstream token pair is available; in that
+  // state the verified local profile is still authenticated and must not be
+  // presented as a failed login.
+  if (!session.hasUpstreamTokens) {
     gateway.debug("auth_me_local_profile_returned", {
       sessionId: session.id, userId: session.userId, authMethod: session.authMethod,
       hasUpstreamTokens: false,
@@ -97,10 +98,21 @@ export async function resolveAuthProfile(gateway: AuthProfileGateway): Promise<A
       });
       return localProfile(session);
     }
+    if (error instanceof AuthProfileError && error.code === "UNAUTHORIZED") {
+      throw new AuthProfileError("PROVIDER_SESSION_RECOVERY_REQUIRED");
+    }
     throw error;
   }
 
-  const profile = await gateway.loadProviderProfile(authorized);
+  let profile;
+  try {
+    profile = await gateway.loadProviderProfile(authorized);
+  } catch (error) {
+    if (error instanceof AuthProfileError && error.code === "UNAUTHORIZED") {
+      throw new AuthProfileError("PROVIDER_SESSION_RECOVERY_REQUIRED");
+    }
+    throw error;
+  }
   const pendingOwnerMatches = !authorized.session.user.pendingUpstreamUserId ||
     authorized.session.user.pendingUpstreamUserId === authorized.upstreamUserId;
   const unresolvedTelegramMerge = Boolean(
@@ -115,6 +127,13 @@ export async function resolveAuthProfile(gateway: AuthProfileGateway): Promise<A
 
   let reconciledSession = authorized.session;
   if (shouldReconcileVerifiedEmail) {
+    if (gateway.canReconcileVerifiedEmail === false) {
+      gateway.debug("auth_me_verified_email_reconciliation_deferred", {
+        sessionId: authorized.session.id,
+        userId: authorized.session.userId,
+      });
+      return localProfile(authorized.session);
+    }
     await gateway.confirmVerifiedEmail(authorized.session.userId);
     reconciledSession = {
       ...authorized.session,

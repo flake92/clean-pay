@@ -5,6 +5,11 @@ import type {
 } from "@/shared/domain/subscriptions";
 import type { SupportViewModel } from "@/application/models/support";
 
+export type PaymentHistorySnapshotStatus =
+  | "current"
+  | "refreshing"
+  | "unavailable";
+
 type CabinetUserViewModel = {
   email: string | null;
   telegramId?: string | null;
@@ -28,7 +33,18 @@ export type CabinetPaymentViewModel = {
 
 export type CabinetViewModel =
   | { status: "unauthorized" }
-  | { status: "error"; message: string }
+  | { status: "provider-session-recovery-required" }
+  | {
+      status: "error";
+      message: string;
+      /**
+       * Which next step the page should offer. "recover" routes through the
+       * cookie-capable provider-session recovery (which can finish an
+       * interrupted refresh or Telegram transition, or explain what to do);
+       * "retry" is a plain reload for transient upstream trouble.
+       */
+      recovery?: "retry" | "recover" | "merge";
+    }
   | {
       status: "ready";
       user: CabinetUserViewModel;
@@ -37,6 +53,6 @@ export type CabinetViewModel =
       offers: SubscriptionOffersResponse | null;
       devices: DevicesResponse | null;
       payments: CabinetPaymentViewModel[];
-      paymentsWarning: string | null;
+      paymentHistoryStatus: PaymentHistorySnapshotStatus;
       support: SupportViewModel;
     };

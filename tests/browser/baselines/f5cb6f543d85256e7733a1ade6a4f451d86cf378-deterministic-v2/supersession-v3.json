@@ -1,0 +1,69 @@
+{
+  "schemaVersion": 1,
+  "baselineId": "f5cb6f543d85256e7733a1ade6a4f451d86cf378-deterministic-v2",
+  "status": "invalid_for_gate",
+  "retainedAs": "immutable_serial_hardware_raster_capture",
+  "reason": [
+    "serial read-only runs still produced cross-process Skia raster variance while DOM, styles, ARIA, routes, state, and projected network remained equal",
+    "a three-shot byte-majority proved the variance can remain internally stable within one process and therefore cannot establish cross-process PNG identity"
+  ],
+  "source": {
+    "commit": "f5cb6f543d85256e7733a1ade6a4f451d86cf378",
+    "tree": "6647fc51c61018ba46aae95da21e534434028fbe",
+    "pristineArchiveSha256": "8f424f5d4839d2aa421849bb2c7f8f48420ee675",
+    "productionImage": {
+      "tag": "clean-pay:baseline-f5cb6f543d85-prod-pristine",
+      "digest": "sha256:e0640e36c6221ba8f2dc174ebbea3961fda59f6320aad56d2f071b1c51a75ffc"
+    }
+  },
+  "runtime": {
+    "engine": "chromium",
+    "browserVersion": "151.0.7922.34",
+    "playwrightVersion": "1.62.1",
+    "chromiumRevision": "1234"
+  },
+  "artifactSet": {
+    "artifactCount": 126,
+    "aggregateSha256": "04f89e738e2695c6c810925297cf06cc5c4f1647da28e64981ceeef7bba315ca",
+    "aggregateFormat": "sorted path\\0bytes\\0sha256\\n"
+  },
+  "immutableFiles": {
+    "metadataSha256": "9ee2e9c85582a37f54f6a2d1e43548a81064e2aba7e63a4a85c01ed3340d0c4c",
+    "comparisonPolicyV4Sha256": "426aed73e59731cbd740814920650294bd09b1bf4ae2aaa2432fac465a1e1b49",
+    "comparisonPolicyV5Sha256": "43981de5e6f5076f7c3e6ac1e69a1744ceb4cd0562800f82ea2f739cb140d896"
+  },
+  "sanitizedEvidence": [
+    {
+      "project": "chromium-1440x900",
+      "route": "protected-payment",
+      "changedChannels": 28,
+      "maxChannelDelta": 1,
+      "bounds": {
+        "minX": 384,
+        "minY": 778,
+        "maxX": 386,
+        "maxY": 786
+      }
+    },
+    {
+      "project": "chromium-390x844",
+      "route": "protected-cabinet",
+      "changedChannels": 115,
+      "maxChannelDelta": 2,
+      "bounds": {
+        "minX": 12,
+        "minY": 87,
+        "maxX": 377,
+        "maxY": 756
+      }
+    },
+    {
+      "project": "chromium-1440x900",
+      "route": "login",
+      "byteIdenticalWithinProcess": "3/3",
+      "changedChannelsAgainstSerialCapture": 53,
+      "maxChannelDelta": 1
+    }
+  ],
+  "canonicalReplacement": "f5cb6f543d85256e7733a1ade6a4f451d86cf378-deterministic-v3"
+}

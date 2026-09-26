@@ -18,6 +18,7 @@
 
             .layout-sidebar {
                 transform: translateX(-100%);
+                visibility: hidden;
                 left: 0;
                 top: 0;
                 height: 100vh;
@@ -28,6 +29,7 @@
             &.layout-overlay-active {
                 .layout-sidebar {
                     transform: translateX(0);
+                    visibility: visible;
                 }
             }
         }
@@ -40,6 +42,7 @@
             &.layout-static-inactive {
                 .layout-sidebar {
                     transform: translateX(-100%);
+                    visibility: hidden;
                     left: 0;
                 }
 
@@ -69,6 +72,7 @@
 
         .layout-sidebar {
             transform: translateX(-100%);
+            visibility: hidden;
             left: 0;
             top: 0;
             height: 100vh;
@@ -90,6 +94,7 @@
         &.layout-mobile-active {
             .layout-sidebar {
                 transform: translateX(0);
+                visibility: visible;
             }
 
             .layout-mask {

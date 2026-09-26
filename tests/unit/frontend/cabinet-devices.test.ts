@@ -11,7 +11,11 @@ import {
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-const actionMocks = vi.hoisted(() => ({ deleteDeviceAction: vi.fn(), refresh: vi.fn() }));
+const actionMocks = vi.hoisted(() => ({
+  deleteDeviceAction: vi.fn(),
+  refresh: vi.fn(),
+  reissueSubscriptionAction: vi.fn(),
+}));
 
 vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh: actionMocks.refresh }) }));
 vi.mock("@/app/actions/cabinet", () => ({
@@ -19,7 +23,7 @@ vi.mock("@/app/actions/cabinet", () => ({
   deleteAllDevicesAction: vi.fn(),
   deleteDeviceAction: actionMocks.deleteDeviceAction,
   logoutAction: vi.fn(),
-  reissueSubscriptionAction: vi.fn(),
+  reissueSubscriptionAction: actionMocks.reissueSubscriptionAction,
 }));
 
 type ColumnProps = {
@@ -178,6 +182,10 @@ describe("cabinet device records", () => {
   beforeEach(async () => {
     vi.clearAllMocks();
     actionMocks.deleteDeviceAction.mockResolvedValue({ status: "success", message: "Устройство удалено." });
+    actionMocks.reissueSubscriptionAction.mockResolvedValue({
+      status: "success",
+      message: "Подписка перевыпущена.",
+    });
     vi.spyOn(window, "confirm").mockReturnValue(true);
 
     container = document.createElement("div");
@@ -192,8 +200,14 @@ describe("cabinet device records", () => {
         offers: { gateways: [], plans: [], has_current_subscription: true, current_subscription_status: "ACTIVE" },
         devices,
         payments: [],
-        paymentsWarning: null,
-        support: { enabled: false, email: null, telegramUsername: null, faqUrl: null },
+        paymentHistoryStatus: "current",
+        support: {
+          enabled: false,
+          email: null,
+          telegramUsername: null,
+          faqUrl: null,
+          liveChatEnabled: false,
+        },
       },
     })));
     await settle();
@@ -230,17 +244,10 @@ describe("cabinet device records", () => {
         'button[aria-label^="Удалить устройство "]',
       ),
     );
-    const mobileDeleteButtons = deleteButtons.filter(
-      (button) => button.textContent === "",
-    );
-    const desktopDeleteButtons = deleteButtons.filter(
-      (button) => button.textContent === "Удалить",
-    );
 
-    expect(deleteButtons).toHaveLength(devices.devices.length * 2);
-    expect(mobileDeleteButtons).toHaveLength(devices.devices.length);
-    expect(desktopDeleteButtons).toHaveLength(devices.devices.length);
-    expect(mobileDeleteButtons[0]?.getAttribute("aria-label")).toBe(
+    expect(deleteButtons).toHaveLength(devices.devices.length);
+    expect(deleteButtons.every((button) => button.textContent === "Удалить")).toBe(true);
+    expect(deleteButtons[0]?.getAttribute("aria-label")).toBe(
       "Удалить устройство 1: iPhone 12 INCY 2.4.7, iOS 26.5.2",
     );
     expect(
@@ -248,10 +255,9 @@ describe("cabinet device records", () => {
         (button) => !button.getAttribute("aria-label")?.includes(internalHwid),
       ),
     ).toBe(true);
-    await click(mobileDeleteButtons[0]!);
-    await click(desktopDeleteButtons[0]!);
+    await click(deleteButtons[0]!);
 
-    expect(window.confirm).toHaveBeenCalledTimes(2);
+    expect(window.confirm).toHaveBeenCalledOnce();
     expect(actionMocks.deleteDeviceAction).toHaveBeenCalledWith(internalHwid);
     expect(container.textContent).toContain("Устройство удалено.");
   });
@@ -262,14 +268,13 @@ describe("cabinet device records", () => {
         'button[aria-label^="Удалить устройство "]',
       ),
     );
-    const mobileButton = deleteButtons.find((button) => button.textContent === "")!;
-    const desktopButton = deleteButtons.find((button) => button.textContent === "Удалить")!;
+    const deleteButton = deleteButtons[0]!;
 
     await act(async () => {
-      mobileButton.dispatchEvent(
+      deleteButton.dispatchEvent(
         new MouseEvent("click", { bubbles: true, cancelable: true }),
       );
-      desktopButton.dispatchEvent(
+      deleteButton.dispatchEvent(
         new MouseEvent("click", { bubbles: true, cancelable: true }),
       );
       await Promise.resolve();
@@ -278,5 +283,45 @@ describe("cabinet device records", () => {
 
     expect(window.confirm).toHaveBeenCalledOnce();
     expect(actionMocks.deleteDeviceAction).toHaveBeenCalledOnce();
+  });
+
+  it("fully explains the consequences before reissuing a subscription", async () => {
+    const reissueButton = Array.from(container.querySelectorAll("button")).find(
+      (button) => button.textContent === "Перевыпустить подписку",
+    );
+
+    expect(reissueButton).toBeDefined();
+    await click(reissueButton!);
+
+    expect(window.confirm).toHaveBeenCalledWith(
+      [
+        "Перевыпуск подписки отключит все текущие устройства.",
+        "",
+        "После перевыпуска старая ссылка перестанет работать, и все устройства придётся заново переподключить.",
+        "",
+        "Вам потребуется:",
+        "• Удалить старую подписку из приложения",
+        "• Добавить новую ссылку из раздела «Подключиться»",
+        "",
+        "Вы уверены, что хотите перевыпустить подписку?",
+      ].join("\n"),
+    );
+    expect(actionMocks.reissueSubscriptionAction).toHaveBeenCalledOnce();
+    expect(actionMocks.refresh).toHaveBeenCalledOnce();
+    expect(container.textContent).toContain("Подписка перевыпущена.");
+  });
+
+  it("does not reissue a subscription when the detailed confirmation is cancelled", async () => {
+    vi.mocked(window.confirm).mockReturnValueOnce(false);
+    const reissueButton = Array.from(container.querySelectorAll("button")).find(
+      (button) => button.textContent === "Перевыпустить подписку",
+    );
+
+    expect(reissueButton).toBeDefined();
+    await click(reissueButton!);
+
+    expect(window.confirm).toHaveBeenCalledOnce();
+    expect(actionMocks.reissueSubscriptionAction).not.toHaveBeenCalled();
+    expect(actionMocks.refresh).not.toHaveBeenCalled();
   });
 });

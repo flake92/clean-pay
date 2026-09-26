@@ -1,0 +1,10 @@
+{
+  "schemaVersion": 1,
+  "baselineCommit": "f5cb6f543d85256e7733a1ade6a4f451d86cf378",
+  "project": "chromium-768x1024",
+  "route": {
+    "id": "protected-passkey-setup",
+    "kind": "protected-redirect"
+  },
+  "normalizedStaticCspViolations": []
+}

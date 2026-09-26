@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { runPaymentMaintenance } from "@/application/payments/run-payment-maintenance";
-import { productionPaymentMaintenanceRunner } from "@/backend/integrations/payments/payment-maintenance-runner";
+import { productionPaymentMaintenanceRunner } from "@/app/_composition/payment-operations-runtime";
 
 const mocks = vi.hoisted(() => ({
   tx: {
@@ -10,7 +10,7 @@ const mocks = vi.hoisted(() => ({
       findUnique: vi.fn(),
       updateMany: vi.fn(),
     },
-    auditLog: { create: vi.fn() },
+    auditLog: { createMany: vi.fn() },
   },
   prisma: {
     $transaction: vi.fn(),
@@ -19,7 +19,13 @@ const mocks = vi.hoisted(() => ({
   applyRemnashopTransaction: vi.fn(),
   getTransactionPage: vi.fn(),
   getPaymentCapabilities: vi.fn(),
+  getExactTransaction: vi.fn(),
+  getLegacyTransactions: vi.fn(),
+  findPendingPaymentIds: vi.fn(),
+  syncExactPaymentRecordFromRemnashop: vi.fn(),
   revealRemnashopToken: vi.fn(),
+  remnashopRefreshTokens: vi.fn(),
+  acquireRemnashopTokensForSession: vi.fn(),
   getRemnashopUserIdFromAccessToken: vi.fn(),
   getJwtExpiresAt: vi.fn(),
 }));
@@ -27,22 +33,38 @@ const mocks = vi.hoisted(() => ({
 vi.mock("@/backend/database/prisma", () => ({ prisma: mocks.prisma }));
 vi.mock("@/backend/integrations/payments/payment-record-service", () => ({
   applyRemnashopTransaction: mocks.applyRemnashopTransaction,
+  syncExactPaymentRecordFromRemnashop:
+    mocks.syncExactPaymentRecordFromRemnashop,
+}));
+vi.mock("@/backend/integrations/payments/prisma-payment-query-repository", () => ({
+  prismaPaymentQueryRepository: {
+    findPendingPaymentIds: mocks.findPendingPaymentIds,
+  },
 }));
 vi.mock("@/backend/integrations/remnashop/payment-recovery", () => ({
   getTransactionPage: mocks.getTransactionPage,
   getPaymentCapabilities: mocks.getPaymentCapabilities,
+  getExactTransaction: mocks.getExactTransaction,
+  getLegacyTransactions: mocks.getLegacyTransactions,
 }));
 vi.mock("@/backend/integrations/remnashop/client", () => ({
-  revealRemnashopToken: mocks.revealRemnashopToken,
   getRemnashopUserIdFromAccessToken:
     mocks.getRemnashopUserIdFromAccessToken,
   getJwtExpiresAt: mocks.getJwtExpiresAt,
+  remnashopRefreshTokens: mocks.remnashopRefreshTokens,
+}));
+vi.mock("@/backend/integrations/remnashop/session-token-lifecycle", () => ({
+  acquireRemnashopTokensForSession: mocks.acquireRemnashopTokensForSession,
+}));
+vi.mock("@/backend/integrations/remnashop/token-protection", () => ({
+  revealRemnashopToken: mocks.revealRemnashopToken,
 }));
 
 import {
   claimPaymentHistorySync,
   completePaymentHistoryPage,
   listDuePaymentHistoryCandidates,
+  loadCurrentPaymentHistoryCredential,
 } from "@/backend/integrations/payments/payment-history-sync-service";
 
 async function continuePaymentHistoryBackfills(input: { limit: number; deadlineMs: number }) {
@@ -106,7 +128,10 @@ describe("payment history sync fencing", () => {
     );
     mocks.getRemnashopUserIdFromAccessToken.mockReturnValue("owner-1");
     mocks.getJwtExpiresAt.mockReturnValue(new Date(now.getTime() + 3_600_000));
-    mocks.tx.auditLog.create.mockResolvedValue({ id: "audit-1" });
+    mocks.revealRemnashopToken.mockImplementation((value: string) => value);
+    mocks.findPendingPaymentIds.mockResolvedValue([]);
+    mocks.getLegacyTransactions.mockResolvedValue([]);
+    mocks.tx.auditLog.createMany.mockResolvedValue({ count: 1 });
   });
 
   it("returns cursor from the locked current row, never from a stale upsert result", async () => {
@@ -466,11 +491,14 @@ describe("payment history sync fencing", () => {
     expect(query).toContain("COALESCE(");
     expect(query).toContain('sync_state."lastSyncedAt"');
     expect(query).toContain(
-      'sync_state."userId", web_user."remnashopUserId"',
+      'web_user."id" AS "userId", web_user."remnashopUserId"',
     );
+    expect(query).toContain('FROM "WebUser" AS web_user');
+    expect(query).toContain('LEFT JOIN "PaymentHistorySyncState" AS sync_state');
+    expect(query).toContain('sync_state."userId" IS NULL');
   });
 
-  it("asks the database for due rows so an earlier backoff cannot starve a ready user", async () => {
+  it("asks the database only for due rows with a usable headless access token", async () => {
     mocks.prisma.$queryRaw.mockResolvedValue([]);
 
     await listDuePaymentHistoryCandidates(1);
@@ -484,47 +512,142 @@ describe("payment history sync fencing", () => {
     );
     expect(query).toContain("AND EXISTS (");
     expect(query).toContain(
+      'web_session."refreshExpiresAt" > clock_timestamp()',
+    );
+    expect(query).toContain('web_session."assuranceLevel" = \'FULL\'');
+    expect(query).toContain(
       'web_session."remnashopAccessTokenEncrypted" IS NOT NULL',
     );
     expect(query).toContain(
       'web_session."remnashopAccessExpiresAt" > clock_timestamp()',
     );
+    expect(query).not.toContain('web_session."remnashopRefreshRecoveryEncrypted"');
+    expect(query).not.toContain('web_session."remnashopRefreshTokenEncrypted"');
+    expect(query).toContain('web_user."emailVerified" = TRUE');
+    expect(query).toContain('web_session."userId" = web_user."id"');
     expect(query.indexOf("AND EXISTS (")).toBeLessThan(
       query.indexOf("LIMIT"),
     );
   });
 
+  it("bounds the number of history candidates selected per maintenance batch", async () => {
+    mocks.prisma.$queryRaw.mockResolvedValue([]);
+
+    await listDuePaymentHistoryCandidates(1_000);
+
+    const sql = mocks.prisma.$queryRaw.mock.calls[0]?.[0] as {
+      values?: unknown[];
+    };
+    expect(sql.values?.at(-1)).toBe(100);
+  });
+
+  it("uses only a fresh owner-matching access token for headless history work", async () => {
+    mocks.tx.$queryRaw
+      .mockResolvedValueOnce([{ set_config: "745ms" }])
+      .mockResolvedValueOnce([{
+        remnashopUserId: "owner-1",
+        encryptedToken: "fresh-access",
+        databaseNow: now,
+      }]);
+    mocks.getRemnashopUserIdFromAccessToken.mockReturnValue("owner-1");
+    mocks.getJwtExpiresAt.mockReturnValue(new Date(now.getTime() + 60_000));
+
+    await expect(loadCurrentPaymentHistoryCredential(
+      "user-1",
+      ownerHash,
+      1_000,
+    )).resolves.toBe("fresh-access");
+
+    expect(mocks.revealRemnashopToken).toHaveBeenCalledWith("fresh-access");
+    const timeoutSql = mocks.tx.$queryRaw.mock.calls[0]?.[0] as {
+      strings?: string[];
+      values?: unknown[];
+    };
+    expect(timeoutSql.strings?.join(" ")).toContain("set_config(");
+    expect(timeoutSql.strings?.join(" ")).toContain("statement_timeout");
+    expect(timeoutSql.values).toContain("745");
+    expect(mocks.prisma.$transaction).toHaveBeenCalledWith(
+      expect.any(Function),
+      { maxWait: 250, timeout: 750 },
+    );
+    const credentialSql = mocks.tx.$queryRaw.mock.calls[1]?.[0] as {
+      strings?: string[];
+    };
+    const credentialQuery = credentialSql.strings?.join(" ") ?? "";
+    expect(credentialQuery).toContain(
+      'web_session."remnashopAccessTokenEncrypted" IS NOT NULL',
+    );
+    expect(credentialQuery).toContain(
+      'web_session."remnashopAccessExpiresAt" > clock_timestamp()',
+    );
+    expect(credentialQuery).not.toContain("remnashopRefreshTokenEncrypted");
+    expect(credentialQuery).not.toContain("remnashopRefreshRecoveryEncrypted");
+    expect(mocks.acquireRemnashopTokensForSession).not.toHaveBeenCalled();
+    expect(mocks.remnashopRefreshTokens).not.toHaveBeenCalled();
+  });
+
+  it("surfaces stored access-token corruption as an unexpected internal error", async () => {
+    mocks.tx.$queryRaw
+      .mockResolvedValueOnce([{ set_config: "9750ms" }])
+      .mockResolvedValueOnce([{
+        remnashopUserId: "owner-1",
+        encryptedToken: "corrupt-access",
+        databaseNow: now,
+      }]);
+    mocks.revealRemnashopToken.mockImplementationOnce(() => {
+      throw new Error("invalid encrypted payload");
+    });
+
+    await expect(loadCurrentPaymentHistoryCredential(
+      "user-1",
+      ownerHash,
+    )).rejects.toMatchObject({ code: "INTERNAL_ERROR", status: 500 });
+    expect(mocks.acquireRemnashopTokensForSession).not.toHaveBeenCalled();
+    expect(mocks.remnashopRefreshTokens).not.toHaveBeenCalled();
+  });
+
+  it("refuses credential discovery when the remaining deadline is too small", async () => {
+    await expect(loadCurrentPaymentHistoryCredential(
+      "user-1",
+      ownerHash,
+      9,
+    )).rejects.toMatchObject({ code: "UPSTREAM_UNAVAILABLE", status: 503 });
+    expect(mocks.prisma.$transaction).not.toHaveBeenCalled();
+  });
+
   it("claims before capability discovery and backs off when discovery fails", async () => {
-    mocks.prisma.$queryRaw
-      .mockResolvedValueOnce([
-        { userId: "user-1", remnashopUserId: "owner-1" },
-      ])
-      .mockResolvedValueOnce([
-        {
-          remnashopUserId: "owner-1",
-          encryptedToken: "encrypted-access-token",
-          databaseNow: now,
-        },
-      ]);
+    mocks.prisma.$queryRaw.mockResolvedValueOnce([
+      { userId: "user-1", remnashopUserId: "owner-1" },
+    ]);
     mocks.tx.paymentHistorySyncState.upsert.mockResolvedValue(state());
     mocks.tx.$queryRaw
       .mockResolvedValueOnce([{ remnashopUserId: "owner-1" }])
       .mockResolvedValueOnce([state()])
       .mockResolvedValueOnce([{ now }])
+      .mockResolvedValueOnce([{ set_config: "745ms" }])
+      .mockResolvedValueOnce([
+        {
+          remnashopUserId: "owner-1",
+          encryptedToken: "access-token",
+          databaseNow: now,
+        },
+      ])
       .mockResolvedValueOnce([{ now }]);
     mocks.tx.paymentHistorySyncState.findUnique.mockResolvedValue({
       failureCount: 0,
     });
     mocks.tx.paymentHistorySyncState.updateMany.mockResolvedValue({ count: 1 });
-    mocks.revealRemnashopToken.mockReturnValue("access-token");
     mocks.getRemnashopUserIdFromAccessToken.mockReturnValue("owner-1");
-    mocks.getPaymentCapabilities.mockResolvedValue(null);
+    mocks.getPaymentCapabilities.mockRejectedValue(new Error("offline"));
 
     await expect(
       continuePaymentHistoryBackfills({ limit: 1, deadlineMs: 1_000 }),
-    ).resolves.toEqual({ attempted: 1, applied: 0, completed: 0, failed: 1 });
+    ).resolves.toEqual({ attempted: 1, applied: 0, completed: 0, failed: 1, deferred: 0 });
 
-    expect(mocks.getPaymentCapabilities).toHaveBeenCalledWith("access-token");
+    expect(mocks.getPaymentCapabilities).toHaveBeenCalledWith(
+      "access-token",
+      expect.any(Number),
+    );
     expect(mocks.getTransactionPage).not.toHaveBeenCalled();
     expect(
       mocks.tx.paymentHistorySyncState.updateMany.mock.invocationCallOrder[0],
@@ -539,7 +662,7 @@ describe("payment history sync fencing", () => {
         }),
       }),
     );
-    expect(mocks.tx.auditLog.create).toHaveBeenCalledWith({
+    expect(mocks.tx.auditLog.createMany).toHaveBeenCalledWith({
       data: expect.objectContaining({
         userId: "user-1",
         action: "payment_history_sync_failed",
@@ -553,57 +676,53 @@ describe("payment history sync fencing", () => {
   });
 
   it("uses DB time to skip an expired JWT and falls through to another owner-matching session", async () => {
-    mocks.prisma.$queryRaw
-      .mockResolvedValueOnce([
-        { userId: "user-1", remnashopUserId: "owner-1" },
-      ])
-      .mockResolvedValueOnce([
-        {
-          remnashopUserId: "owner-1",
-          encryptedToken: "encrypted-wrong-owner",
-          databaseNow: now,
-        },
-        {
-          remnashopUserId: "owner-1",
-          encryptedToken: "encrypted-current-owner",
-          databaseNow: now,
-        },
-      ]);
+    mocks.prisma.$queryRaw.mockResolvedValueOnce([
+      { userId: "user-1", remnashopUserId: "owner-1" },
+    ]);
     mocks.tx.paymentHistorySyncState.upsert.mockResolvedValue(state());
     mocks.tx.$queryRaw
       .mockResolvedValueOnce([{ remnashopUserId: "owner-1" }])
       .mockResolvedValueOnce([state()])
       .mockResolvedValueOnce([{ now }])
+      .mockResolvedValueOnce([{ set_config: "745ms" }])
+      .mockResolvedValueOnce([
+        {
+          remnashopUserId: "owner-1",
+          encryptedToken: "token-wrong",
+          databaseNow: now,
+        },
+        {
+          remnashopUserId: "owner-1",
+          encryptedToken: "token-current",
+          databaseNow: now,
+        },
+      ])
       .mockResolvedValueOnce([{ now }]);
     mocks.tx.paymentHistorySyncState.findUnique.mockResolvedValue({
       failureCount: 0,
     });
     mocks.tx.paymentHistorySyncState.updateMany.mockResolvedValue({ count: 1 });
-    mocks.revealRemnashopToken.mockImplementation((encrypted: string) =>
-      encrypted === "encrypted-wrong-owner" ? "token-wrong" : "token-current",
-    );
     mocks.getRemnashopUserIdFromAccessToken.mockReturnValue("owner-1");
     mocks.getJwtExpiresAt.mockImplementation((token: string) =>
       token === "token-wrong"
         ? new Date(now.getTime() + 1_000)
         : new Date(now.getTime() + 3_600_000),
     );
-    mocks.getPaymentCapabilities.mockResolvedValue(null);
+    mocks.getPaymentCapabilities.mockRejectedValue(new Error("offline"));
 
     await expect(
       continuePaymentHistoryBackfills({ limit: 1, deadlineMs: 1_000 }),
-    ).resolves.toEqual({ attempted: 1, applied: 0, completed: 0, failed: 1 });
+    ).resolves.toEqual({ attempted: 1, applied: 0, completed: 0, failed: 1, deferred: 0 });
 
-    expect(mocks.revealRemnashopToken).toHaveBeenNthCalledWith(
-      1,
-      "encrypted-wrong-owner",
+    expect(mocks.revealRemnashopToken).toHaveBeenCalledTimes(2);
+    expect(mocks.getPaymentCapabilities).toHaveBeenCalledWith(
+      "token-current",
+      expect.any(Number),
     );
-    expect(mocks.revealRemnashopToken).toHaveBeenNthCalledWith(
-      2,
-      "encrypted-current-owner",
-    );
-    expect(mocks.getPaymentCapabilities).toHaveBeenCalledWith("token-current");
-    const credentialSql = mocks.prisma.$queryRaw.mock.calls[1]?.[0] as {
+    const credentialSql = mocks.tx.$queryRaw.mock.calls.find((call) => {
+      const sql = call[0] as { strings?: string[] };
+      return sql.strings?.join(" ").includes('FROM "WebSession"');
+    })?.[0] as {
       strings?: string[];
     };
     const credentialQuery = credentialSql.strings?.join(" ") ?? "";
@@ -617,26 +736,21 @@ describe("payment history sync fencing", () => {
     );
   });
 
-  it("backs off a claimed row whose session vanished and continues to the next due user", async () => {
+  it("defers a stale-access active session without refresh and continues to the next due user", async () => {
     const ownerHash2 = paymentUpstreamOwnerHash("owner-2");
-    mocks.prisma.$queryRaw
-      .mockResolvedValueOnce([
-        { userId: "user-1", remnashopUserId: "owner-1" },
-        { userId: "user-2", remnashopUserId: "owner-2" },
-      ])
-      .mockResolvedValueOnce([])
-      .mockResolvedValueOnce([
-        {
-          remnashopUserId: "owner-2",
-          encryptedToken: "encrypted-access-token-2",
-          databaseNow: now,
-        },
-      ]);
+    mocks.prisma.$queryRaw.mockResolvedValueOnce([
+      { userId: "user-1", remnashopUserId: "owner-1" },
+      { userId: "user-2", remnashopUserId: "owner-2" },
+    ]);
     mocks.tx.paymentHistorySyncState.upsert.mockResolvedValue(state());
     mocks.tx.$queryRaw
       .mockResolvedValueOnce([{ remnashopUserId: "owner-1" }])
       .mockResolvedValueOnce([state()])
       .mockResolvedValueOnce([{ now }])
+      .mockResolvedValueOnce([{ set_config: "745ms" }])
+      // The candidate was selected because its local FULL session remains
+      // active, but no access token is fresh enough for background use.
+      .mockResolvedValueOnce([])
       .mockResolvedValueOnce([{ now }])
       .mockResolvedValueOnce([{ remnashopUserId: "owner-2" }])
       .mockResolvedValueOnce([
@@ -646,24 +760,54 @@ describe("payment history sync fencing", () => {
         }),
       ])
       .mockResolvedValueOnce([{ now }])
+      .mockResolvedValueOnce([{ set_config: "745ms" }])
+      .mockResolvedValueOnce([
+        {
+          remnashopUserId: "owner-2",
+          encryptedToken: "access-token-2",
+          databaseNow: now,
+        },
+      ])
       .mockResolvedValueOnce([{ now }]);
     mocks.tx.paymentHistorySyncState.findUnique.mockResolvedValue({
       failureCount: 0,
     });
     mocks.tx.paymentHistorySyncState.updateMany.mockResolvedValue({ count: 1 });
-    mocks.revealRemnashopToken.mockReturnValue("access-token-2");
     mocks.getRemnashopUserIdFromAccessToken.mockReturnValue("owner-2");
-    mocks.getPaymentCapabilities.mockResolvedValue(null);
+    mocks.getPaymentCapabilities.mockRejectedValue(new Error("offline"));
 
     await expect(
       continuePaymentHistoryBackfills({ limit: 2, deadlineMs: 1_000 }),
-    ).resolves.toEqual({ attempted: 2, applied: 0, completed: 0, failed: 2 });
+    ).resolves.toEqual({
+      attempted: 2,
+      applied: 0,
+      completed: 0,
+      failed: 2,
+      deferred: 1,
+    });
 
     expect(mocks.revealRemnashopToken).toHaveBeenCalledOnce();
-    expect(mocks.revealRemnashopToken).toHaveBeenCalledWith(
-      "encrypted-access-token-2",
-    );
     expect(mocks.getPaymentCapabilities).toHaveBeenCalledOnce();
     expect(mocks.getTransactionPage).not.toHaveBeenCalled();
+    expect(mocks.acquireRemnashopTokensForSession).not.toHaveBeenCalled();
+    expect(mocks.remnashopRefreshTokens).not.toHaveBeenCalled();
+    const deferredUpdate = mocks.tx.paymentHistorySyncState.updateMany.mock.calls
+      .map((call) => call[0])
+      .find((input) => input.data?.errorSnapshot?.code === "UNAUTHORIZED");
+    expect(deferredUpdate).toEqual(expect.objectContaining({
+      data: expect.objectContaining({
+        claimTokenHash: null,
+        leaseExpiresAt: null,
+        nextAttemptAt: new Date(now.getTime() + 5 * 60_000),
+      }),
+    }));
+    expect(deferredUpdate?.data).not.toHaveProperty("failureCount");
+    expect(mocks.tx.auditLog.createMany).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        userId: "user-1",
+        action: "payment_history_sync_deferred",
+        severity: "INFO",
+      }),
+    });
   });
 });

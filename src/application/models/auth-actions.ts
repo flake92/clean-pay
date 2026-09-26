@@ -7,6 +7,22 @@ export type AuthCommand =
 
 export type AuthCommandResult =
   | { ok: true; kind: "identified"; exists: boolean; hasPasskey: boolean }
-  | { ok: true; kind: "authenticated"; emailVerified: boolean; verificationRequired: boolean }
+  | {
+      ok: true;
+      kind: "authenticated";
+      emailVerified: boolean;
+      verificationRequired: boolean;
+      verificationDeliveryFailed: boolean;
+    }
   | { ok: true; kind: "password-reset-requested" }
   | { ok: false; code: string; message: string };
+
+export type AuthExecutionCommand =
+  | Exclude<AuthCommand, { kind: "register" }>
+  | (Extract<AuthCommand, { kind: "register" }> & { referralCode?: string });
+
+export type AuthExecutionResult =
+  | Exclude<AuthCommandResult, { ok: true; kind: "authenticated" }>
+  | (Extract<AuthCommandResult, { ok: true; kind: "authenticated" }> & {
+      registrationFlow?: "created" | "existing_email_login";
+    });

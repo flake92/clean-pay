@@ -1,0 +1,201 @@
+import { NextResponse } from "next/server";
+
+import {
+  accountLinkPath,
+  emailVerificationPath,
+  passkeySetupPath,
+} from "@/shared/auth/account-setup-flow";
+import { safeRedirectPath } from "@/shared/auth/redirect-policy";
+import { getEnv, ServiceError } from "@/app/_composition/platform-runtime";
+import { getAuthorizedRemnashopTokens } from "@/app/_composition/telegram-session-recovery";
+import { clearWebSession } from "@/app/_composition/web-session-runtime";
+
+export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
+
+const transientCodes = new Set([
+  "UPSTREAM_UNAVAILABLE",
+  "UPSTREAM_ERROR",
+  "INTERNAL_ERROR",
+  "CONFLICT",
+]);
+
+function redirect(path: string) {
+  const response = NextResponse.redirect(
+    new URL(path, getEnv().publicAppUrl),
+    303,
+  );
+  response.headers.set("cache-control", "no-store");
+  return response;
+}
+
+function retryAfter(error: ServiceError | null) {
+  const candidate = error?.debug?.retryAfterSeconds;
+  return typeof candidate === "number" && Number.isFinite(candidate) && candidate > 0
+    ? String(Math.min(3_600, Math.ceil(candidate)))
+    : "1";
+}
+
+function recoveryAttempt(value: string | null) {
+  return value === "1" ? 1 : 0;
+}
+
+// A successful recovery redirects back to the page that asked for it. If that
+// page keeps asking for recovery (its render-only authorizer still refuses the
+// freshly refreshed bundle), the browser would bounce between the two forever
+// and every lap would burn a one-time upstream refresh token. A short-lived
+// hop counter turns that into a visible, actionable page after a few laps.
+const RECOVERY_HOPS_COOKIE = "clean_pay_recover_hops";
+const RECOVERY_HOPS_WINDOW_SECONDS = 60;
+const MAX_RECOVERY_HOPS = 3;
+
+function recoveryHops(request: Request) {
+  const header = request.headers.get("cookie") ?? "";
+  const match = new RegExp(`(?:^|;\\s*)${RECOVERY_HOPS_COOKIE}=(\\d{1,3})(?:;|$)`)
+    .exec(header);
+  return match ? Number(match[1]) : 0;
+}
+
+function withRecoveryHops(response: NextResponse, hops: number) {
+  const env = getEnv();
+  response.cookies.set(RECOVERY_HOPS_COOKIE, String(hops), {
+    httpOnly: true,
+    maxAge: RECOVERY_HOPS_WINDOW_SECONDS,
+    path: "/auth/session",
+    sameSite: env.cookieSameSite,
+    secure: env.cookieSecure,
+  });
+  return response;
+}
+
+function unavailable(
+  request: Request,
+  error: ServiceError | null,
+  returnTo: string,
+  attempt: number,
+  status = 503,
+) {
+  const seconds = retryAfter(error);
+
+  const accept = request.headers.get("accept")?.toLowerCase() ?? "";
+  if (accept.includes("application/json") && !accept.includes("text/html")) {
+    return NextResponse.json(
+      {
+        error: {
+          code: error?.code ?? "INTERNAL_ERROR",
+          message: "Provider session recovery is temporarily unavailable.",
+        },
+      },
+      {
+        status,
+        headers: {
+          "cache-control": "no-store",
+          "retry-after": seconds,
+        },
+      },
+    );
+  }
+
+  const url = new URL("/auth/session/recovery", getEnv().publicAppUrl);
+  url.searchParams.set("return_to", returnTo);
+  url.searchParams.set("retry_after", seconds);
+  url.searchParams.set("attempt", String(attempt));
+  url.searchParams.set("kind", "provider");
+  const response = redirect(`${url.pathname}${url.search}`);
+  response.headers.set("retry-after", seconds);
+  return response;
+}
+
+function mergeRecoveryPath(
+  returnTo: string,
+  code: "ACCOUNT_MERGE_REQUIRED" | "ACCOUNT_MERGE_SUBSCRIPTIONS_CONFLICT",
+) {
+  const url = new URL(accountLinkPath(returnTo), getEnv().publicAppUrl);
+  url.searchParams.set(
+    "auth",
+    code === "ACCOUNT_MERGE_SUBSCRIPTIONS_CONFLICT"
+      ? "telegram_merge_subscriptions"
+      : "telegram_merge_required",
+  );
+  return `${url.pathname}${url.search}`;
+}
+
+async function login(returnTo: string) {
+  // A terminal provider credential failure must not leave a valid local
+  // session that would make the proxy send /login straight back to the
+  // protected page. clearWebSession revokes it when possible; explicit
+  // response deletion also fails closed if revocation itself races or fails.
+  try {
+    await clearWebSession();
+  } catch {
+    // The browser credentials are still removed on the response below.
+  }
+
+  const url = new URL("/login", getEnv().publicAppUrl);
+  url.searchParams.set("redirect_to", returnTo);
+  const response = redirect(`${url.pathname}${url.search}`);
+  response.cookies.delete("clean_pay_access");
+  response.cookies.delete("clean_pay_refresh");
+  return response;
+}
+
+export async function GET(request: Request) {
+  const requestUrl = new URL(request.url);
+  const returnTo = safeRedirectPath(requestUrl.searchParams.get("return_to"))
+    ?? "/cabinet";
+  const attempt = recoveryAttempt(requestUrl.searchParams.get("attempt"));
+  const hops = recoveryHops(request);
+
+  if (hops >= MAX_RECOVERY_HOPS) {
+    // Do not touch the provider again: this is a loop, not a transient miss.
+    return unavailable(
+      request,
+      new ServiceError("CONFLICT", 409, "Provider session recovery is looping", {
+        retryAfterSeconds: RECOVERY_HOPS_WINDOW_SECONDS / 2,
+      }),
+      returnTo,
+      1,
+      409,
+    );
+  }
+
+  try {
+    await getAuthorizedRemnashopTokens({
+      allowUnverifiedEmail: true,
+      forceRefresh: true,
+    });
+    return withRecoveryHops(redirect(returnTo), hops + 1);
+  } catch (error) {
+    const serviceError = error instanceof ServiceError ? error : null;
+    const code = serviceError?.code ?? "INTERNAL_ERROR";
+
+    if (code === "UNAUTHORIZED" || code === "AUTH_FAILED") {
+      return login(returnTo);
+    }
+    if (code === "PASSKEY_REQUIRED") {
+      return redirect(passkeySetupPath(returnTo));
+    }
+    if (code === "EMAIL_REQUIRED") {
+      return redirect(accountLinkPath(returnTo));
+    }
+    if (code === "EMAIL_NOT_VERIFIED") {
+      return redirect(emailVerificationPath(returnTo));
+    }
+    if (
+      code === "ACCOUNT_MERGE_REQUIRED"
+      || code === "ACCOUNT_MERGE_SUBSCRIPTIONS_CONFLICT"
+    ) {
+      return redirect(mergeRecoveryPath(returnTo, code));
+    }
+    if (code === "RATE_LIMITED") {
+      return unavailable(request, serviceError, returnTo, attempt, 429);
+    }
+    if (transientCodes.has(code)) {
+      return unavailable(request, serviceError, returnTo, attempt);
+    }
+
+    // An unclassified failure is not proof that either browser credential is
+    // invalid. Preserve the session and let the caller retry safely.
+    return unavailable(request, serviceError, returnTo, attempt);
+  }
+}

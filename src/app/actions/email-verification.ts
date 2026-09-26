@@ -5,15 +5,38 @@ import {
   requestEmailVerificationCode,
   safeReadiness,
 } from "@/application/auth/execute-email-verification";
-import { productionEmailVerificationCommands } from "@/backend/integrations/auth/email-verification";
-import { productionAuthProfileGateway } from "@/backend/integrations/auth/auth-profile-gateway";
+import type { EmailVerificationResult } from "@/application/models/email-verification";
+import {
+  productionAuthProfileGateway,
+  productionEmailVerificationCommands,
+} from "@/app/_composition/session-gateways";
+import { parseEmailActionPayload } from "@/app/actions/runtime-payload";
 
-export async function requestEmailVerificationCodeAction(input: { email?: string; turnstileToken?: string }) {
-  return requestEmailVerificationCode(productionEmailVerificationCommands, input);
+const malformed = {
+  ok: false as const,
+  code: "VALIDATION_ERROR",
+  message: "Проверьте введённые данные.",
+};
+
+export async function requestEmailVerificationCodeAction(
+  input: { email?: string; turnstileToken?: string },
+): Promise<EmailVerificationResult> {
+  const parsed = parseEmailActionPayload(input);
+  return parsed
+    ? requestEmailVerificationCode(productionEmailVerificationCommands, parsed)
+    : malformed;
 }
 
-export async function confirmEmailVerificationCodeAction(input: { email?: string; code: string; turnstileToken?: string }) {
-  return confirmEmailVerificationCode(productionEmailVerificationCommands, input);
+export async function confirmEmailVerificationCodeAction(
+  input: { email?: string; code: string; turnstileToken?: string },
+): Promise<EmailVerificationResult> {
+  const parsed = parseEmailActionPayload(input, { codeRequired: true });
+  return parsed?.code
+    ? confirmEmailVerificationCode(productionEmailVerificationCommands, {
+        ...parsed,
+        code: parsed.code,
+      })
+    : malformed;
 }
 
 export async function checkAccountReadinessAction() {

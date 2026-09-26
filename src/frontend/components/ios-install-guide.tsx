@@ -1,5 +1,10 @@
 "use client";
 
+import Image from "next/image";
+
+import { useModalDialogFocus } from "@/frontend/hooks/use-modal-dialog-focus";
+import { getBranding } from "@/shared/branding";
+
 type IosInstallGuideProps = {
   onClose: () => void;
 };
@@ -11,7 +16,7 @@ const panelStyle = {
   padding: "1rem",
 } as const;
 
-function ShareToolbarPreview() {
+function ShareToolbarPreview({ brandName }: { brandName: string }) {
   return (
     <div aria-hidden="true" style={panelStyle}>
       <div className="flex align-items-center justify-content-between gap-2">
@@ -21,7 +26,7 @@ function ShareToolbarPreview() {
           style={{ background: "white", borderRadius: "1.25rem", minHeight: "2.75rem", padding: "0.5rem 0.75rem" }}
         >
           <i className="pi pi-lock text-500" />
-          <span className="text-700 text-sm">Clean Pay</span>
+          <span className="text-700 text-sm">{brandName}</span>
         </div>
         <span
           className="flex align-items-center justify-content-center"
@@ -54,14 +59,20 @@ function HomeScreenMenuPreview() {
   );
 }
 
-function ConfirmationPreview() {
+function ConfirmationPreview({ brandName }: { brandName: string }) {
   return (
     <div aria-hidden="true" style={panelStyle}>
       <div className="flex align-items-center gap-3">
-        {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img src="/clean-pay-icon-192.png?v=3" alt="" style={{ borderRadius: "0.8rem", height: "3.5rem", objectFit: "cover", width: "3.5rem" }} />
+        <Image
+          alt=""
+          height={56}
+          src="/clean-pay-icon-192.png?v=3"
+          style={{ borderRadius: "0.8rem", objectFit: "cover" }}
+          unoptimized
+          width={56}
+        />
         <div className="flex-1 min-w-0">
-          <div className="font-semibold text-900">Clean Pay</div>
+          <div className="font-semibold text-900">{brandName}</div>
           <div className="text-500 text-sm text-overflow-ellipsis overflow-hidden">Личный кабинет</div>
         </div>
         <span className="text-primary font-semibold">Добавить</span>
@@ -71,11 +82,16 @@ function ConfirmationPreview() {
 }
 
 export function IosInstallGuide({ onClose }: IosInstallGuideProps) {
+  const branding = getBranding();
+  const dialogRef = useModalDialogFocus(onClose);
+
   return (
     <div
       role="dialog"
       aria-modal="true"
       aria-labelledby="install-ios-title"
+      ref={dialogRef}
+      tabIndex={-1}
       style={{
         alignItems: "flex-end",
         background: "rgba(15, 23, 42, 0.55)",
@@ -112,11 +128,11 @@ export function IosInstallGuide({ onClose }: IosInstallGuideProps) {
           </button>
         </div>
         <h2 id="install-ios-title" className="mt-0 mb-3 text-900" style={{ fontSize: "clamp(1.6rem, 7vw, 2.15rem)", lineHeight: 1.12 }}>
-          Как добавить Clean Pay на экран «Домой»
+          Как добавить {branding.name} на экран «Домой»
         </h2>
 
         <p className="mt-0 mb-4 text-600 line-height-3">
-          Установка выполняется средствами Safari. Ярлык будет открывать личный кабинет с названием и логотипом Clean Pay.
+          Установка выполняется средствами Safari. Ярлык будет открывать личный кабинет с названием и логотипом {branding.name}.
         </p>
 
         <ol className="list-none p-0 m-0 flex flex-column gap-4">
@@ -128,7 +144,7 @@ export function IosInstallGuide({ onClose }: IosInstallGuideProps) {
             <p className="text-600 line-height-3 mt-0 mb-2">
               Нажмите кнопку <strong>«Поделиться»</strong> — квадрат со стрелкой вверх. Она находится в нижней или верхней панели Safari.
             </p>
-            <ShareToolbarPreview />
+            <ShareToolbarPreview brandName={branding.name} />
           </li>
 
           <li>
@@ -148,9 +164,9 @@ export function IosInstallGuide({ onClose }: IosInstallGuideProps) {
               <strong className="text-900 text-lg">Подтвердите добавление</strong>
             </div>
             <p className="text-600 line-height-3 mt-0 mb-2">
-              Проверьте название <strong>Clean Pay</strong>, затем нажмите <strong>«Добавить»</strong>. Ярлык появится на экране «Домой».
+              Проверьте название <strong>{branding.name}</strong>, затем нажмите <strong>«Добавить»</strong>. Ярлык появится на экране «Домой».
             </p>
-            <ConfirmationPreview />
+            <ConfirmationPreview brandName={branding.name} />
           </li>
         </ol>
 

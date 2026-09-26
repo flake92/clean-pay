@@ -3,6 +3,7 @@ import type { SubscriptionOffersResponse } from "@/shared/domain/subscriptions";
 
 export type CheckoutViewModel =
   | { status: "ready"; offers: SubscriptionOffersResponse }
+  | { status: "provider-session-recovery-required" }
   | { status: "account-action-required"; action: "login" | "linkEmail" | "verifyEmail"; message: string }
   | { status: "error"; message: string };
 

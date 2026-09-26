@@ -2,6 +2,7 @@ import {
   TelegramCallbackError,
   type TelegramCallbackGateway,
   type TelegramCallbackInput,
+  type TelegramCallbackDurableOwnership,
   type TelegramCallbackSession,
   type TelegramProviderSession,
 } from "@/application/auth/ports/telegram-callback";
@@ -20,7 +21,10 @@ import {
   remnashopLinkTelegram,
   remnashopMergeUsers,
 } from "@/backend/integrations/remnashop/client";
-import { withPaymentOwnerChangeFence } from "@/backend/integrations/payments/payment-user-merge-service";
+import {
+  markPaymentOwnerChangeUpstreamMutationStarted,
+  withPaymentOwnerChangeFence,
+} from "@/backend/integrations/payments/payment-user-merge-service";
 import {
   clearTelegramAuthCookies,
   verifyTelegramCallback,
@@ -43,6 +47,7 @@ type VerifiedResult = {
     telegramId: string; telegramUsername: string | null; fullName: string | null; photoUrl: string | null;
     remnashopAuthResult?: ProviderSession | null;
   };
+  durable?: TelegramCallbackDurableOwnership;
 };
 
 function providerSession(session: TelegramProviderSession) {
@@ -82,7 +87,12 @@ function subscriptionsConflict(error: unknown) {
       .includes("both users have current subscriptions");
 }
 
-export const productionTelegramCallbackGateway: TelegramCallbackGateway = {
+type TelegramCallbackAuthorizer = typeof getAuthorizedRemnashopTokens;
+
+export function createProductionTelegramCallbackGateway(
+  authorize: TelegramCallbackAuthorizer = getAuthorizedRemnashopTokens,
+): TelegramCallbackGateway {
+  return {
   async consume(input) {
     const result = await consume(input);
     return {
@@ -98,6 +108,7 @@ export const productionTelegramCallbackGateway: TelegramCallbackGateway = {
         photoUrl: result.identity.photoUrl,
         providerSession: result.identity.remnashopAuthResult ? { context: result.identity.remnashopAuthResult } : null,
       },
+      ...(result.durable ? { durable: result.durable } : {}),
     };
   },
 
@@ -164,6 +175,93 @@ export const productionTelegramCallbackGateway: TelegramCallbackGateway = {
       await tx.$queryRaw<Array<{ id: string }>>`
         SELECT "id" FROM "WebUser" WHERE "id" = ${input.userId} FOR UPDATE
       `;
+      const owner = await tx.webUser.findUnique({
+        where: { id: input.userId },
+        select: {
+          paymentOwnerChangeTokenHash: true,
+          paymentOwnerChangeLeaseExpiresAt: true,
+          paymentOwnerChangeOperationHash: true,
+          paymentOwnerChangeMutationStartedAt: true,
+        },
+      });
+      if (owner?.paymentOwnerChangeTokenHash) {
+        const recoverable = owner.paymentOwnerChangeMutationStartedAt
+          && owner.paymentOwnerChangeOperationHash;
+        if (recoverable) {
+          const candidates = await tx.accountMergeConfirmation.findMany({
+            where: {
+              userId: input.userId,
+              status: { in: [AccountMergeConfirmationStatus.PENDING, AccountMergeConfirmationStatus.PROCESSING] },
+            },
+            orderBy: { createdAt: "desc" },
+            take: 10,
+          });
+          const previous = candidates.find((candidate) =>
+            sha256(`telegram-account-merge:v1:${candidate.id}`) === owner.paymentOwnerChangeOperationHash
+            && candidate.telegramId === input.telegramId
+            && candidate.sourceRemnashopUserId === input.sourceAccountId
+            && candidate.targetRemnashopUserId === input.targetAccountId
+            && candidate.targetEmail.trim().toLowerCase() === input.targetEmail.trim().toLowerCase()
+          );
+          if (previous) {
+            const staleProcessing = previous.status === AccountMergeConfirmationStatus.PROCESSING
+              && (!previous.leaseExpiresAt || previous.leaseExpiresAt <= now);
+            await tx.accountMergeConfirmation.update({
+              where: { id: previous.id },
+              data: {
+                tokenHash: sha256(token),
+                expiresAt: new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000),
+                ...(staleProcessing
+                  ? { status: AccountMergeConfirmationStatus.PENDING, leaseExpiresAt: null }
+                  : {}),
+              },
+            });
+            return;
+          }
+        }
+        if (!owner.paymentOwnerChangeLeaseExpiresAt
+          || owner.paymentOwnerChangeLeaseExpiresAt > now
+          || owner.paymentOwnerChangeMutationStartedAt) {
+          throw new ServiceError(
+            "CONFLICT",
+            409,
+            "The previous account merge still owns the payment transition.",
+          );
+        }
+      }
+      const reusable = await tx.accountMergeConfirmation.findFirst({
+        where: {
+          userId: input.userId,
+          telegramId: input.telegramId,
+          sourceEmail: input.sourceEmail,
+          targetEmail: input.targetEmail,
+          targetTelegramId: input.targetTelegramId,
+          sourceRemnashopUserId: input.sourceAccountId,
+          targetRemnashopUserId: input.targetAccountId,
+          expiresAt: { gt: now },
+          OR: [
+            { status: AccountMergeConfirmationStatus.PENDING },
+            {
+              status: AccountMergeConfirmationStatus.PROCESSING,
+              leaseExpiresAt: { lte: now },
+            },
+          ],
+        },
+      });
+      if (reusable) {
+        await tx.accountMergeConfirmation.update({
+          where: { id: reusable.id },
+          data: {
+            tokenHash: sha256(token),
+            telegramUsername: input.telegramUsername,
+            status: AccountMergeConfirmationStatus.PENDING,
+            leaseExpiresAt: null,
+            lastErrorCode: null,
+            expiresAt: new Date(now.getTime() + 10 * 60 * 1000),
+          },
+        });
+        return;
+      }
       const active = await tx.$queryRaw<Array<{ id: string }>>`
         SELECT "id" FROM "AccountMergeConfirmation"
         WHERE "userId" = ${input.userId} AND "status" = 'PROCESSING'
@@ -199,27 +297,47 @@ export const productionTelegramCallbackGateway: TelegramCallbackGateway = {
   },
 
   async applyTelegramIdentity(input) {
-    const existing = input.existingTelegramUserId
-      ? await prisma.webUser.findUnique({ where: { id: input.existingTelegramUserId } })
-      : null;
     const user = input.targetUserId
       ? await prisma.$transaction(async (tx) => {
           const target = await tx.webUser.findUniqueOrThrow({ where: { id: input.targetUserId! } });
+          const existing = input.existingTelegramUserId
+            ? await tx.webUser.findUnique({ where: { id: input.existingTelegramUserId } })
+            : null;
           const source = existing && existing.id !== input.targetUserId ? existing : null;
-          if (source) {
-            await mergeLocalUsersIntoTarget(tx, {
-              targetUserId: input.targetUserId!,
-              targetUpstreamAccountId: target.remnashopUserId ?? source.remnashopUserId,
-              sourceUserIds: [source.id],
-              ownerExpectations: [target, source].map((owner) => ({
-                id: owner.id, remnashopUserId: owner.remnashopUserId, email: owner.email, telegramId: owner.telegramId,
-              })),
-            });
+          if (target.remnashopUserId
+            && target.remnashopUserId !== input.provenProviderAccountId) {
+            throw new ServiceError(
+              "ACCOUNT_MERGE_REQUIRED",
+              409,
+              "The local target owner changed after provider verification.",
+              { message: "local_telegram_target_owner_mismatch" },
+            );
           }
+          if (source
+            && (source.remnashopUserId !== input.expectedExistingUpstreamAccountId
+              || (source.remnashopUserId !== null
+                && source.remnashopUserId !== input.provenProviderAccountId))) {
+            throw new ServiceError(
+              "ACCOUNT_MERGE_REQUIRED",
+              409,
+              "The local Telegram owner is not proven to belong to the provider account.",
+              { message: "local_telegram_source_owner_mismatch" },
+            );
+          }
+          const targetUpstreamAccountId =
+            input.provenProviderAccountId ?? target.remnashopUserId;
+          await mergeLocalUsersIntoTarget(tx, {
+            targetUserId: input.targetUserId!,
+            targetUpstreamAccountId,
+            sourceUserIds: source ? [source.id] : [],
+            ownerExpectations: [target, ...(source ? [source] : [])].map((owner) => ({
+              id: owner.id, remnashopUserId: owner.remnashopUserId, email: owner.email, telegramId: owner.telegramId,
+            })),
+          });
           const updated = await tx.webUser.update({
             where: { id: input.targetUserId! },
             data: {
-              remnashopUserId: target.remnashopUserId ?? source?.remnashopUserId,
+              remnashopUserId: input.provenProviderAccountId ?? target.remnashopUserId,
               email: target.email ?? source?.email,
               emailVerified: target.emailVerified || Boolean(source?.emailVerified),
               telegramId: input.telegramId,
@@ -233,13 +351,11 @@ export const productionTelegramCallbackGateway: TelegramCallbackGateway = {
               lastLoginAt: new Date(),
             },
           });
-          if (source) {
-            await assertUserMergeFinalOwner(tx, {
-              targetUserId: updated.id,
-              sourceUserIds: [source.id],
-              expected: { telegramId: input.telegramId, ...(updated.remnashopUserId ? { remnashopUserId: updated.remnashopUserId } : {}), ...(updated.email ? { email: updated.email } : {}) },
-            });
-          }
+          await assertUserMergeFinalOwner(tx, {
+            targetUserId: updated.id,
+            sourceUserIds: source ? [source.id] : [],
+            expected: { telegramId: input.telegramId, ...(updated.remnashopUserId ? { remnashopUserId: updated.remnashopUserId } : {}), ...(updated.email ? { email: updated.email } : {}) },
+          });
           return updated;
         })
       : await prisma.webUser.upsert({
@@ -265,8 +381,24 @@ export const productionTelegramCallbackGateway: TelegramCallbackGateway = {
   },
 
   async attachTelegramToCurrentAccount({ telegramId, telegramUsername, ownerFenceHeld }) {
-    const tokens = await getAuthorizedRemnashopTokens({ allowUnverifiedEmail: true });
+    const tokens = await authorize({ allowUnverifiedEmail: true });
+    const before = await getRemnashopMe(tokens.accessToken);
+    if (before.pending_email) {
+      throw new ServiceError(
+        "ACCOUNT_MERGE_REQUIRED",
+        409,
+        "Pending provider e-mail must be resolved before linking Telegram.",
+      );
+    }
+    await markPaymentOwnerChangeUpstreamMutationStarted();
     await remnashopLinkTelegram({ accessToken: tokens.accessToken, telegramId, telegramUsername });
+    const verified = await synchronizeProviderAccountIdentity(tokens.accessToken, {
+      accountId: getRemnashopUserIdFromAccessToken(tokens.accessToken),
+      email: before.email,
+      emailVerified: before.is_email_verified,
+      pendingEmail: null,
+      telegramId,
+    });
     await linkCurrentUserToRemnashopAuth({
       accessToken: tokens.accessToken,
       refreshToken: tokens.refreshToken,
@@ -279,16 +411,21 @@ export const productionTelegramCallbackGateway: TelegramCallbackGateway = {
           ?? new Date(Date.now() + 60_000).toISOString(),
       },
       paymentOwnerFenceHeld: ownerFenceHeld,
+      verifiedProfile: verified.profile,
     });
   },
 
   async mergeProviderAccounts({ sourceAccountId, targetAccountId }) {
     if (sourceAccountId === targetAccountId) return false;
     try {
+      await markPaymentOwnerChangeUpstreamMutationStarted();
       await remnashopMergeUsers({
         sourceUserId: sourceAccountId,
         targetUserId: targetAccountId,
         reason: "Clean Pay Telegram link: merge current e-mail account into owned Telegram account",
+        emailResolution: "KEEP_TARGET",
+        telegramResolution: "KEEP_SOURCE",
+        paymentResolution: "REKEY_SOURCE",
       });
       return true;
     } catch (error) {
@@ -299,15 +436,19 @@ export const productionTelegramCallbackGateway: TelegramCallbackGateway = {
     }
   },
 
-  async linkProviderSession({ session, ownerFenceHeld, invalidateSiblingTokens }) {
+  async linkProviderSession({ session, ownerFenceHeld, invalidateSiblingTokens, expectedIdentity }) {
     const auth = providerSession(session);
-    await synchronizeProviderAccountIdentity(auth.cookies.accessToken);
+    const verified = await synchronizeProviderAccountIdentity(
+      auth.cookies.accessToken,
+      expectedIdentity,
+    );
     const result = await linkCurrentUserToRemnashopAuth({
       accessToken: auth.cookies.accessToken,
       refreshToken: auth.cookies.refreshToken,
       auth: auth.data,
       paymentOwnerFenceHeld: ownerFenceHeld,
       ...(invalidateSiblingTokens ? { invalidateSiblingRemnashopTokens: true } : {}),
+      verifiedProfile: verified.profile,
     });
     return { userId: result.user.id, requiresTelegramRecovery: false };
   },
@@ -330,4 +471,5 @@ export const productionTelegramCallbackGateway: TelegramCallbackGateway = {
       telegramId,
     });
   },
-};
+  };
+}

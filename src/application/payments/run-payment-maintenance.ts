@@ -1,4 +1,8 @@
-import type { PaymentMaintenanceRunner, PaymentReconciliationGateway } from "@/application/payments/ports/payment-maintenance";
+import type {
+  PaymentHistoryAuthorization,
+  PaymentMaintenanceRunner,
+  PaymentReconciliationGateway,
+} from "@/application/payments/ports/payment-maintenance";
 
 const emptyBacklog = {
   pending: 0,
@@ -8,6 +12,10 @@ const emptyBacklog = {
   maximumAttemptCount: 0,
   totalFailureCount: 0,
 };
+
+const HISTORY_CANDIDATE_LIMIT = 20;
+const HISTORY_EXACT_PAYMENT_LIMIT = 5;
+const HISTORY_PAGE_LIMIT_PER_CANDIDATE = 3;
 
 export async function loadPaymentReconciliationBacklog(
   runner: PaymentMaintenanceRunner,
@@ -24,6 +32,16 @@ function assertBounds(input: { paymentLimit: number; deadlineMs: number }) {
 
 function retryDelayMs(failureCount: number) {
   return Math.min(60 * 60_000, 15_000 * 2 ** Math.min(failureCount, 8));
+}
+
+function remainingHistoryBudget(runner: PaymentMaintenanceRunner, deadlineAt: number) {
+  const remaining = deadlineAt - runner.now();
+  if (remaining <= 0) {
+    throw Object.assign(new Error("Payment history deadline exceeded"), {
+      code: "UPSTREAM_UNAVAILABLE",
+    });
+  }
+  return remaining;
 }
 
 export async function processPaymentReconciliation(
@@ -132,26 +150,117 @@ export async function runPaymentMaintenance(
     }
   }
 
-  const history = { attempted: 0, applied: 0, completed: 0, failed: 0 };
-  const candidates = await runner.listHistoryCandidates(1);
-  for (const candidate of candidates) {
-    if (runner.now() >= deadlineAt) break;
-    const claim = await runner.claimHistory(candidate);
-    if (!claim) continue;
-    history.attempted += 1;
-    try {
-      const authorization = await runner.authorizeHistory(claim);
-      const pageSize = await runner.historyPageSize(authorization);
-      if (!pageSize) throw Object.assign(new Error("History capability unavailable"), { code: "UPSTREAM_ERROR" });
-      const page = await runner.loadHistoryPage(authorization, claim.cursor, Math.min(100, pageSize));
-      const result = await runner.completeHistoryPage(claim, page);
-      history.applied += result.applied;
-      if (!result.hasMore) history.completed += 1;
-    } catch (error) {
-      await runner.failHistory(claim, error);
-      history.failed += 1;
+  const history = {
+    attempted: 0,
+    applied: 0,
+    completed: 0,
+    failed: 0,
+    deferred: 0,
+  };
+  const candidates = await runner.listHistoryCandidates(HISTORY_CANDIDATE_LIMIT);
+  candidateLoop: for (const candidate of candidates) {
+    let authorization: PaymentHistoryAuthorization | null = null;
+    let pageSize: number | null = null;
+
+    for (
+      let pageIndex = 0;
+      pageIndex < HISTORY_PAGE_LIMIT_PER_CANDIDATE;
+      pageIndex += 1
+    ) {
+      if (runner.now() >= deadlineAt) break candidateLoop;
+
+      const claim = await runner.claimHistory(candidate);
+      if (!claim) break;
+
+      history.attempted += 1;
+      try {
+        if (!authorization) {
+          authorization = await runner.authorizeHistory(
+            claim,
+            remainingHistoryBudget(runner, deadlineAt),
+          );
+          pageSize = await runner.historyPageSize(
+            authorization,
+            remainingHistoryBudget(runner, deadlineAt),
+          );
+        }
+
+        if (!pageSize) {
+          const legacyPage = await runner.loadLegacyHistory(
+            authorization,
+            remainingHistoryBudget(runner, deadlineAt),
+          );
+          const result = await runner.completeHistoryPage(claim, legacyPage);
+          history.applied += result.applied;
+          if (!result.hasMore) history.completed += 1;
+          break;
+        }
+
+        if (pageIndex === 0) {
+          const pendingPaymentIds = await runner.findPendingHistoryPaymentIds(
+            candidate.userId,
+            HISTORY_EXACT_PAYMENT_LIMIT,
+          );
+          for (const [index, paymentId] of pendingPaymentIds.entries()) {
+            try {
+              const exact = await runner.loadExactHistoryPayment(
+                authorization,
+                paymentId,
+                remainingHistoryBudget(runner, deadlineAt),
+              );
+              if (exact) {
+                await runner.persistExactHistoryPayment(candidate, exact);
+              }
+            } catch (error) {
+              runner.logHistoryExactFailure?.(error, index);
+            }
+          }
+        }
+
+        const page = await runner.loadHistoryPage(
+          authorization,
+          claim.cursor,
+          Math.min(100, pageSize),
+          remainingHistoryBudget(runner, deadlineAt),
+        );
+        const result = await runner.completeHistoryPage(claim, page);
+        history.applied += result.applied;
+        if (!result.hasMore) {
+          history.completed += 1;
+          break;
+        }
+      } catch (error) {
+        const classification = runner.classifyHistoryError(error);
+
+        if (classification.kind === "deferred") {
+          await runner.deferHistory(claim, error);
+          history.deferred += 1;
+        } else {
+          await runner.failHistory(claim, error);
+        }
+        history.failed += 1;
+        break;
+      }
     }
   }
   const backlog = await loadPaymentReconciliationBacklog(runner);
   return { ...payments, history, backlog };
+}
+
+export function paymentMaintenanceBatchIsHealthy(
+  result: Awaited<ReturnType<typeof runPaymentMaintenance>>,
+) {
+  const processedWithoutFailure = result.claimed - result.failed;
+
+  if (processedWithoutFailure > 0) return true;
+  if (result.claimed > 0 || result.backlog.due > 0) return false;
+
+  const historyProcessedWithoutFailure =
+    result.history.attempted - result.history.failed;
+
+  if (historyProcessedWithoutFailure > 0) return true;
+  if (result.history.attempted === 0) return true;
+
+  return result.history.failed === result.history.attempted &&
+    result.history.deferred === result.history.failed;
 }

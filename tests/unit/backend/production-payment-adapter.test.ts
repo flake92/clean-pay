@@ -35,6 +35,10 @@ vi.mock("@/backend/integrations/remnashop/client", () => ({
   getAuthorizedRemnashopTokens: mocks.getAuthorizedRemnashopTokens,
   getRemnashopUserIdFromAccessToken: mocks.getRemnashopUserIdFromAccessToken,
   remnashopRequest: mocks.remnashopRequest,
+  remnashopValidatedRequest: mocks.remnashopRequest,
+}));
+vi.mock("@/backend/integrations/remnashop/api-client-runtime", () => ({
+  remnashopValidatedRequest: mocks.remnashopRequest,
 }));
 vi.mock("@/backend/integrations/remnashop/payment-recovery", () => ({ parsePaymentInit: mocks.parsePaymentInit }));
 vi.mock("@/backend/integrations/payments/payment-idempotency-service", () => ({
@@ -56,7 +60,9 @@ vi.mock("@/backend/observability/audit", () => ({
   logTechnicalError: mocks.logTechnicalError,
 }));
 
-import { productionPaymentWorkflowGateway } from "@/backend/integrations/payments/payment-workflow-gateway";
+import { createProductionPaymentWorkflowGateway } from "@/backend/integrations/payments/payment-workflow-gateway";
+
+const productionPaymentWorkflowGateway = createProductionPaymentWorkflowGateway();
 
 const productionPaymentCommands = {
   purchase: (request: PurchaseRequest, idempotencyKey: string) => executePaymentWorkflow(

@@ -6,7 +6,10 @@ import {
   verifyPasskeyLogin,
   verifyPasskeyRegistration,
 } from "@/application/auth/execute-passkey-command";
-import type { PasskeyCommands } from "@/application/auth/ports/passkey-commands";
+import {
+  PasskeyGatewayError,
+  type PasskeyCommands,
+} from "@/application/auth/ports/passkey-commands";
 
 function commands(overrides: Partial<PasskeyCommands> = {}): PasskeyCommands {
   const actor = {
@@ -55,6 +58,39 @@ describe("passkey application workflow", () => {
     await expect(beginPasskeyLogin(subject, { email: "none@example.com" })).resolves.toMatchObject({ ok: false, code: "NOT_FOUND" });
     expect(subject.generateLoginOptions).not.toHaveBeenCalled();
     expect(subject.storeLoginChallenge).not.toHaveBeenCalled();
+  });
+
+  it("distinguishes Turnstile rejection from other passkey prohibitions", async () => {
+    const securityFailure = commands({
+      verifyHuman: vi.fn(async () => {
+        throw new PasskeyGatewayError("SECURITY_CHECK_FAILED");
+      }),
+    });
+    await expect(beginPasskeyLogin(securityFailure, {
+      email: "user@example.com",
+      turnstileToken: "rejected-token",
+    })).resolves.toEqual({
+      ok: false,
+      code: "SECURITY_CHECK_FAILED",
+      message: "Cloudflare Turnstile не подтвердил проверку. Выполните её ещё раз и повторите действие.",
+    });
+    expect(securityFailure.findLoginAccount).not.toHaveBeenCalled();
+
+    const forbidden = commands({
+      assertLoginOptionsRateLimit: vi.fn(async () => {
+        throw new PasskeyGatewayError("FORBIDDEN");
+      }),
+    });
+    const result = await beginPasskeyLogin(forbidden, {
+      email: "user@example.com",
+      turnstileToken: "valid-token",
+    });
+    expect(result).toEqual({
+      ok: false,
+      code: "FORBIDDEN",
+      message: "Действие недоступно.",
+    });
+    expect(JSON.stringify(result)).not.toContain("Turnstile");
   });
 
   it("rejects a credential selected for another challenge owner before cryptographic verification", async () => {

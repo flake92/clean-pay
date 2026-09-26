@@ -1,15 +1,21 @@
 import { AppShell } from "@/app/_components/app-shell";
-import { PageHeader } from "@/frontend/components/layout";
+import { PageHeader } from "@/frontend/components/page-header";
 import { LinkAccountPanel } from "@/frontend/components/link-account-panel";
 import { loadLinkAccount } from "@/application/auth/manage-linked-account";
-import { productionLinkAccountReader } from "@/backend/integrations/auth/link-account";
-import { productionAuthProfileGateway } from "@/backend/integrations/auth/auth-profile-gateway";
-import { productionPasskeyManagementGateway } from "@/backend/integrations/auth/passkey-management-gateway";
+import {
+  requestAuthProfileGateway,
+  requestLinkAccountReader,
+  requestPasskeyManagementGateway,
+} from "@/app/_composition/request-scoped-readers";
 import {
   ACCOUNT_SETUP_PASSWORD_STEP,
   ACCOUNT_SETUP_REASON,
   safeAccountSetupDestination,
 } from "@/shared/auth/account-setup-flow";
+import {
+  providerSessionRecoveryPath,
+  sessionRefreshPath,
+} from "@/shared/auth/session-navigation";
 import { redirect } from "next/navigation";
 
 export const dynamic = "force-dynamic";
@@ -38,16 +44,42 @@ export default async function LinkAccountPage({
   const redirectTo = safeAccountSetupDestination(
     firstSearchParam(params.redirect_to),
   );
-  const model = await loadLinkAccount(productionLinkAccountReader, productionAuthProfileGateway, productionPasskeyManagementGateway, firstSearchParam(params.auth) ?? null);
-  if (model.status === "unauthorized") redirect("/login");
+  const authStatus = firstSearchParam(params.auth) ?? null;
+  const returnParams = new URLSearchParams();
+  if (guided) returnParams.set("reason", ACCOUNT_SETUP_REASON);
+  if (passwordRequired) returnParams.set("step", ACCOUNT_SETUP_PASSWORD_STEP);
+  if (params.redirect_to !== undefined || guided) {
+    returnParams.set("redirect_to", redirectTo);
+  }
+  if (authStatus && authStatus.length <= 100) returnParams.set("auth", authStatus);
+  const linkAccountReturnTo = `/link-account${returnParams.size ? `?${returnParams}` : ""}`;
+  const model = await loadLinkAccount(
+    requestLinkAccountReader,
+    requestAuthProfileGateway,
+    requestPasskeyManagementGateway,
+    authStatus,
+  );
+  if (model.status === "unauthorized") {
+    redirect(sessionRefreshPath(linkAccountReturnTo));
+  }
+  if (model.status === "provider-session-recovery-required") {
+    redirect(providerSessionRecoveryPath(linkAccountReturnTo));
+  }
+  const passwordOnlyReauth =
+    passwordRequired &&
+    model.status === "ready" &&
+    Boolean(model.profile.email) &&
+    model.profile.emailVerified;
 
   return (
-    <AppShell requireAuth>
+    <AppShell requireAuth returnTo={linkAccountReturnTo}>
       <div className="flex flex-column gap-4">
         <PageHeader
           description={
             guided
-              ? "Добавьте резервный вход, подтвердите e-mail и вернитесь к прерванному действию."
+              ? passwordOnlyReauth
+                ? "Подтвердите вход текущим паролем и вернитесь к прерванному действию."
+                : "Добавьте резервный вход, подтвердите e-mail и вернитесь к прерванному действию."
               : "Управляйте способами входа и восстановления доступа."
           }
           title={guided ? "Сохраните доступ к аккаунту" : "Способы входа"}

@@ -2,6 +2,7 @@
 set -eu
 
 ENV_FILE=${1:-}
+PHASE=${2:-finalize}
 
 fail() {
   printf '%s\n' "Remnashop rollout preparation failed: $*" >&2
@@ -14,7 +15,11 @@ info() {
 
 [ -n "$ENV_FILE" ] || fail "an environment file path is required"
 [ -f "$ENV_FILE" ] || fail "environment file not found: $ENV_FILE"
-command -v docker >/dev/null 2>&1 || fail "docker is not installed or is not available in PATH"
+
+case "$PHASE" in
+  check|finalize) ;;
+  *) fail "phase must be check or finalize" ;;
+esac
 
 env_value() {
   name="$1"
@@ -32,6 +37,55 @@ env_value() {
   fi
 }
 
+repository_minimum_revision=0059
+minimum_revision=$(env_value REMNASHOP_MINIMUM_ALEMBIC_REVISION "$repository_minimum_revision")
+case "$minimum_revision:$repository_minimum_revision" in
+  *[!0-9:]*|:*|*:) fail "Alembic revisions must be numeric (configured=$minimum_revision repository=$repository_minimum_revision)" ;;
+esac
+[ "$minimum_revision" -ge "$repository_minimum_revision" ] \
+  || fail "REMNASHOP_MINIMUM_ALEMBIC_REVISION=$minimum_revision is below the repository-required floor $repository_minimum_revision; upgrade Remnashop first"
+
+script_dir=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
+remnashop_env_file=$(env_value REMNASHOP_ENV_FILE /opt/remnashop/.env)
+remnashop_env_expected_uid=$(env_value REMNASHOP_ENV_EXPECTED_UID 0)
+remnashop_env_expected_gid=$(env_value REMNASHOP_ENV_EXPECTED_GID 0)
+
+case "$remnashop_env_expected_uid:$remnashop_env_expected_gid" in
+  *[!0-9:]*) fail "REMNASHOP_ENV_EXPECTED_UID and REMNASHOP_ENV_EXPECTED_GID must be numeric ids" ;;
+esac
+case "$remnashop_env_file" in
+  /*) ;;
+  *) fail "REMNASHOP_ENV_FILE must be an absolute path" ;;
+esac
+
+# This metadata-only guard deliberately runs before the first Docker access.
+# It rejects a missing, symlinked, non-regular, broadly readable or wrongly
+# owned host credential source without ever printing or reading its contents.
+# Production hosts do not otherwise need a host Node.js installation, so use
+# the equivalent descriptor-bound Python guard when Node.js is unavailable.
+run_remnashop_env_preflight() {
+  if command -v node >/dev/null 2>&1; then
+    node "$script_dir/remnashop-env-preflight.mjs" \
+      "$remnashop_env_file" \
+      "$remnashop_env_expected_uid" \
+      "$remnashop_env_expected_gid"
+    return
+  fi
+  if command -v python3 >/dev/null 2>&1; then
+    python3 "$script_dir/remnashop-env-preflight.py" \
+      "$remnashop_env_file" \
+      "$remnashop_env_expected_uid" \
+      "$remnashop_env_expected_gid"
+    return
+  fi
+  fail "node or python3 is required for credential metadata preflight"
+}
+
+run_remnashop_env_preflight \
+  || fail "Remnashop environment-file metadata is unsafe"
+
+command -v docker >/dev/null 2>&1 || fail "docker is not installed or is not available in PATH"
+
 container_image() {
   container="$1"
   running=$(docker inspect "$container" --format '{{.State.Running}}' 2>/dev/null) \
@@ -46,11 +100,56 @@ database_query() {
     sh "$@"
 }
 
+probe_notification_preferences_contract() {
+  service_key=$(env_value REMNASHOP_AUTH_SERVICE_KEY)
+  [ -n "$service_key" ] \
+    || fail "REMNASHOP_AUTH_SERVICE_KEY is required for the Remnashop API contract probe"
+
+  # First validate the shared service credential against an unauthenticated
+  # endpoint: a correct key plus an empty body yields 422, a wrong key yields
+  # 401. Then use an unsupported POST on the exact new path: FastAPI yields 405
+  # only when that path exists, while an image without the reminder contract yields 404. The key
+  # travels over stdin and is never embedded in command-line arguments or logs.
+  contract_statuses=$(
+    printf '%s' "$service_key" \
+      | docker exec -i "$api_container" python -c '
+import http.client
+import os
+import sys
+
+key = sys.stdin.read()
+port = int(os.environ.get("APP_PORT", "5000"))
+statuses = []
+for path in (
+    "/api/v1/public/auth/identify",
+    "/api/v1/public/auth/notification-preferences",
+):
+    connection = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
+    connection.request(
+        "POST",
+        path,
+        body="{}",
+        headers={
+            "content-type": "application/json",
+            "x-remnashop-auth-service-key": key,
+        },
+    )
+    response = connection.getresponse()
+    response.read()
+    statuses.append(response.status)
+    connection.close()
+print(*statuses)
+' 2>/dev/null
+  ) || fail "could not probe the Remnashop notification-preferences API"
+
+  [ "$contract_statuses" = "422 405" ] \
+    || fail "Remnashop auth/API contract returned $contract_statuses; expected 422 405"
+}
+
 api_container=$(env_value REMNASHOP_API_CONTAINER remnashop)
 worker_container=$(env_value REMNASHOP_WORKER_CONTAINER remnashop-taskiq-worker)
 scheduler_container=$(env_value REMNASHOP_SCHEDULER_CONTAINER remnashop-taskiq-scheduler)
 postgres_container=$(env_value REMNASHOP_POSTGRES_CONTAINER remnashop-db)
-minimum_revision=$(env_value REMNASHOP_MINIMUM_ALEMBIC_REVISION 0050)
 
 api_image=$(container_image "$api_container")
 worker_image=$(container_image "$worker_container")
@@ -61,8 +160,24 @@ if [ "$api_image" != "$worker_image" ] || [ "$api_image" != "$scheduler_image" ]
   fail "API, worker and scheduler must use the same image (api=$api_image worker=$worker_image scheduler=$scheduler_image)"
 fi
 
-schema_ready=$(database_query -c "SELECT to_regclass('public.alembic_version') IS NOT NULL AND to_regclass('public.payment_runtime_control') IS NOT NULL AND to_regclass('public.payment_operations') IS NOT NULL;")
-[ "$schema_ready" = "t" ] || fail "required payment rollout schema is missing"
+schema_ready=$(database_query -c "
+  SELECT
+    to_regclass('public.alembic_version') IS NOT NULL
+    AND to_regclass('public.payment_runtime_control') IS NOT NULL
+    AND to_regclass('public.payment_operations') IS NOT NULL
+    AND to_regclass('public.subscription_email_reminders') IS NOT NULL
+    AND (
+      SELECT count(DISTINCT column_name)
+      FROM information_schema.columns
+      WHERE table_schema = 'public'
+        AND table_name = 'users'
+        AND column_name IN (
+          'subscription_expiration_email_enabled',
+          'subscription_expiration_email_enabled_at'
+        )
+    ) = 2;
+")
+[ "$schema_ready" = "t" ] || fail "required payment and subscription-email rollout schema is missing"
 
 current_revision=$(database_query -c "SELECT version_num FROM alembic_version;")
 case "$current_revision:$minimum_revision" in
@@ -70,6 +185,13 @@ case "$current_revision:$minimum_revision" in
 esac
 [ "$current_revision" -ge "$minimum_revision" ] \
   || fail "Alembic revision $current_revision is older than required revision $minimum_revision"
+
+probe_notification_preferences_contract
+
+if [ "$PHASE" = "check" ]; then
+  info "compatibility preflight passed (Alembic revision $current_revision, image $api_image)"
+  exit 0
+fi
 
 docker exec -i "$postgres_container" sh -lc \
   'exec psql -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB"' <<'SQL'

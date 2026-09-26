@@ -1,0 +1,10 @@
+services:
+  app:
+    environment:
+      SUPPORT_ENABLED: "false"
+      SUPPORT_EMAIL: ""
+      SUPPORT_TELEGRAM_USERNAME: ""
+      SUPPORT_FAQ_URL: ""
+      CHATWOOT_BASE_URL: ""
+      CHATWOOT_WEBSITE_TOKEN: ""
+      CHATWOOT_HMAC_TOKEN: ""

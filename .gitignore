@@ -10,13 +10,15 @@ node_modules/
 
 # env
 .env
+.zero-downtime-state
+.zero-downtime-state.lock/
 .env.*
 !.env.example
 deploy/prod/.env
-.env
 deploy/prod/remnashop.env
 deploy/prod/*.env
 !deploy/prod/*.env.example
+deploy/prod/.production-operation.lock
 
 # next
 .next/
@@ -29,6 +31,7 @@ build/
 .turbo/
 .cache/
 coverage/
+/test-results/
 .vercel/
 *.tsbuildinfo
 next-env.d.ts
@@ -42,6 +45,7 @@ pnpm-debug.log*
 .pnpm-debug.log*
 
 # local tooling
+.codex-remote-attachments/
 .DS_Store
 Thumbs.db
 *.pem

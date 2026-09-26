@@ -1,5 +1,5 @@
 import { AuthTurnstileProvider, LoginForm } from "@/frontend/components/auth-forms";
-import { AuthShell } from "@/frontend/components/layout";
+import { AuthShell } from "@/frontend/components/auth-shell";
 import { safeRedirectPath } from "@/shared/auth/redirect-policy";
 
 export const dynamic = "force-dynamic";

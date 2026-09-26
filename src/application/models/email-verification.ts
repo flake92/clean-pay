@@ -3,6 +3,7 @@ export type AccountReadiness =
   | { status: "pending"; emailVerified: boolean }
   | { status: "merge-conflict" }
   | { status: "unauthorized" }
+  | { status: "provider-session-recovery-required" }
   | { status: "unavailable" };
 
 export type EmailVerificationResult =

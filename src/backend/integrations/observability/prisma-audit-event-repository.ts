@@ -11,12 +11,16 @@ type AuditEvent = {
 
 export const prismaAuditEventRepository = {
   async append(event: AuditEvent) {
-    await prisma.auditLog.create({ data: {
-      userId: event.userId,
-      action: event.action,
-      severity: event.severity,
-      ipHash: event.ipHash,
-      metadata: event.metadata as Prisma.InputJsonValue | undefined,
-    } });
+    await prisma.auditLog.createMany({
+      data: {
+        userId: event.userId,
+        action: event.action,
+        severity: event.severity,
+        ipHash: event.ipHash,
+        metadata: event.metadata as Prisma.InputJsonValue | undefined,
+      },
+      // createMany intentionally emits no RETURNING clause. The production
+      // role can append audit rows without receiving private audit payloads.
+    });
   },
 };

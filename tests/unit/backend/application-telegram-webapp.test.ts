@@ -12,12 +12,16 @@ const upstreamSession = {
 
 function gateway(overrides: Partial<TelegramWebAppGateway> = {}): TelegramWebAppGateway {
   return {
+    preflightCapacity: vi.fn(async () => undefined),
+    withUpstreamConcurrency: vi.fn(async (_action, work) => work()),
     authenticateProvider: vi.fn(async () => ({ context: { provider: true } })),
     verifiedIdentity: vi.fn(async () => ({ telegramId: "777", context: { verified: true } })),
     rateLimit: vi.fn(async () => undefined),
     reconcileIdentity: vi.fn(async () => ({ userId: "user-1", upstreamSession, requiresRecovery: false })),
     createSession: vi.fn(async () => ({ id: "session-1" })),
     recoverSession: vi.fn(async () => undefined),
+    revokeSession: vi.fn(async () => undefined),
+    clearSessionCookies: vi.fn(async () => undefined),
     ...overrides,
   };
 }
@@ -31,6 +35,54 @@ describe("authenticateTelegramWebApp", () => {
       code: "VALIDATION_ERROR",
     });
     expect(target.authenticateProvider).not.toHaveBeenCalled();
+  });
+
+  it("rejects oversized init data before capacity or provider work", async () => {
+    const target = gateway();
+
+    await expect(authenticateTelegramWebApp(target, "x".repeat(16_385)))
+      .resolves.toMatchObject({ ok: false, code: "VALIDATION_ERROR" });
+    expect(target.preflightCapacity).not.toHaveBeenCalled();
+    expect(target.authenticateProvider).not.toHaveBeenCalled();
+  });
+
+  it("rejects non-string init data before capacity or provider work", async () => {
+    const target = gateway();
+
+    await expect(authenticateTelegramWebApp(target, { signed: true }))
+      .resolves.toMatchObject({ ok: false, code: "VALIDATION_ERROR" });
+    expect(target.preflightCapacity).not.toHaveBeenCalled();
+    expect(target.authenticateProvider).not.toHaveBeenCalled();
+  });
+
+  it("orders anonymous capacity and bounded provider proof before the target limit", async () => {
+    const order: string[] = [];
+    const target = gateway({
+      preflightCapacity: vi.fn(async () => { order.push("capacity"); }),
+      withUpstreamConcurrency: vi.fn(async (_action, work) => {
+        order.push("semaphore");
+        return work();
+      }),
+      authenticateProvider: vi.fn(async () => {
+        order.push("authenticate-provider");
+        return { context: {} };
+      }),
+      verifiedIdentity: vi.fn(async () => {
+        order.push("verified-identity");
+        return { telegramId: "777", context: {} };
+      }),
+      rateLimit: vi.fn(async () => { order.push("target"); }),
+    });
+
+    await expect(authenticateTelegramWebApp(target, "signed-data")).resolves.toEqual({ ok: true });
+    expect(order).toEqual([
+      "capacity",
+      "semaphore",
+      "authenticate-provider",
+      "semaphore",
+      "verified-identity",
+      "target",
+    ]);
   });
 
   it("authenticates trimmed init data and creates a local session", async () => {
@@ -51,6 +103,20 @@ describe("authenticateTelegramWebApp", () => {
 
     await expect(authenticateTelegramWebApp(target, "signed-data")).resolves.toEqual({ ok: true });
     expect(target.recoverSession).toHaveBeenCalledWith("session-2", "user-2");
+  });
+
+  it("revokes only the newly created session when recovery fails", async () => {
+    const target = gateway({
+      reconcileIdentity: vi.fn(async () => ({ userId: "user-2", upstreamSession, requiresRecovery: true })),
+      createSession: vi.fn(async () => ({ id: "session-2" })),
+      recoverSession: vi.fn(async () => { throw new Error("recovery unavailable"); }),
+    });
+
+    await expect(authenticateTelegramWebApp(target, "signed-data"))
+      .resolves.toMatchObject({ ok: false, code: "INTERNAL_ERROR" });
+    expect(target.revokeSession).toHaveBeenCalledOnce();
+    expect(target.revokeSession).toHaveBeenCalledWith("session-2", "user-2");
+    expect(target.clearSessionCookies).toHaveBeenCalledOnce();
   });
 
   it.each([

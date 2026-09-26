@@ -7,19 +7,56 @@ import {
   changeProfilePassword,
   requestProfileEmailVerification,
 } from "@/application/profile/execute-profile-command";
-import { productionProfileCommands } from "@/backend/integrations/profile/profile-adapter";
-import { productionEmailVerificationCommands } from "@/backend/integrations/auth/email-verification";
+import type { ProfileCommandResult } from "@/application/models/profile";
+import {
+  productionEmailVerificationCommands,
+  productionEmailReminderPreferenceCommands,
+  productionProfileCommands,
+} from "@/app/_composition/session-gateways";
+import { updateEmailReminderPreference } from "@/application/profile/update-email-reminder-preference";
+import {
+  parseEmailActionPayload,
+  parseProfilePasswordPayload,
+} from "@/app/actions/runtime-payload";
 
-export async function requestProfileEmailVerificationAction(input: { email?: string; turnstileToken?: string }) {
-  return requestProfileEmailVerification(productionEmailVerificationCommands, input);
+const malformed = {
+  ok: false as const,
+  code: "VALIDATION_ERROR",
+  message: "Проверьте введённые данные.",
+};
+
+export async function requestProfileEmailVerificationAction(
+  input: { email?: string; turnstileToken?: string },
+): Promise<ProfileCommandResult> {
+  const parsed = parseEmailActionPayload(input);
+  return parsed
+    ? requestProfileEmailVerification(productionEmailVerificationCommands, parsed)
+    : malformed;
 }
 
 export async function changeProfileEmailAction(input: { email: string; turnstileToken?: string }) {
-  const result = await changeProfileEmail(productionEmailVerificationCommands, input);
+  const parsed = parseEmailActionPayload(input, { emailRequired: true });
+  if (!parsed?.email) return malformed;
+  const result = await changeProfileEmail(productionEmailVerificationCommands, {
+    ...parsed,
+    email: parsed.email,
+  });
   if (result.ok) revalidatePath("/profile");
   return result;
 }
 
-export async function changeProfilePasswordAction(input: { currentPassword: string; newPassword: string }) {
-  return changeProfilePassword(productionProfileCommands, input);
+export async function changeProfilePasswordAction(
+  input: { currentPassword: string; newPassword: string },
+): Promise<ProfileCommandResult> {
+  const parsed = parseProfilePasswordPayload(input);
+  return parsed ? changeProfilePassword(productionProfileCommands, parsed) : malformed;
+}
+
+export async function updateEmailReminderPreferenceAction(enabled: unknown) {
+  const result = await updateEmailReminderPreference(
+    productionEmailReminderPreferenceCommands,
+    enabled,
+  );
+  if (result.ok) revalidatePath("/profile");
+  return result;
 }

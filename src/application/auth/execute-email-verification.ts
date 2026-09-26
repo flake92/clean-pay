@@ -8,6 +8,8 @@ import type { AccountReadiness, EmailVerificationResult } from "@/application/mo
 import type { AuthProfileGateway } from "@/application/auth/ports/auth-profile";
 import { AuthProfileError } from "@/application/auth/ports/auth-profile";
 import { resolveAuthProfile } from "@/application/auth/resolve-auth-profile";
+import { securityCheckFailedMessage } from "@/application/models/security-check-messages";
+import { paymentOwnerTransitionKey } from "@/shared/domain/payment-owner-transition";
 
 function failure(error: unknown, fallback: string): EmailVerificationResult {
   const code = error instanceof EmailVerificationError ? error.code : "INTERNAL_ERROR";
@@ -17,7 +19,8 @@ function failure(error: unknown, fallback: string): EmailVerificationResult {
     ? Math.ceil(error.retryAfterSeconds)
     : null;
   const messages: Record<string, string> = {
-    FORBIDDEN: "Проверка безопасности не пройдена. Выполните её ещё раз и повторите попытку.",
+    FORBIDDEN: "Действие недоступно.",
+    SECURITY_CHECK_FAILED: securityCheckFailedMessage,
     EMAIL_REQUIRED: "Сначала добавьте e-mail и пароль к аккаунту.",
     EMAIL_CODE_INVALID: "Код не подошёл. Проверьте его и попробуйте снова.",
     EMAIL_CODE_EXPIRED: "Код истёк. Запросите новый.",
@@ -92,6 +95,14 @@ async function synchronizeConfirmedAccount(
     upstreamAccountIds: [persisted.upstreamAccountId],
     emails: [email],
     telegramIds: [actor.telegramId],
+    operationKey: paymentOwnerTransitionKey({
+      actorUserId: actor.userId,
+      sourceUpstreamAccountId:
+        actor.localUpstreamAccountId ?? persisted.upstreamAccountId,
+      targetUpstreamAccountId: persisted.upstreamAccountId,
+      telegramId: actor.telegramId,
+    }),
+    targetUpstreamAccountId: persisted.upstreamAccountId,
     work: async () => {
       let providerSession = commands.currentProviderSession(actor);
       let upstreamMerged = false;
@@ -119,7 +130,17 @@ async function synchronizeConfirmedAccount(
           upstreamMerged = true;
         }
       }
-      await commands.linkCurrentAccount(providerSession, { upstreamMerged, ownerFenceHeld: true });
+      await commands.linkCurrentAccount(providerSession, {
+        upstreamMerged,
+        ownerFenceHeld: true,
+        expectedIdentity: {
+          accountId: persisted.upstreamAccountId,
+          email,
+          emailVerified: true,
+          pendingEmail: null,
+          telegramId: actor.telegramId,
+        },
+      });
       await commands.refreshLocalSession();
     },
   });
@@ -180,6 +201,7 @@ export async function safeReadiness(gateway: AuthProfileGateway): Promise<Accoun
     if (error instanceof AuthProfileError) {
       if (error.code === "ACCOUNT_MERGE_REQUIRED" || error.code === "ACCOUNT_MERGE_SUBSCRIPTIONS_CONFLICT") return { status: "merge-conflict" };
       if (error.code === "UNAUTHORIZED") return { status: "unauthorized" };
+      if (error.code === "PROVIDER_SESSION_RECOVERY_REQUIRED") return { status: "provider-session-recovery-required" };
     }
     return { status: "unavailable" };
   }

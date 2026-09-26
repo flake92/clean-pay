@@ -5,6 +5,7 @@ const mocks = vi.hoisted(() => ({
   consumeTelegramLoginWidgetPayload: vi.fn(),
   consumeTelegramCallback: vi.fn(),
   withPaymentOwnerChangeFence: vi.fn(),
+  markPaymentOwnerChangeUpstreamMutationStarted: vi.fn(),
   getAuthorizedRemnashopTokens: vi.fn(),
   getRemnashopUserIdFromAccessToken: vi.fn(),
   getJwtExpiresAt: vi.fn(),
@@ -15,6 +16,10 @@ const mocks = vi.hoisted(() => ({
   linkCurrentUserToRemnashopAuth: vi.fn(),
   reconcileUserFromRemnashopAuth: vi.fn(),
   createWebSessionOnResponse: vi.fn(),
+  setDurableCallbackReplayCookies: vi.fn(),
+  loadDurableTelegramCallback: vi.fn(),
+  completeDurableTelegramCallback: vi.fn(),
+  revokeWebSessionById: vi.fn(),
   getCurrentSession: vi.fn(),
   logTechnicalError: vi.fn(),
   logTechnicalInfo: vi.fn(),
@@ -23,6 +28,9 @@ const mocks = vi.hoisted(() => ({
   assertRateLimit: vi.fn(),
   stageTelegramAccountMerge: vi.fn(),
   synchronizeProviderAccountIdentity: vi.fn(),
+  mergeLocalUsersIntoTarget: vi.fn(),
+  assertUserMergeFinalOwner: vi.fn(),
+  publicAppUrl: "https://clean-pay.example.com",
   prisma: {
     webUser: { findUnique: vi.fn(), findUniqueOrThrow: vi.fn(), update: vi.fn(), upsert: vi.fn() },
     telegramAuthState: { update: vi.fn() },
@@ -43,9 +51,10 @@ vi.mock("@/backend/limits/rate-limit", () => ({ assertRateLimit: mocks.assertRat
 
 vi.mock("@/backend/config/env", () => ({
   getEnv: () => ({
-    publicAppUrl: "https://clean-pay.example.com",
+    publicAppUrl: mocks.publicAppUrl,
     cookieSecure: true,
     cookieSameSite: "lax",
+    webJwtSecret: "test-web-jwt-secret-with-enough-entropy",
   }),
 }));
 
@@ -63,13 +72,38 @@ vi.mock("@/backend/integrations/remnashop/client", () => ({
   remnashopLinkTelegram: mocks.remnashopLinkTelegram,
   remnashopMergeUsers: mocks.remnashopMergeUsers,
 }));
+vi.mock("@/app/_composition/telegram-session-recovery", () => ({
+  recoverRemnashopTelegramSession: mocks.recoverRemnashopTelegramSession,
+}));
+vi.mock("@/app/_composition/session-gateways", async () => {
+  const { createProductionTelegramCallbackGateway } = await import(
+    "@/backend/integrations/auth/telegram-callback-gateway"
+  );
+  return {
+    productionTelegramCallbackGateway: createProductionTelegramCallbackGateway(
+      mocks.getAuthorizedRemnashopTokens,
+    ),
+  };
+});
 vi.mock("@/backend/integrations/auth/provider-account-identity-sync", () => ({
   synchronizeProviderAccountIdentity: mocks.synchronizeProviderAccountIdentity,
+}));
+vi.mock("@/backend/integrations/auth/local-user-merge-service", () => ({
+  mergeLocalUsersIntoTarget: mocks.mergeLocalUsersIntoTarget,
+  assertUserMergeFinalOwner: mocks.assertUserMergeFinalOwner,
 }));
 
 vi.mock("@/backend/integrations/sessions/web-session-service", () => ({
   createWebSessionOnResponse: mocks.createWebSessionOnResponse,
+  setDurableCallbackReplayCookies: mocks.setDurableCallbackReplayCookies,
   getCurrentSession: mocks.getCurrentSession,
+}));
+vi.mock("@/backend/integrations/telegram/durable-callback", () => ({
+  loadDurableTelegramCallback: mocks.loadDurableTelegramCallback,
+  completeDurableTelegramCallback: mocks.completeDurableTelegramCallback,
+}));
+vi.mock("@/backend/integrations/sessions/web-session-revocation", () => ({
+  revokeWebSessionById: mocks.revokeWebSessionById,
 }));
 
 vi.mock("@/backend/integrations/telegram/oidc", () => {
@@ -95,6 +129,7 @@ vi.mock("@/backend/integrations/auth/telegram-account-merge-service", () => ({
 
 vi.mock("@/backend/integrations/payments/payment-user-merge-service", () => ({
   withPaymentOwnerChangeFence: mocks.withPaymentOwnerChangeFence,
+  markPaymentOwnerChangeUpstreamMutationStarted: mocks.markPaymentOwnerChangeUpstreamMutationStarted,
 }));
 
 import { GET, POST } from "@/app/auth/telegram/callback/route";
@@ -102,6 +137,7 @@ import { GET, POST } from "@/app/auth/telegram/callback/route";
 describe("Telegram callback payment-owner fence", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.publicAppUrl = "https://clean-pay.example.com";
     mocks.withPaymentOwnerChangeFence.mockImplementation(
       async ({ work }: { work: () => Promise<unknown> }) => work(),
     );
@@ -133,8 +169,7 @@ describe("Telegram callback payment-owner fence", () => {
     mocks.prisma.webUser.update.mockImplementation(async ({ data }: { data: Record<string, unknown> }) => ({ ...targetUser, ...data }));
     mocks.prisma.$transaction.mockImplementation(async (work: (tx: typeof mocks.prisma) => Promise<unknown>) => work(mocks.prisma));
     mocks.stageTelegramAccountMerge.mockResolvedValue({ required: false });
-    mocks.getRemnashopUserIdFromAccessToken.mockReturnValue("target-owner");
-    mocks.getRemnashopUserIdFromAccessToken.mockReturnValueOnce("source-owner");
+    mocks.getRemnashopUserIdFromAccessToken.mockReturnValue("source-owner");
     mocks.getRemnashopMe.mockResolvedValue({
       email: "user@example.com", is_email_verified: true, pending_email: null, telegram_id: 777,
     });
@@ -149,42 +184,85 @@ describe("Telegram callback payment-owner fence", () => {
     mocks.getJwtExpiresAt.mockReturnValue(null);
     mocks.remnashopLinkTelegram.mockRejectedValue(new Error("attach failed"));
     mocks.remnashopMergeUsers.mockResolvedValue({});
+    mocks.synchronizeProviderAccountIdentity.mockResolvedValue({
+      hasSubscription: false,
+      profile: { email: "user@example.com", is_email_verified: true, pending_email: null, telegram_id: 777 },
+    });
     mocks.linkCurrentUserToRemnashopAuth.mockResolvedValue({
       user: { id: "local-user" },
     });
     mocks.createWebSessionOnResponse.mockResolvedValue({ id: "new-session" });
+    mocks.setDurableCallbackReplayCookies.mockResolvedValue({ id: "new-session" });
+    mocks.loadDurableTelegramCallback.mockResolvedValue({ status: "none" });
+    mocks.completeDurableTelegramCallback.mockResolvedValue(undefined);
   });
 
-  it("holds the owner fence before Telegram attach, upstream merge and local relink", async () => {
+  it("holds the owner fence before Telegram attach and local relink", async () => {
     const response = await POST(new Request("https://clean-pay.example.com/auth/telegram/callback", {
       method: "POST",
-      headers: { "content-type": "application/json" },
+      headers: { "content-type": "application/json", origin: "https://clean-pay.example.com" },
       body: JSON.stringify({ idToken: "telegram-id-token" }),
     }));
 
     expect(response.status).toBe(200);
     expect(mocks.withPaymentOwnerChangeFence).toHaveBeenCalledWith(expect.objectContaining({
       userIds: ["local-user"],
-      upstreamAccountIds: ["source-owner", "target-owner"],
+      upstreamAccountIds: ["source-owner", "source-owner"],
       telegramIds: ["777"],
       work: expect.any(Function),
     }));
     expect(mocks.withPaymentOwnerChangeFence.mock.invocationCallOrder[0]).toBeLessThan(
       mocks.remnashopLinkTelegram.mock.invocationCallOrder[0]!,
     );
-    expect(mocks.remnashopLinkTelegram.mock.invocationCallOrder[0]).toBeLessThan(
-      mocks.remnashopMergeUsers.mock.invocationCallOrder[0]!,
-    );
-    expect(mocks.linkCurrentUserToRemnashopAuth).toHaveBeenCalledWith({
+    expect(mocks.remnashopMergeUsers).not.toHaveBeenCalled();
+    expect(mocks.linkCurrentUserToRemnashopAuth).toHaveBeenCalledWith(expect.objectContaining({
       accessToken: "incoming-access",
       refreshToken: "incoming-refresh",
       auth: {
         expires_at: "2030-01-01T00:00:00.000Z",
         refresh_expires_at: "2030-02-01T00:00:00.000Z",
       },
-      invalidateSiblingRemnashopTokens: true,
       paymentOwnerFenceHeld: true,
-    });
+      verifiedProfile: expect.any(Object),
+    }));
+  });
+
+  it("accepts the owned public alias for the Telegram popup callback", async () => {
+    mocks.publicAppUrl = "https://cleanvpn.edge-connect.uk";
+
+    const response = await POST(new Request(
+      "https://oplata.clear-vpn.org/auth/telegram/callback",
+      {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          origin: "https://oplata.clear-vpn.org",
+        },
+        body: JSON.stringify({ idToken: "telegram-id-token" }),
+      },
+    ));
+
+    expect(response.status).toBe(200);
+    expect(mocks.consumeTelegramPopupToken).toHaveBeenCalledOnce();
+  });
+
+  it("rejects an unowned Origin even when the callback URL uses the public alias", async () => {
+    mocks.publicAppUrl = "https://cleanvpn.edge-connect.uk";
+
+    const response = await POST(new Request(
+      "https://oplata.clear-vpn.org/auth/telegram/callback",
+      {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          origin: "https://attacker.example",
+        },
+        body: JSON.stringify({ idToken: "telegram-id-token" }),
+      },
+    ));
+
+    expect(response.status).toBe(403);
+    expect(mocks.consumeTelegramPopupToken).not.toHaveBeenCalled();
   });
 
   it("returns generic failures without exposing a mismatched link-state owner", async () => {
@@ -203,7 +281,7 @@ describe("Telegram callback payment-owner fence", () => {
       "https://clean-pay.example.com/auth/telegram/callback",
       {
         method: "POST",
-        headers: { "content-type": "application/json" },
+        headers: { "content-type": "application/json", origin: "https://clean-pay.example.com" },
         body: JSON.stringify({ idToken: "telegram-id-token" }),
       },
     ));
@@ -217,5 +295,66 @@ describe("Telegram callback payment-owner fence", () => {
       error: "telegram_failed",
     });
     expect(mocks.createWebSessionOnResponse).not.toHaveBeenCalled();
+  });
+
+  it("revokes the newly created popup session before propagating a recovery failure", async () => {
+    mocks.consumeTelegramPopupToken.mockResolvedValueOnce({
+      authState: { id: "state-2", userId: null, redirectTo: "/cabinet" },
+      identity: {
+        telegramId: "888",
+        telegramUsername: "new_user",
+        fullName: "New User",
+        photoUrl: null,
+        remnashopAuthResult: {
+          cookies: { accessToken: "incoming-access", refreshToken: "incoming-refresh" },
+          data: {
+            expires_at: "2030-01-01T00:00:00.000Z",
+            refresh_expires_at: "2030-02-01T00:00:00.000Z",
+          },
+        },
+      },
+    });
+    mocks.prisma.webUser.upsert.mockResolvedValueOnce({
+      id: "new-user",
+      remnashopUserId: null,
+      email: null,
+      emailVerified: false,
+      telegramId: "888",
+    });
+    mocks.reconcileUserFromRemnashopAuth.mockResolvedValueOnce({
+      user: { id: "new-user" },
+      requiresTelegramRecovery: true,
+    });
+    mocks.recoverRemnashopTelegramSession.mockRejectedValueOnce(new Error("recovery unavailable"));
+
+    const response = await POST(new Request(
+      "https://clean-pay.example.com/auth/telegram/callback",
+      {
+        method: "POST",
+        headers: { "content-type": "application/json", origin: "https://clean-pay.example.com" },
+        body: JSON.stringify({ idToken: "telegram-id-token" }),
+      },
+    ));
+
+    expect(response.status).toBe(400);
+    expect(mocks.revokeWebSessionById).toHaveBeenCalledWith("new-session", "new-user");
+    expect(mocks.revokeWebSessionById.mock.invocationCallOrder[0]).toBeLessThan(
+      mocks.logTechnicalError.mock.invocationCallOrder.at(-1)!,
+    );
+  });
+
+  it("rejects a cross-origin popup callback before consuming credentials", async () => {
+    const response = await POST(new Request(
+      "https://clean-pay.example.com/auth/telegram/callback",
+      {
+        method: "POST",
+        headers: { "content-type": "application/json", origin: "https://evil.example" },
+        body: JSON.stringify({ idToken: "telegram-id-token" }),
+      },
+    ));
+
+    expect(response.status).toBe(403);
+    await expect(response.json()).resolves.toEqual({ error: "forbidden" });
+    expect(mocks.consumeTelegramPopupToken).not.toHaveBeenCalled();
   });
 });

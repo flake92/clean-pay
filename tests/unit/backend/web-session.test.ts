@@ -22,6 +22,7 @@ const mocks = vi.hoisted(() => ({
     webRefreshToken: {
       create: vi.fn(),
       findUnique: vi.fn(),
+      updateMany: vi.fn(),
     },
     webUser: {
       findUnique: vi.fn(),
@@ -71,15 +72,27 @@ import {
   createWebSession,
   createWebSessionForRemnashopUser,
   createWebSessionOnResponse,
+  getCurrentRefreshSessionCandidateReadOnly,
   getCurrentSession,
+  getCurrentSessionReadOnly,
   getCurrentUser,
   getWebSessionUserIdFromAccessCookie,
   replaceWebSessionAfterPasswordChange,
   refreshCurrentAccessCookie,
   rotateRefreshTokenFamily,
+  setDurableCallbackReplayCookies,
+  setDurableCallbackWebSessionCookies,
   upgradeCurrentSessionToFull,
 } from "@/backend/integrations/sessions/web-session-service";
-import { hmacSha256, jsonBase64Url, sha256 } from "@/backend/security/crypto";
+import { runWithPostCommitWebSessionCookieEffects } from "@/backend/integrations/sessions/web-session-cookie-effects";
+import { cookies as requestCookies } from "next/headers";
+import {
+  decryptKeyringSecret,
+  encryptSecret,
+  hmacSha256,
+  jsonBase64Url,
+  sha256,
+} from "@/backend/security/crypto";
 
 function accessToken(payload: Record<string, unknown>) {
   const encoded = jsonBase64Url(payload);
@@ -122,6 +135,7 @@ describe("web session lifecycle", () => {
     mocks.prisma.webSession.findUnique.mockResolvedValue({ id: "session-1", userId: "user-1" });
     mocks.prisma.webRefreshToken.create.mockResolvedValue({ id: "consumed-1" });
     mocks.prisma.webRefreshToken.findUnique.mockResolvedValue(null);
+    mocks.prisma.webRefreshToken.updateMany.mockResolvedValue({ count: 1 });
     mocks.prisma.$queryRaw.mockResolvedValue([{ id: "session-1" }]);
     mocks.prisma.$transaction.mockImplementation(
       async (callback: (tx: typeof mocks.prisma) => unknown) =>
@@ -206,6 +220,99 @@ describe("web session lifecycle", () => {
     });
   });
 
+  it("publishes no cookies when a transaction fails after its callback completes", async () => {
+    const commitError = new Error("transaction commit failed");
+
+    await expect(
+      runWithPostCommitWebSessionCookieEffects(async () => {
+        await createWebSessionForRemnashopUser({
+          userId: "user-1",
+          remnashopAccessTokenEncrypted: "protected-access",
+          remnashopRefreshTokenEncrypted: "protected-refresh",
+          remnashopAccessExpiresAt: new Date("2099-01-02T00:00:00.000Z"),
+          remnashopRefreshExpiresAt: new Date("2099-02-02T00:00:00.000Z"),
+          tx: mocks.prisma as never,
+        });
+
+        expect(mocks.prisma.webSession.create).toHaveBeenCalledOnce();
+        expect(requestCookies).not.toHaveBeenCalled();
+        expect(state.setCalls).toEqual([]);
+        throw commitError;
+      }),
+    ).rejects.toBe(commitError);
+
+    expect(requestCookies).not.toHaveBeenCalled();
+    expect(state.setCalls).toEqual([]);
+  });
+
+  it("publishes byte-identical Remnashop session cookies in access-then-refresh order after commit", async () => {
+    const now = new Date("2026-08-27T12:34:56.789Z");
+    const accessExpiresAt = new Date("2026-08-27T12:49:56.789Z");
+    const refreshExpiresAt = new Date("2026-09-26T12:34:56.789Z");
+
+    vi.useFakeTimers();
+    vi.setSystemTime(now);
+    try {
+      await runWithPostCommitWebSessionCookieEffects(async () => {
+        await createWebSessionForRemnashopUser({
+          userId: "user-1",
+          remnashopAccessTokenEncrypted: "protected-access",
+          remnashopRefreshTokenEncrypted: "protected-refresh",
+          remnashopAccessExpiresAt: new Date("2099-01-02T00:00:00.000Z"),
+          remnashopRefreshExpiresAt: new Date("2099-02-02T00:00:00.000Z"),
+          tx: mocks.prisma as never,
+        });
+
+        expect(requestCookies).not.toHaveBeenCalled();
+        expect(state.setCalls).toEqual([]);
+      });
+
+      const refreshCookie = state.setCalls[1];
+      expect(refreshCookie?.value).toBeTruthy();
+      expect(state.setCalls).toEqual([
+        {
+          name: "clean_pay_access",
+          value: accessToken({
+            sid: "session-1",
+            uid: "user-1",
+            exp: Math.floor(accessExpiresAt.getTime() / 1000),
+            al: "FULL",
+            ev: true,
+            tg: true,
+          }),
+          options: {
+            httpOnly: true,
+            secure: false,
+            sameSite: "lax",
+            path: "/",
+            expires: accessExpiresAt,
+          },
+        },
+        {
+          name: "clean_pay_refresh",
+          value: refreshCookie?.value,
+          options: {
+            httpOnly: true,
+            secure: false,
+            sameSite: "lax",
+            path: "/",
+            expires: refreshExpiresAt,
+          },
+        },
+      ]);
+      expect(requestCookies).toHaveBeenCalledTimes(2);
+      expect(mocks.prisma.webSession.create).toHaveBeenCalledWith({
+        data: expect.objectContaining({
+          refreshTokenHash: sha256(refreshCookie?.value ?? ""),
+          accessTokenExpiresAt: accessExpiresAt,
+          refreshExpiresAt,
+        }),
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("atomically revokes prior sessions before a password-reset session is created", async () => {
     const transactionClient = {
       $queryRaw: vi.fn().mockResolvedValue([{ id: "user-1" }]),
@@ -238,6 +345,10 @@ describe("web session lifecycle", () => {
         remnashopRefreshTokenEncrypted: null,
         remnashopAccessExpiresAt: null,
         remnashopRefreshExpiresAt: null,
+        remnashopRefreshClaimTokenHash: null,
+        remnashopRefreshLeaseExpiresAt: null,
+        remnashopRefreshDispatchedAt: null,
+        remnashopRefreshRecoveryEncrypted: null,
       },
     });
     expect(
@@ -254,6 +365,10 @@ describe("web session lifecycle", () => {
     });
     expect(mocks.prisma.webSession.updateMany).not.toHaveBeenCalled();
     expect(mocks.prisma.webSession.create).not.toHaveBeenCalled();
+    expect(state.setCalls.map(({ name }) => name)).toEqual([
+      "clean_pay_access",
+      "clean_pay_refresh",
+    ]);
   });
 
   it("loads current session and current user from a valid access cookie", async () => {
@@ -348,6 +463,102 @@ describe("web session lifecycle", () => {
     expect(nextRefresh).not.toBe("refresh-token");
   });
 
+  it("keeps the Server Component session reader free of refresh side effects", async () => {
+    state.cookies.set("clean_pay_refresh", "refresh-token");
+
+    await expect(getCurrentSessionReadOnly()).resolves.toBeNull();
+
+    expect(mocks.prisma.$queryRaw).not.toHaveBeenCalled();
+    expect(mocks.prisma.webRefreshToken.create).not.toHaveBeenCalled();
+    expect(state.setCalls).toEqual([]);
+    expect(state.deleteCalls).toEqual([]);
+
+    state.cookies.set("clean_pay_access", accessToken({
+      sid: "session-1",
+      uid: "user-1",
+      exp: Math.floor(Date.now() / 1000) + 60,
+    }));
+    mocks.prisma.webSession.findFirst.mockResolvedValueOnce(session);
+
+    await expect(getCurrentSessionReadOnly()).resolves.toEqual(session);
+    expect(state.setCalls).toEqual([]);
+    expect(state.deleteCalls).toEqual([]);
+  });
+
+  it("verifies a refresh-session candidate without consuming or rotating it", async () => {
+    state.cookies.set("clean_pay_refresh", "refresh-token");
+    mocks.prisma.webSession.findFirst.mockResolvedValueOnce({
+      id: "session-1",
+      userId: "user-1",
+    });
+
+    await expect(getCurrentRefreshSessionCandidateReadOnly()).resolves.toEqual({
+      sessionId: "session-1",
+      userId: "user-1",
+    });
+
+    expect(mocks.prisma.webSession.findFirst).toHaveBeenCalledWith({
+      where: {
+        revokedAt: null,
+        refreshExpiresAt: { gt: expect.any(Date) },
+        OR: [
+          { refreshTokenHash: sha256("refresh-token") },
+          {
+            refreshTokenHistory: {
+              some: {
+                tokenHash: sha256("refresh-token"),
+                graceExpiresAt: { gte: expect.any(Date) },
+              },
+            },
+          },
+        ],
+      },
+      select: { id: true, userId: true },
+    });
+    expect(mocks.prisma.$queryRaw).not.toHaveBeenCalled();
+    expect(mocks.prisma.webRefreshToken.create).not.toHaveBeenCalled();
+    expect(mocks.prisma.webSession.update).not.toHaveBeenCalled();
+    expect(state.setCalls).toEqual([]);
+    expect(state.deleteCalls).toEqual([]);
+  });
+
+  it("does not query or mutate sessions without a refresh candidate", async () => {
+    await expect(getCurrentRefreshSessionCandidateReadOnly())
+      .resolves.toBeNull();
+
+    expect(mocks.prisma.webSession.findFirst).not.toHaveBeenCalled();
+    expect(mocks.prisma.webRefreshToken.create).not.toHaveBeenCalled();
+    expect(mocks.prisma.webSession.update).not.toHaveBeenCalled();
+    expect(state.setCalls).toEqual([]);
+    expect(state.deleteCalls).toEqual([]);
+  });
+
+  it("treats a signed but database-revoked access session as unauthorized without rotating refresh", async () => {
+    state.cookies.set("clean_pay_access", accessToken({
+      sid: "revoked-session",
+      uid: "user-1",
+      exp: Math.floor(Date.now() / 1000) + 60,
+    }));
+    state.cookies.set("clean_pay_refresh", "revoked-refresh-candidate");
+    mocks.prisma.webSession.findFirst.mockResolvedValueOnce(null);
+
+    await expect(getCurrentSessionReadOnly()).resolves.toBeNull();
+
+    expect(mocks.prisma.webSession.findFirst).toHaveBeenCalledWith({
+      where: {
+        id: "revoked-session",
+        userId: "user-1",
+        revokedAt: null,
+        accessTokenExpiresAt: { gt: expect.any(Date) },
+      },
+      include: { user: true },
+    });
+    expect(mocks.prisma.$queryRaw).not.toHaveBeenCalled();
+    expect(mocks.prisma.webRefreshToken.create).not.toHaveBeenCalled();
+    expect(state.setCalls).toEqual([]);
+    expect(state.deleteCalls).toEqual([]);
+  });
+
   it("clears access and refresh cookies after a definitive refresh miss", async () => {
     state.cookies.set("clean_pay_access", "expired-or-invalid-access");
     state.cookies.set("clean_pay_refresh", "unknown-refresh");
@@ -424,6 +635,59 @@ describe("web session lifecycle", () => {
     expect(mocks.prisma.webRefreshToken.create).toHaveBeenCalledTimes(1);
   });
 
+  it("rewraps a legacy grace successor before the previous key is retired", async () => {
+    const previousEnv = {
+      id: process.env.WEB_REFRESH_KEY_ID,
+      secret: process.env.WEB_REFRESH_SECRET,
+      previous: process.env.WEB_REFRESH_PREVIOUS_KEYS,
+    };
+    const oldSecret = "synthetic-old-refresh-key-A-7Vr3Nm8Wp2Kq5Xs9";
+    const newSecret = "synthetic-new-refresh-key-B-4Lc8Kq2Vr9Nm5Xs7";
+    try {
+      process.env.WEB_REFRESH_KEY_ID = "key-b";
+      process.env.WEB_REFRESH_SECRET = newSecret;
+      process.env.WEB_REFRESH_PREVIOUS_KEYS = JSON.stringify({ "key-a": oldSecret });
+      const predecessor = "previous-browser-refresh";
+      const successor = "durable-successor";
+      const now = new Date("2026-08-25T12:00:00.000Z");
+      mocks.prisma.webSession.findUnique.mockResolvedValueOnce({
+        ...session,
+        refreshTokenHash: sha256(successor),
+        revokedAt: null,
+      });
+      mocks.prisma.webRefreshToken.findUnique.mockResolvedValueOnce({
+        id: "consumed-key-a",
+        sessionId: session.id,
+        tokenHash: sha256(predecessor),
+        successorTokenEncrypted: encryptSecret(successor, oldSecret),
+        graceExpiresAt: new Date(now.getTime() + 5_000),
+      });
+      mocks.prisma.webSession.update.mockResolvedValueOnce(session);
+
+      await expect(rotateRefreshTokenFamily(predecessor, now)).resolves.toMatchObject({
+        status: "ok",
+        successorToken: successor,
+        reusedPrevious: true,
+      });
+
+      const rewrapped = mocks.prisma.webRefreshToken.updateMany.mock.calls.at(-1)?.[0]
+        ?.data.successorTokenEncrypted as string;
+      expect(rewrapped).toMatch(/^v2\.key-b\.[A-Za-z0-9_-]{22}\./);
+      expect(decryptKeyringSecret(
+        rewrapped,
+        { primary: { id: "key-b", secret: newSecret }, previous: [] },
+        "web-refresh-successor",
+      ).value).toBe(successor);
+    } finally {
+      if (previousEnv.id === undefined) delete process.env.WEB_REFRESH_KEY_ID;
+      else process.env.WEB_REFRESH_KEY_ID = previousEnv.id;
+      if (previousEnv.secret === undefined) delete process.env.WEB_REFRESH_SECRET;
+      else process.env.WEB_REFRESH_SECRET = previousEnv.secret;
+      if (previousEnv.previous === undefined) delete process.env.WEB_REFRESH_PREVIOUS_KEYS;
+      else process.env.WEB_REFRESH_PREVIOUS_KEYS = previousEnv.previous;
+    }
+  });
+
   it("revokes only the reused token family outside the grace window", async () => {
     state.cookies.set("clean_pay_refresh", "reused-refresh");
     mocks.prisma.webSession.findUnique.mockResolvedValueOnce({
@@ -447,6 +711,20 @@ describe("web session lifecycle", () => {
       severity: "WARN",
       userId: "user-1",
     }));
+    expect(mocks.prisma.webSession.update).toHaveBeenCalledWith({
+      where: { id: "session-1" },
+      data: expect.objectContaining({
+        revokedAt: expect.any(Date),
+        remnashopAccessTokenEncrypted: null,
+        remnashopRefreshTokenEncrypted: null,
+        remnashopAccessExpiresAt: null,
+        remnashopRefreshExpiresAt: null,
+        remnashopRefreshClaimTokenHash: null,
+        remnashopRefreshLeaseExpiresAt: null,
+        remnashopRefreshDispatchedAt: null,
+        remnashopRefreshRecoveryEncrypted: null,
+      }),
+    });
   });
 
   it("sets cookies on explicit NextResponse and can refresh access cookie", async () => {
@@ -468,6 +746,79 @@ describe("web session lifecycle", () => {
     mocks.prisma.webSession.findFirst.mockResolvedValue(session);
     await expect(refreshCurrentAccessCookie()).resolves.toEqual(session);
     expect(state.setCalls.some((call) => call.name === "clean_pay_access")).toBe(true);
+  });
+
+  it("issues byte-identical callback bootstrap cookies under out-of-order replay", async () => {
+    const bootstrapRefreshToken = "encrypted-checkpoint-bootstrap-refresh";
+    const completionAt = new Date("2026-08-25T12:00:00.000Z");
+    const active = {
+      ...session,
+      refreshTokenHash: sha256(bootstrapRefreshToken),
+      revokedAt: null,
+      accessTokenExpiresAt: new Date(
+        completionAt.getTime() + 15 * 60_000,
+      ),
+      user: {
+        ...user,
+        // Simulates identity fields finalized by Telegram recovery after the
+        // WebSession row was first created.
+        emailVerified: true,
+        telegramId: "recovered-telegram-id",
+      },
+    };
+    mocks.prisma.webSession.findFirst.mockResolvedValue(active);
+    const stalePreRecoveryResponse = NextResponse.redirect(
+      "https://example.test/cabinet",
+    );
+    setDurableCallbackWebSessionCookies(stalePreRecoveryResponse, {
+      session: {
+        ...active,
+        user: { ...active.user, emailVerified: false, telegramId: null },
+      } as Parameters<
+        typeof setDurableCallbackWebSessionCookies
+      >[1]["session"],
+      refreshToken: bootstrapRefreshToken,
+    });
+    const firstResponse = NextResponse.redirect("https://example.test/cabinet");
+    const delayedInitialResponse = NextResponse.redirect(
+      "https://example.test/cabinet",
+    );
+
+    await Promise.all([
+      setDurableCallbackReplayCookies(
+        firstResponse,
+        session.id,
+        user.id,
+        bootstrapRefreshToken,
+        new Date(completionAt.getTime() + 9 * 60_000 + 59_000),
+      ),
+      setDurableCallbackReplayCookies(
+        delayedInitialResponse,
+        session.id,
+        user.id,
+        bootstrapRefreshToken,
+        new Date(completionAt.getTime() + 9 * 60_000 + 59_000),
+      ),
+    ]);
+
+    expect(firstResponse.cookies.get("clean_pay_refresh")?.value).toBe(
+      bootstrapRefreshToken,
+    );
+    expect(
+      delayedInitialResponse.cookies.get("clean_pay_refresh")?.value,
+    ).toBe(bootstrapRefreshToken);
+    expect(firstResponse.cookies.get("clean_pay_access")?.value).toBe(
+      delayedInitialResponse.cookies.get("clean_pay_access")?.value,
+    );
+    expect(stalePreRecoveryResponse.cookies.get("clean_pay_access")?.value)
+      .not.toBe(firstResponse.cookies.get("clean_pay_access")?.value);
+    const accessPayload = JSON.parse(Buffer.from(
+      firstResponse.cookies.get("clean_pay_access")!.value.split(".")[0]!,
+      "base64url",
+    ).toString("utf8")) as Record<string, unknown>;
+    expect(accessPayload).toMatchObject({ ev: true, tg: true });
+    expect(mocks.prisma.webSession.update).not.toHaveBeenCalled();
+    expect(mocks.prisma.webRefreshToken.create).not.toHaveBeenCalled();
   });
 
   it("revokes every old session, creates a new session and rejects the old refresh token", async () => {
@@ -512,6 +863,10 @@ describe("web session lifecycle", () => {
         remnashopRefreshTokenEncrypted: null,
         remnashopAccessExpiresAt: null,
         remnashopRefreshExpiresAt: null,
+        remnashopRefreshClaimTokenHash: null,
+        remnashopRefreshLeaseExpiresAt: null,
+        remnashopRefreshDispatchedAt: null,
+        remnashopRefreshRecoveryEncrypted: null,
       },
     });
     const refreshCookie = state.setCalls.find(

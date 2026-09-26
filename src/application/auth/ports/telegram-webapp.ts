@@ -8,6 +8,8 @@ type UpstreamSession = {
 };
 
 export interface TelegramWebAppGateway {
+  preflightCapacity(): Promise<void>;
+  withUpstreamConcurrency<T>(action: string, work: () => Promise<T>): Promise<T>;
   authenticateProvider(initData: string): Promise<TelegramWebAppProviderSession>;
   verifiedIdentity(session: TelegramWebAppProviderSession): Promise<{ telegramId: string | null; context: unknown }>;
   rateLimit(telegramId: string): Promise<void>;
@@ -18,4 +20,6 @@ export interface TelegramWebAppGateway {
   }>;
   createSession(input: { userId: string; upstreamSession: UpstreamSession }): Promise<{ id: string } | null>;
   recoverSession(sessionId: string, userId: string): Promise<void>;
+  revokeSession(sessionId: string, userId: string): Promise<void>;
+  clearSessionCookies(): Promise<void>;
 }
