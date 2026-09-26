@@ -48,7 +48,7 @@
     "@simplewebauthn/browser": "^13.3.0",
     "@simplewebauthn/server": "^13.3.2",
     "dotenv": "^17.4.2",
-    "jose": "^6.2.3",
+    "jose": "^6.2.12",
     "next": "16.3.4",
     "pg": "8.23.0",
     "primeflex": "^4.0.0",
