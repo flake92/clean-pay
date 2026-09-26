@@ -133,6 +133,73 @@ export async function assertRateLimit(options: RateLimitOptions) {
   }
 }
 
+/**
+ * Consumes only the cheap shared capacity bucket. Call this before any
+ * external proof/provider work and before a target identity is resolved.
+ */
+export async function assertRateLimitCapacity(
+  action: string,
+  windowSeconds = 15 * 60,
+) {
+  await assertRateLimit({
+    action,
+    limit: getEnv().authRateLimitCapacity,
+    windowSeconds,
+  });
+}
+
+/**
+ * Consumes only the proven target bucket. The shared capacity bucket must
+ * already have been consumed by assertRateLimitCapacity for this request.
+ */
+export async function assertTargetRateLimit(options: RateLimitOptions) {
+  const targetKey = rateLimitKey(options);
+  const capacityKey = rateLimitCapacityKey(options.action);
+
+  if (targetKey === capacityKey) {
+    throw new ServiceError(
+      "VALIDATION_ERROR",
+      400,
+      "A stable authentication target is required for the target rate limit",
+    );
+  }
+
+  let counts: number[];
+  try {
+    counts = await incrementRateLimits([targetKey], options.windowSeconds);
+  } catch (error) {
+    logger.error("auth_rate_limit_unavailable", {
+      action: options.action,
+      errorName: error instanceof Error ? error.name : "UnknownError",
+    });
+    if (error instanceof ServiceError) {
+      throw error;
+    }
+    throw new ServiceError("UPSTREAM_UNAVAILABLE", 503, "Authentication protection is temporarily unavailable", {
+      retryAfterSeconds: Math.min(options.windowSeconds, 30),
+    });
+  }
+
+  if ((counts[0] ?? 0) <= options.limit) {
+    return;
+  }
+
+  let retryAfterSeconds: number;
+  try {
+    retryAfterSeconds = await getRetryAfterSeconds(targetKey, options.windowSeconds);
+  } catch {
+    retryAfterSeconds = Math.min(options.windowSeconds, 30);
+  }
+
+  recordOperationalEvent("rate_limit_target_rejected", options.action);
+  throw new ServiceError(
+    "RATE_LIMITED",
+    429,
+    options.message ?? "Too many attempts. Try again later.",
+    { retryAfterSeconds },
+  );
+}
+
 export async function withAuthConcurrency<T>(
   action: string,
   work: () => Promise<T>,

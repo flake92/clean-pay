@@ -11,11 +11,13 @@ import type { AuthProfileGateway } from "@/application/auth/ports/auth-profile";
 import { resolveAuthProfile } from "@/application/auth/resolve-auth-profile";
 import type { PasskeyManagementGateway } from "@/application/auth/ports/passkey-management";
 import { accountAccessIssue } from "@/shared/domain/account-access-policy";
+import { paymentOwnerTransitionKey } from "@/shared/domain/payment-owner-transition";
 
 function callbackError(status: string | null) {
   if (status === "telegram_merge_subscriptions") return "В обеих учётных записях есть подписки. Данные не изменены — обратитесь в службу поддержки.";
   if (status === "telegram_merge_required") return "Автоматическое объединение остановлено из-за конфликта данных. Ничего не изменено.";
   if (status === "telegram_failed") return "Не удалось завершить привязку Telegram.";
+  if (status === "telegram_recovery_required") return "Привязка Telegram остановилась после безопасной проверки. Повторите привязку; если проблема сохраняется, обратитесь в поддержку.";
   return null;
 }
 
@@ -32,7 +34,9 @@ async function loadMergeConfirmation(reader: LinkAccountReader) {
   if (!actor) throw new LinkAccountGatewayError("UNAUTHORIZED");
   if (!actor.fullAssurance) throw new LinkAccountGatewayError("PASSKEY_REQUIRED");
   const confirmation = await reader.loadTelegramMergeConfirmation(actor.userId);
-  if (!confirmation || confirmation.expiresAt <= new Date() || confirmation.status === "FAILED") {
+  if (!confirmation
+    || (confirmation.expiresAt <= new Date() && !confirmation.recoverableAfterExpiry)
+    || confirmation.status === "FAILED") {
     throw new LinkAccountGatewayError("NOT_FOUND");
   }
   return {
@@ -59,16 +63,25 @@ export async function loadLinkAccount(reader: LinkAccountReader, auth: AuthProfi
     return { status: "ready", profile, passkeys, mergeConfirmation, callbackError: callbackError(status) };
   } catch (error) {
     const code = (error as { code?: unknown })?.code;
-    return code === "UNAUTHORIZED"
+    return code === "PROVIDER_SESSION_RECOVERY_REQUIRED"
+      ? { status: "provider-session-recovery-required" }
+      : code === "UNAUTHORIZED"
       ? { status: "unauthorized" }
       : { status: "error", message: "Не удалось загрузить способы входа." };
   }
 }
 
-function failed(error: unknown, fallback: string): LinkAccountCommandResult {
+function failed(
+  error: unknown,
+  fallback: string,
+  messageOverrides: Readonly<Record<string, string>> = {},
+): LinkAccountCommandResult {
   const code = typeof (error as { code?: unknown })?.code === "string" ? String((error as { code: string }).code) : "INTERNAL_ERROR";
   const prodMessage = typeof (error as { prodMessage?: unknown })?.prodMessage === "string" ? (error as { prodMessage: string }).prodMessage : null;
-  const message = code === "AUTH_FAILED" ? "Неверный e-mail или пароль." : code === "UNAUTHORIZED" ? "Сессия завершилась. Войдите снова." : prodMessage ?? fallback;
+  const message = messageOverrides[code]
+    ?? (code === "AUTH_FAILED" ? "Неверный e-mail или пароль."
+      : code === "UNAUTHORIZED" ? "Сессия завершилась. Войдите снова."
+      : prodMessage ?? fallback);
   return { ok: false, code, message };
 }
 
@@ -99,12 +112,29 @@ async function linkVerifiedEmailAccount(
   const identity = actor.telegramId
     ? { telegramId: actor.telegramId, telegramUsername: actor.telegramUsername }
     : null;
+  const targetAccountId = commands.providerAccountId(initialSession);
+  const existingOwnerId = await commands.emailOwnerId(email);
   const linked = await commands.withOwnerChangeFence({
-    userIds: [actor.userId],
-    upstreamAccountIds: [commands.providerAccountId(initialSession), actor.upstreamAccountId ?? ""],
+    userIds: [actor.userId, existingOwnerId ?? ""],
+    upstreamAccountIds: [targetAccountId, actor.upstreamAccountId ?? ""],
     emails: [email, actor.email],
     telegramIds: [actor.telegramId],
+    operationKey: paymentOwnerTransitionKey({
+      actorUserId: actor.userId,
+      sourceUpstreamAccountId: actor.upstreamAccountId ?? targetAccountId,
+      targetUpstreamAccountId: targetAccountId,
+      telegramId: actor.telegramId,
+    }),
+    targetUpstreamAccountId: targetAccountId,
     work: async () => {
+      await commands.stagePendingEmail({
+        actor,
+        providerSession: initialSession,
+        email,
+        providerEmail: email,
+        stagedLocally: false,
+        ownerTransitionStarted: true,
+      });
       let providerSession = initialSession;
       let upstreamMerged = false;
       if (identity) {
@@ -121,14 +151,26 @@ async function linkVerifiedEmailAccount(
           upstreamMerged = true;
         }
       }
-      return commands.linkCurrentAccount(providerSession, { upstreamMerged, ownerFenceHeld: true });
+      return commands.linkCurrentAccount(providerSession, {
+        upstreamMerged,
+        ownerFenceHeld: true,
+        expectedIdentity: {
+          accountId: targetAccountId,
+          email,
+          emailVerified: true,
+          pendingEmail: null,
+          telegramId: actor.telegramId,
+        },
+      });
     },
   });
-  await commands.auditLinkEvent({
-    action: "remnashop_account_linked_verified_email",
-    userId: linked.userId,
-    metadata: { email, telegramId: actor.telegramId },
-  });
+  try {
+    await commands.auditLinkEvent({
+      action: "remnashop_account_linked_verified_email",
+      userId: linked.userId,
+      metadata: { email, telegramId: actor.telegramId },
+    });
+  } catch { /* committed owner transition must remain successful */ }
 }
 
 export async function linkAccountEmail(
@@ -159,7 +201,7 @@ export async function linkAccountEmail(
     }
     if (!await commands.linkActorIsCurrent(actor)) throw new LinkAccountGatewayError("UNAUTHORIZED");
     const profile = await commands.loadProviderProfile(providerSession);
-    if (source === "login" && profile.email && profile.emailVerified) {
+    if (source === "login" && profile.email && profile.emailVerified && !profile.pendingEmail) {
       await linkVerifiedEmailAccount(commands, actor, providerSession, profile.email);
       return { ok: true, kind: "linked" };
     }
@@ -186,7 +228,9 @@ export async function linkAccountEmail(
       return { ok: true, kind: "linked" };
     }
   } catch (error) {
-    return failed(error, "Не удалось связать e-mail с аккаунтом.");
+    return failed(error, "Не удалось связать e-mail с аккаунтом.", {
+      RATE_LIMITED: "Слишком много попыток. Попробуйте позже.",
+    });
   }
 }
 

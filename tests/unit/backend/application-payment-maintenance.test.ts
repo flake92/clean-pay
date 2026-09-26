@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
+  paymentMaintenanceBatchIsHealthy,
   processPaymentHistoryPage,
   processPaymentReconciliation,
   runPaymentMaintenance,
@@ -15,8 +16,12 @@ function runner(overrides: Partial<PaymentMaintenanceRunner> = {}): PaymentMaint
     failReconciliation: vi.fn(async () => "released" as const), classifyReconciliationError: vi.fn(() => ({ kind: "other" as const })),
     listHistoryCandidates: vi.fn(async () => []), claimHistory: vi.fn(async () => null),
     authorizeHistory: vi.fn(async () => ({ context: {} })), historyPageSize: vi.fn(async () => 100),
+    findPendingHistoryPaymentIds: vi.fn(async () => []), loadExactHistoryPayment: vi.fn(async () => null),
+    persistExactHistoryPayment: vi.fn(async () => undefined),
+    loadLegacyHistory: vi.fn(async () => ({ context: {} })),
     loadHistoryPage: vi.fn(async () => ({ context: {} })), completeHistoryPage: vi.fn(async () => ({ applied: 0, hasMore: false })),
-    failHistory: vi.fn(async () => undefined), now: vi.fn(() => 1_000), ...overrides,
+    classifyHistoryError: vi.fn(() => ({ kind: "unexpected" as const })),
+    deferHistory: vi.fn(async () => undefined), failHistory: vi.fn(async () => undefined), now: vi.fn(() => 1_000), ...overrides,
   };
 }
 
@@ -150,7 +155,7 @@ describe("payment maintenance application policy", () => {
     });
   });
 
-  it("processes history candidates and isolates missing capabilities", async () => {
+  it("processes history candidates and falls back to legacy history when capabilities are absent", async () => {
     let time = 1_000;
     const subject = runner({
       now: vi.fn(() => time++), listHistoryCandidates: vi.fn(async () => [
@@ -160,8 +165,203 @@ describe("payment maintenance application policy", () => {
       historyPageSize: vi.fn(async () => 0),
     });
     await expect(runPaymentMaintenance(subject, { paymentLimit: 1, deadlineMs: 10_000 })).resolves.toMatchObject({
-      history: { attempted: 1, applied: 0, completed: 0, failed: 1 },
+      history: { attempted: 1, applied: 0, completed: 1, failed: 0 },
     });
-    expect(subject.failHistory).toHaveBeenCalled();
+    expect(subject.loadLegacyHistory).toHaveBeenCalled();
+    expect(subject.failHistory).not.toHaveBeenCalled();
+    expect(subject.listHistoryCandidates).toHaveBeenCalledWith(20);
+  });
+
+  it("isolates exact pending-payment failures before applying the bounded page", async () => {
+    const failure = new Error("exact unavailable");
+    const subject = runner({
+      listHistoryCandidates: vi.fn(async () => [
+        { userId: "user-1", upstreamAccountId: "owner-1" },
+      ]),
+      claimHistory: vi.fn(async () => ({ context: {}, cursor: null })),
+      findPendingHistoryPaymentIds: vi.fn(async () => ["payment-1", "payment-2"]),
+      loadExactHistoryPayment: vi.fn()
+        .mockRejectedValueOnce(failure)
+        .mockResolvedValueOnce({ context: { payment_id: "payment-2" } }),
+      completeHistoryPage: vi.fn(async () => ({ applied: 1, hasMore: false })),
+      logHistoryExactFailure: vi.fn(),
+    });
+
+    await expect(runPaymentMaintenance(subject, {
+      paymentLimit: 1,
+      deadlineMs: 10_000,
+    })).resolves.toMatchObject({
+      history: { attempted: 1, applied: 1, completed: 1, failed: 0 },
+    });
+    expect(subject.persistExactHistoryPayment).toHaveBeenCalledOnce();
+    expect(subject.logHistoryExactFailure).toHaveBeenCalledWith(failure, 0);
+    expect(subject.loadHistoryPage).toHaveBeenCalledOnce();
+  });
+
+  it("finishes a bounded multi-page backfill in one maintenance cycle", async () => {
+    const claims = [
+      { context: {}, cursor: null },
+      { context: {}, cursor: "cursor-2" },
+      { context: {}, cursor: "cursor-3" },
+    ];
+    const subject = runner({
+      listHistoryCandidates: vi.fn(async () => [
+        { userId: "user-1", upstreamAccountId: "owner-1" },
+      ]),
+      claimHistory: vi.fn(async () => claims.shift() ?? null),
+      completeHistoryPage: vi.fn()
+        .mockResolvedValueOnce({ applied: 100, hasMore: true })
+        .mockResolvedValueOnce({ applied: 100, hasMore: true })
+        .mockResolvedValueOnce({ applied: 47, hasMore: false }),
+    });
+
+    await expect(runPaymentMaintenance(subject, {
+      paymentLimit: 1,
+      deadlineMs: 10_000,
+    })).resolves.toMatchObject({
+      history: {
+        attempted: 3,
+        applied: 247,
+        completed: 1,
+        failed: 0,
+      },
+    });
+
+    expect(subject.authorizeHistory).toHaveBeenCalledOnce();
+    expect(subject.historyPageSize).toHaveBeenCalledOnce();
+    expect(subject.findPendingHistoryPaymentIds).toHaveBeenCalledOnce();
+    expect(subject.loadHistoryPage).toHaveBeenNthCalledWith(
+      1,
+      expect.anything(),
+      null,
+      100,
+      expect.any(Number),
+    );
+    expect(subject.loadHistoryPage).toHaveBeenNthCalledWith(
+      2,
+      expect.anything(),
+      "cursor-2",
+      100,
+      expect.any(Number),
+    );
+    expect(subject.loadHistoryPage).toHaveBeenNthCalledWith(
+      3,
+      expect.anything(),
+      "cursor-3",
+      100,
+      expect.any(Number),
+    );
+  });
+
+  it("yields safely when another worker claims the next history page", async () => {
+    const subject = runner({
+      listHistoryCandidates: vi.fn(async () => [
+        { userId: "user-1", upstreamAccountId: "owner-1" },
+      ]),
+      claimHistory: vi.fn()
+        .mockResolvedValueOnce({ context: {}, cursor: null })
+        .mockResolvedValueOnce(null),
+      completeHistoryPage: vi.fn(async () => ({ applied: 100, hasMore: true })),
+    });
+
+    await expect(runPaymentMaintenance(subject, {
+      paymentLimit: 1,
+      deadlineMs: 10_000,
+    })).resolves.toMatchObject({
+      history: {
+        attempted: 1,
+        applied: 100,
+        completed: 0,
+        failed: 0,
+      },
+    });
+
+    expect(subject.claimHistory).toHaveBeenCalledTimes(2);
+    expect(subject.loadHistoryPage).toHaveBeenCalledOnce();
+  });
+
+  it("passes one shrinking budget through history stages and stops after it expires", async () => {
+    let time = 1_000;
+    const authorizeHistory = vi.fn(async () => ({ context: {} }));
+    const subject = runner({
+      now: vi.fn(() => time),
+      listHistoryCandidates: vi.fn(async () => [
+        { userId: "user-1", upstreamAccountId: "owner-1" },
+      ]),
+      claimHistory: vi.fn(async () => ({ context: {}, cursor: null })),
+      authorizeHistory,
+      historyPageSize: vi.fn(async () => {
+        time = 2_001;
+        return 100;
+      }),
+      findPendingHistoryPaymentIds: vi.fn(async () => ["payment-1"]),
+      logHistoryExactFailure: vi.fn(),
+    });
+
+    await expect(runPaymentMaintenance(subject, {
+      paymentLimit: 1,
+      deadlineMs: 1_000,
+    })).resolves.toMatchObject({
+      history: { attempted: 1, failed: 1 },
+    });
+    expect(authorizeHistory).toHaveBeenCalledWith(expect.anything(), 1_000);
+    expect(subject.loadExactHistoryPayment).not.toHaveBeenCalled();
+    expect(subject.loadHistoryPage).not.toHaveBeenCalled();
+    expect(subject.failHistory).toHaveBeenCalledOnce();
+  });
+
+  it("defers expected stale history credentials without recording a hard failure", async () => {
+    const staleCredential = Object.assign(new Error("expired"), {
+      code: "UNAUTHORIZED",
+    });
+    const subject = runner({
+      listHistoryCandidates: vi.fn(async () => [
+        { userId: "user-1", upstreamAccountId: "owner-1" },
+      ]),
+      claimHistory: vi.fn(async () => ({ context: {}, cursor: null })),
+      authorizeHistory: vi.fn(async () => { throw staleCredential; }),
+      classifyHistoryError: vi.fn(() => ({ kind: "deferred" as const })),
+    });
+
+    await expect(runPaymentMaintenance(subject, {
+      paymentLimit: 1,
+      deadlineMs: 10_000,
+    })).resolves.toMatchObject({
+      history: { attempted: 1, failed: 1, deferred: 1 },
+    });
+    expect(subject.deferHistory).toHaveBeenCalledWith(
+      expect.anything(),
+      staleCredential,
+    );
+    expect(subject.failHistory).not.toHaveBeenCalled();
+  });
+
+  it("keeps opportunistic history degradation out of core reconciliation health", () => {
+    const result = (overrides: Record<string, unknown>) => ({
+      claimed: 0, succeeded: 0, inProgress: 0, unknown: 0, manualRequired: 0,
+      retryReady: 0, failed: 0, manualRequiredOperationIds: [],
+      history: { attempted: 0, applied: 0, completed: 0, failed: 0, deferred: 0 },
+      backlog: { pending: 0, due: 0, manualRequired: 0, oldestAgeSeconds: 0, maximumAttemptCount: 0, totalFailureCount: 0 },
+      ...overrides,
+    }) as Awaited<ReturnType<typeof runPaymentMaintenance>>;
+
+    expect(paymentMaintenanceBatchIsHealthy(result({}))).toBe(true);
+    expect(paymentMaintenanceBatchIsHealthy(result({ claimed: 1, succeeded: 1 }))).toBe(true);
+    expect(paymentMaintenanceBatchIsHealthy(result({ claimed: 1, failed: 1 }))).toBe(false);
+    expect(paymentMaintenanceBatchIsHealthy(result({
+      history: { attempted: 3, applied: 0, completed: 0, failed: 3, deferred: 3 },
+    }))).toBe(true);
+    expect(paymentMaintenanceBatchIsHealthy(result({
+      history: { attempted: 1, applied: 0, completed: 0, failed: 1, deferred: 0 },
+    }))).toBe(false);
+    expect(paymentMaintenanceBatchIsHealthy(result({
+      claimed: 1,
+      failed: 1,
+      history: { attempted: 1, applied: 10, completed: 1, failed: 0, deferred: 0 },
+    }))).toBe(false);
+    expect(paymentMaintenanceBatchIsHealthy(result({
+      backlog: { pending: 1, due: 1, manualRequired: 0, oldestAgeSeconds: 1, maximumAttemptCount: 0, totalFailureCount: 0 },
+      history: { attempted: 1, applied: 10, completed: 1, failed: 0, deferred: 0 },
+    }))).toBe(false);
   });
 });

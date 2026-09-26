@@ -14,11 +14,14 @@ import {
   remnashopAuthTelegramIdentity,
   remnashopLinkTelegram,
   remnashopMergeUsers,
-  remnashopRequest,
 } from "@/backend/integrations/remnashop/client";
+import { remnashopValidatedRequest } from "@/backend/integrations/remnashop/api-client-runtime";
 import { linkCurrentUserToRemnashopAuth } from "@/backend/integrations/remnashop/session";
 import { refreshCurrentAccessCookie } from "@/backend/integrations/sessions/web-session-service";
-import { withPaymentOwnerChangeFence } from "@/backend/integrations/payments/payment-user-merge-service";
+import {
+  markPaymentOwnerChangeUpstreamMutationStarted,
+  withPaymentOwnerChangeFence,
+} from "@/backend/integrations/payments/payment-user-merge-service";
 import { synchronizeProviderAccountIdentity } from "@/backend/integrations/auth/provider-account-identity-sync";
 import { assertCooldown, assertRateLimit } from "@/backend/limits/rate-limit";
 import { auditLog } from "@/backend/observability/audit";
@@ -67,11 +70,16 @@ function providerSession(auth: {
   };
 }
 
-export const productionEmailVerificationCommands: EmailVerificationCommands = {
+type EmailVerificationAuthorizer = typeof getAuthorizedRemnashopTokens;
+
+export function createProductionEmailVerificationCommands(
+  authorize: EmailVerificationAuthorizer = getAuthorizedRemnashopTokens,
+): EmailVerificationCommands {
+  return {
   verifyHuman: (token, action) => adapt(() => verifyTurnstileToken(token, action)),
 
   async loadActor(options) {
-    const authorized = await adapt(() => getAuthorizedRemnashopTokens(
+    const authorized = await adapt(() => authorize(
       options?.allowUnverifiedEmail ? { allowUnverifiedEmail: true } : undefined,
     ));
     const { accessToken, session } = authorized;
@@ -84,6 +92,7 @@ export const productionEmailVerificationCommands: EmailVerificationCommands = {
       telegramUsername: session.user.telegramUsername,
       pendingUpstreamAccountId: session.user.pendingRemnashopUserId,
       pendingEmail: session.user.pendingRemnashopEmail,
+      localUpstreamAccountId: session.user.remnashopUserId,
       authorizedUpstreamAccountId: getRemnashopUserIdFromAccessToken(accessToken),
     };
   },
@@ -139,7 +148,7 @@ export const productionEmailVerificationCommands: EmailVerificationCommands = {
 
   async confirmProviderCode(actor, input) {
     if (input.alreadyVerified) return { email: input.email! };
-    return adapt(() => remnashopRequest<ConfirmEmailVerificationResponse>(
+    return adapt(() => remnashopValidatedRequest<ConfirmEmailVerificationResponse>(
       "/auth/email/confirm",
       {
         method: "POST",
@@ -200,10 +209,12 @@ export const productionEmailVerificationCommands: EmailVerificationCommands = {
 
   async attachTelegram(session, input) {
     const provider = providerContext(session);
+    await markPaymentOwnerChangeUpstreamMutationStarted();
     await adapt(() => remnashopLinkTelegram({ accessToken: provider.accessToken, ...input }));
   },
 
   async mergeProviderAccounts(input) {
+    await markPaymentOwnerChangeUpstreamMutationStarted();
     await adapt(async () => {
       try {
         await remnashopMergeUsers({
@@ -230,7 +241,10 @@ export const productionEmailVerificationCommands: EmailVerificationCommands = {
 
   async linkCurrentAccount(session, input) {
     const provider = providerContext(session);
-    await adapt(() => synchronizeProviderAccountIdentity(provider.accessToken));
+    const verified = await adapt(() => synchronizeProviderAccountIdentity(
+      provider.accessToken,
+      input.expectedIdentity,
+    ));
     await adapt(async () => {
       await linkCurrentUserToRemnashopAuth({
         accessToken: provider.accessToken,
@@ -238,6 +252,7 @@ export const productionEmailVerificationCommands: EmailVerificationCommands = {
         auth: provider.auth,
         ...(input.upstreamMerged ? { invalidateSiblingRemnashopTokens: true } : {}),
         paymentOwnerFenceHeld: input.ownerFenceHeld,
+        verifiedProfile: verified.profile,
       });
     });
   },
@@ -291,9 +306,13 @@ export const productionEmailVerificationCommands: EmailVerificationCommands = {
   },
 
   async changeProviderEmail(actor, email) {
-    const result = await adapt(() => remnashopRequest<ChangeEmailResponse>(
+    const result = await adapt(() => remnashopValidatedRequest<ChangeEmailResponse>(
       "/auth/email/change",
-      { method: "POST", accessToken: actorContext(actor).accessToken, body: { email } },
+      {
+        method: "POST",
+        accessToken: actorContext(actor).accessToken,
+        body: { email },
+      },
     ));
     return { pendingEmail: result.pending_email };
   },
@@ -323,4 +342,5 @@ export const productionEmailVerificationCommands: EmailVerificationCommands = {
     }));
   },
 
-};
+  };
+}

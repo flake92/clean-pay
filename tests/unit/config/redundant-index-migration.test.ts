@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
@@ -19,6 +20,15 @@ describe("redundant index cleanup migration", () => {
   it("fails fast instead of waiting indefinitely for a table lock", () => {
     expect(migration).toContain("SET lock_timeout = '5s'");
     expect(migration).not.toContain("CONCURRENTLY");
+  });
+
+  it("keeps the already-published migration bytes immutable", () => {
+    const normalizedChecksum = createHash("sha256")
+      .update(migration.replace(/\r\n/g, "\n"), "utf8")
+      .digest("hex");
+    expect(normalizedChecksum).toBe(
+      "d7857cdbea5de7e559d305697e25fa7e2eeab37f4c207f940d7d06368bd629d6",
+    );
   });
 
   it("keeps unique fields without recreating non-unique copies", () => {

@@ -83,6 +83,20 @@ describe("application readiness", () => {
     });
   });
 
+  it("rejects a readiness snapshot timestamped in the future", async () => {
+    const now = Date.parse("2026-08-09T06:00:00.000Z");
+    const readSharedState = vi.fn(async () => JSON.stringify({
+      status: "ok",
+      checkedAt: "2026-08-09T07:00:00.000Z",
+    }));
+
+    await expect(getPublicReadiness({ readSharedState }, now)).resolves.toEqual({
+      status: "degraded",
+      checkedAt: "2026-08-09T07:00:00.000Z",
+      stale: true,
+    });
+  });
+
   it("serves a fresh process-local readiness snapshot without opening Redis", async () => {
     const dependencies = gateway();
     const detailed = await runDetailedReadiness(dependencies);

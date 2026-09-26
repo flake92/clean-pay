@@ -66,6 +66,55 @@ function gateway(overrides: Partial<TelegramCallbackGateway> = {}): TelegramCall
 const input = { kind: "oidc" as const, code: "code", state: "state" };
 
 describe("completeTelegramCallback", () => {
+  it.each([
+    "https://evil.example/steal",
+    "//evil.example/steal",
+    "javascript:alert(1)",
+    "/missing",
+    "/api/private",
+    "/auth/telegram/start",
+  ])("fails closed for a corrupted stored continuation %s", async (redirectTo) => {
+    const subject = gateway({
+      consume: vi.fn(async () => ({
+        authState: { id: "state-1", targetUserId: "target-local", redirectTo },
+        identity: {
+          telegramId: "777",
+          telegramUsername: "selected",
+          fullName: "Selected User",
+          photoUrl: null,
+          providerSession,
+        },
+      })),
+    });
+
+    await expect(completeTelegramCallback(subject, input)).resolves.toMatchObject({
+      redirectTo: "/cabinet",
+    });
+  });
+
+  it("preserves a valid stored continuation with query and hash", async () => {
+    const subject = gateway({
+      consume: vi.fn(async () => ({
+        authState: {
+          id: "state-1",
+          targetUserId: "target-local",
+          redirectTo: "/payment?plan=pro#checkout",
+        },
+        identity: {
+          telegramId: "777",
+          telegramUsername: "selected",
+          fullName: "Selected User",
+          photoUrl: null,
+          providerSession,
+        },
+      })),
+    });
+
+    await expect(completeTelegramCallback(subject, input)).resolves.toMatchObject({
+      redirectTo: "/payment?plan=pro#checkout",
+    });
+  });
+
   it("links directly when Telegram already resolves to the target provider account", async () => {
     const subject = gateway();
 
@@ -105,6 +154,23 @@ describe("completeTelegramCallback", () => {
     expect(subject.loadProviderMergeIdentity).not.toHaveBeenCalled();
   });
 
+  it("does not delete a local Telegram owner bound to an unrelated provider account", async () => {
+    const subject = gateway({
+      findUserByTelegramId: vi.fn(async () => ({
+        id: "stale-local-owner",
+        upstreamAccountId: "unrelated-account",
+        email: "stale@example.com",
+        emailVerified: true,
+        telegramId: "777",
+      })),
+    });
+
+    await expect(completeTelegramCallback(subject, input)).rejects.toMatchObject({
+      code: "ACCOUNT_MERGE_REQUIRED",
+    });
+    expect(subject.applyTelegramIdentity).not.toHaveBeenCalled();
+  });
+
   it("keeps the local link when attachment fails without a provider session", async () => {
     const subject = gateway({
       consume: vi.fn(async () => ({
@@ -135,11 +201,11 @@ describe("completeTelegramCallback", () => {
       sourceAccountId: "target-account",
       targetAccountId: "source-account",
     });
-    expect(subject.linkProviderSession).toHaveBeenCalledWith({
+    expect(subject.linkProviderSession).toHaveBeenCalledWith(expect.objectContaining({
       session: providerSession,
       ownerFenceHeld: true,
       invalidateSiblingTokens: true,
-    });
+    }));
   });
 
   it("does not merge without a known current provider account", async () => {

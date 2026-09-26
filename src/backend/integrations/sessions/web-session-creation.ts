@@ -20,6 +20,10 @@ import {
   addMinutes,
   setAccessCookie,
 } from "@/backend/integrations/sessions/web-session-token";
+import {
+  applyOrDeferWebSessionCookieEffect,
+  webSessionCookieEffectsAreDeferred,
+} from "@/backend/integrations/sessions/web-session-cookie-effects";
 
 export async function createWebSession(
   userId: string,
@@ -118,7 +122,9 @@ export async function createWebSessionForRemnashopUser({
   replaceExistingSessions?: boolean;
 }) {
   const env = getEnv();
-  const cookieStore = await cookies();
+  const immediateCookieStore = webSessionCookieEffectsAreDeferred()
+    ? undefined
+    : await cookies();
   const requestHeaders = await headers();
   const db = tx ?? prisma;
   const now = new Date();
@@ -190,29 +196,32 @@ export async function createWebSessionForRemnashopUser({
     where: { id: userId },
     select: { emailVerified: true, telegramId: true },
   });
-  await setAccessCookie({
-    sessionId: session.id,
-    userId,
-    expiresAt: accessTokenExpiresAt,
-    assuranceLevel,
-    emailVerified: user?.emailVerified,
-    telegramId: user?.telegramId,
-  });
-  cookieStore.set(sessionCookieNames.refresh, refreshToken, {
-    httpOnly: true,
-    secure: env.cookieSecure,
-    sameSite: env.cookieSameSite,
-    path: "/",
-    expires: refreshExpiresAt,
-  });
-  authDebugLog("session_create_success", {
-    sessionId: session.id,
-    userId,
-    authMethod: session.authMethod,
-    assuranceLevel: session.assuranceLevel,
-    accessTokenExpiresAt,
-    refreshExpiresAt,
-    hasRemnashopTokens: true,
+  await applyOrDeferWebSessionCookieEffect(async () => {
+    const cookieStore = immediateCookieStore ?? await cookies();
+    await setAccessCookie({
+      sessionId: session.id,
+      userId,
+      expiresAt: accessTokenExpiresAt,
+      assuranceLevel,
+      emailVerified: user?.emailVerified,
+      telegramId: user?.telegramId,
+    });
+    cookieStore.set(sessionCookieNames.refresh, refreshToken, {
+      httpOnly: true,
+      secure: env.cookieSecure,
+      sameSite: env.cookieSameSite,
+      path: "/",
+      expires: refreshExpiresAt,
+    });
+    authDebugLog("session_create_success", {
+      sessionId: session.id,
+      userId,
+      authMethod: session.authMethod,
+      assuranceLevel: session.assuranceLevel,
+      accessTokenExpiresAt,
+      refreshExpiresAt,
+      hasRemnashopTokens: true,
+    });
   });
   return session;
 }

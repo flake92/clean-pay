@@ -1,13 +1,39 @@
 import type { CabinetReader } from "@/application/cabinet/ports/cabinet-reader";
 import type { CabinetViewModel } from "@/application/models/cabinet";
 import type { PaymentHistoryGateway } from "@/application/payments/ports/payment-history";
-import type { PaymentMaintenanceRunner } from "@/application/payments/ports/payment-maintenance";
 import { loadPaymentHistory } from "@/application/payments/load-payment-history";
 import type { AuthProfileGateway } from "@/application/auth/ports/auth-profile";
 import { AuthProfileError } from "@/application/auth/ports/auth-profile";
 import { resolveAuthProfile } from "@/application/auth/resolve-auth-profile";
+import { isProviderSessionRecoveryRequired } from "@/shared/domain/provider-session-recovery";
 
-export async function loadCabinetViewModel(reader: CabinetReader, auth: AuthProfileGateway, history: PaymentHistoryGateway, maintenance: PaymentMaintenanceRunner): Promise<CabinetViewModel> {
+function cabinetLoadFailure(error: unknown): CabinetViewModel {
+  const code = error instanceof AuthProfileError ? error.code : "INTERNAL_ERROR";
+
+  if (code === "ACCOUNT_MERGE_REQUIRED" || code === "ACCOUNT_MERGE_SUBSCRIPTIONS_CONFLICT") {
+    return {
+      status: "error",
+      message: "Не удалось безопасно определить ваш аккаунт: данные Telegram и e-mail ещё не объединены. Нажмите «Объединить аккаунты» — откроется страница привязки, где можно подтвердить e-mail и завершить объединение.",
+      recovery: "merge",
+    };
+  }
+
+  if (code === "UPSTREAM_UNAVAILABLE" || code === "UPSTREAM_ERROR" || code === "RATE_LIMITED") {
+    return {
+      status: "error",
+      message: "Сервис подписок временно недоступен или обновляет вашу сессию. Подождите несколько секунд и повторите.",
+      recovery: "retry",
+    };
+  }
+
+  return {
+    status: "error",
+    message: "Не удалось загрузить данные аккаунта. Повторите попытку или восстановите доступ.",
+    recovery: "recover",
+  };
+}
+
+export async function loadCabinetViewModel(reader: CabinetReader, auth: AuthProfileGateway, history: PaymentHistoryGateway): Promise<CabinetViewModel> {
   let account;
   try {
     account = await resolveAuthProfile(auth);
@@ -15,16 +41,26 @@ export async function loadCabinetViewModel(reader: CabinetReader, auth: AuthProf
     if (error instanceof AuthProfileError && error.code === "UNAUTHORIZED") {
       return { status: "unauthorized" };
     }
-    return { status: "error", message: "Нужно войти в аккаунт." };
+    if (error instanceof AuthProfileError && error.code === "PROVIDER_SESSION_RECOVERY_REQUIRED") {
+      return { status: "provider-session-recovery-required" };
+    }
+    return cabinetLoadFailure(error);
   }
 
   const [subscription, offers, devices, payments, support] = await Promise.allSettled([
     reader.loadSubscription(),
     reader.loadOffers(),
     reader.loadDevices(),
-    loadPaymentHistory(history, maintenance, account.userId),
+    loadPaymentHistory(history, account.userId),
     reader.loadSupport(),
   ]);
+
+  if ([subscription, offers, devices].some(
+    (result) => result.status === "rejected"
+      && isProviderSessionRecoveryRequired(result.reason),
+  )) {
+    return { status: "provider-session-recovery-required" };
+  }
 
   return {
     status: "ready",
@@ -34,13 +70,17 @@ export async function loadCabinetViewModel(reader: CabinetReader, auth: AuthProf
     offers: offers.status === "fulfilled" ? offers.value : null,
     devices: devices.status === "fulfilled" ? devices.value : null,
     payments: payments.status === "fulfilled" ? payments.value.records : [],
-    paymentsWarning: payments.status === "rejected"
-      ? "Не удалось обновить историю платежей."
-      : payments.value.stale
-        ? "История показана из сохранённых данных. Обновление статусов временно недоступно."
-        : null,
+    paymentHistoryStatus: payments.status === "fulfilled"
+      ? payments.value.status
+      : "unavailable",
     support: support.status === "fulfilled"
       ? support.value
-      : { enabled: false, email: null, telegramUsername: null, faqUrl: null },
+      : {
+          enabled: false,
+          email: null,
+          telegramUsername: null,
+          faqUrl: null,
+          liveChatEnabled: false,
+        },
   };
 }

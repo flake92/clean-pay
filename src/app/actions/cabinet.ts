@@ -8,10 +8,18 @@ import {
   deleteCabinetDevice,
   reissueCabinetSubscription,
 } from "@/application/cabinet/execute-command";
-import { productionCabinetCommands } from "@/backend/integrations/cabinet/cabinet-commands";
+import type { CabinetCommandResult } from "@/application/models/cabinet-actions";
+import { productionCabinetCommands } from "@/app/_composition/session-gateways";
+import { parseBoundedIdentifier } from "@/app/actions/runtime-payload";
 
-export async function deleteDeviceAction(hwid: string) {
-  const result = await deleteCabinetDevice(productionCabinetCommands, hwid);
+export async function deleteDeviceAction(
+  hwid: string,
+): Promise<CabinetCommandResult> {
+  const parsed = parseBoundedIdentifier(hwid, 512);
+  if (!parsed) {
+    return { status: "error" as const, message: "Некорректный идентификатор устройства." };
+  }
+  const result = await deleteCabinetDevice(productionCabinetCommands, parsed);
   if (result.status === "success") revalidatePath("/cabinet");
   return result;
 }
@@ -29,7 +37,11 @@ export async function reissueSubscriptionAction() {
 }
 
 export async function activatePromocodeAction(code: string) {
-  const result = await activateCabinetPromocode(productionCabinetCommands, code);
+  const parsed = parseBoundedIdentifier(code, 256);
+  if (!parsed) {
+    return { status: "error" as const, message: "Введите корректный промокод." };
+  }
+  const result = await activateCabinetPromocode(productionCabinetCommands, parsed);
   if (result.status === "success") revalidatePath("/cabinet");
   return result;
 }

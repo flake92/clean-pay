@@ -11,17 +11,21 @@ vi.mock("@/backend/config/env", () => ({ getEnv: mocks.getEnv }));
 vi.mock("@/backend/integrations/remnashop/client", () => ({
   getAuthorizedRemnashopTokens: mocks.getAuthorizedRemnashopTokens,
   remnashopRequest: mocks.remnashopRequest,
+  remnashopValidatedRequest: mocks.remnashopRequest,
+}));
+vi.mock("@/backend/integrations/remnashop/api-client-runtime", () => ({
+  remnashopValidatedRequest: mocks.remnashopRequest,
 }));
 vi.mock("@/backend/integrations/remnawave/client", () => ({
   getLiveRemnawaveSubscriptionUrl: mocks.getLiveRemnawaveSubscriptionUrl,
 }));
 
 import { ServiceError } from "@/backend/errors/service-error";
-import { productionCabinetReader } from "@/backend/integrations/cabinet/cabinet-reader";
-import { productionCheckoutReader } from "@/backend/integrations/payments/checkout-reader";
-import { remnashopSubscriptionCatalog } from "@/backend/integrations/remnashop/subscription-catalog";
-import { remnashopSubscriptionReader } from "@/backend/integrations/remnashop/subscription-reader";
-import { productionSupportReader } from "@/backend/integrations/support/support-reader";
+import { createProductionCabinetReader } from "@/backend/integrations/cabinet/cabinet-reader";
+import { createProductionCheckoutReader } from "@/backend/integrations/payments/checkout-reader";
+import { createRemnashopSubscriptionCatalog } from "@/backend/integrations/remnashop/subscription-catalog";
+import { createRemnashopSubscriptionReader } from "@/backend/integrations/remnashop/subscription-reader";
+import { productionSupportReader } from "@/app/_composition/support-runtime";
 
 const offers = {
   gateways: [],
@@ -29,6 +33,19 @@ const offers = {
   has_current_subscription: true,
   current_subscription_status: "ACTIVE",
 };
+
+const remnashopSubscriptionReader = createRemnashopSubscriptionReader(
+  mocks.getAuthorizedRemnashopTokens,
+);
+const remnashopSubscriptionCatalog = createRemnashopSubscriptionCatalog(
+  mocks.getAuthorizedRemnashopTokens,
+);
+const productionCabinetReader = createProductionCabinetReader(
+  remnashopSubscriptionReader,
+);
+const productionCheckoutReader = createProductionCheckoutReader(
+  remnashopSubscriptionReader,
+);
 
 describe("production read adapters", () => {
   beforeEach(() => {

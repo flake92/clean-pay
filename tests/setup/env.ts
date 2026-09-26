@@ -1,3 +1,7 @@
+import { afterEach, vi } from "vitest";
+
+import { resetEnvForTests } from "@/backend/config/env";
+
 process.env.DATABASE_URL = "postgresql://clean_pay:clean_pay@postgres:5432/clean_pay?schema=public";
 process.env.APP_URL = "http://localhost:8080";
 process.env.NEXT_PUBLIC_APP_URL = "http://localhost:8080";
@@ -15,6 +19,7 @@ process.env.AUTH_CONCURRENCY_LIMIT = "64";
 process.env.READINESS_INTERNAL_SECRET = "test-readiness-internal-secret";
 process.env.PAYMENT_RECONCILIATION_ENABLED = "true";
 process.env.PAYMENT_RECONCILIATION_SECRET = "test-payment-reconciliation-secret";
+process.env.PAYMENT_REDIRECT_ORIGINS = "https://pay.example.test,https://pay.example,https://pay.test,https://provider.test";
 process.env.COOKIE_SECURE = "false";
 process.env.COOKIE_SAMESITE = "lax";
 process.env.TELEGRAM_OIDC_CLIENT_ID = "123456";
@@ -28,3 +33,11 @@ process.env.SUPPORT_ENABLED = "true";
 process.env.SUPPORT_EMAIL = "support@clean-pay.localhost";
 process.env.SUPPORT_TELEGRAM_USERNAME = "cleanpay_support";
 process.env.SUPPORT_FAQ_URL = "http://localhost:8080/support";
+process.env.CHATWOOT_BASE_URL = "";
+process.env.CHATWOOT_WEBSITE_TOKEN = "";
+process.env.CHATWOOT_HMAC_TOKEN = "";
+
+afterEach(() => {
+  vi.unstubAllEnvs();
+  resetEnvForTests();
+});

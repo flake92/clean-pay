@@ -7,6 +7,8 @@ export class AuthGatewayError extends Error {
 }
 
 export interface AuthCommands {
+  preflightCapacity(action: string): Promise<void>;
+  withUpstreamConcurrency<T>(action: string, work: () => Promise<T>): Promise<T>;
   verifyHuman(token: string | null, action: "auth_login"): Promise<void>;
   rateLimit(input: {
     action: "auth_identify" | "auth_login" | "auth_register" | "password_reset_start" | "password_reset_confirm";
@@ -16,12 +18,11 @@ export interface AuthCommands {
   }): Promise<void>;
   identifyEmail(email: string): Promise<{ exists: boolean }>;
   hasPasskey(email: string): Promise<boolean>;
-  authenticate(input: {
-    operation: "login" | "register" | "confirm-password-reset";
-    email: string;
-    password?: string;
-    code?: string;
-  }): Promise<AuthProviderSession>;
+  authenticate(input:
+    | { operation: "login"; email: string; password: string }
+    | { operation: "register"; email: string; password: string; referralCode?: string }
+    | { operation: "confirm-password-reset"; email: string; password: string; code: string }
+  ): Promise<AuthProviderSession>;
   establishSession(
     providerSession: AuthProviderSession,
     options?: { replaceExistingSessions?: boolean; replacementIdentityEmail?: string },

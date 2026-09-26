@@ -3,8 +3,11 @@ import {
   remnashopRequest,
   remnashopRequestResult,
 } from "@/backend/integrations/remnashop/client";
+import { bindRemnashopResponseContract } from "@/backend/integrations/remnashop/request-transport";
 import { ServiceError } from "@/backend/errors/service-error";
+import { getEnv } from "@/backend/config/env";
 import { logger } from "@/backend/observability/logger";
+import { isAllowedPaymentRedirectUrl } from "@/backend/payments/payment-redirect-policy";
 import type {
   PaymentInitResponse,
   PaymentTransactionResponse,
@@ -297,14 +300,14 @@ export function parsePaymentInit(
   }
 
   if (paymentUrl !== null) {
-    try {
-      const parsedUrl = new URL(paymentUrl);
-
-      if (parsedUrl.protocol !== "https:") {
-        throw new Error();
-      }
-    } catch {
-      return invalidContract(path, "payment.payment_url must be an https URL or null");
+    if (!isAllowedPaymentRedirectUrl(
+      paymentUrl,
+      getEnv().paymentRedirectOrigins,
+    )) {
+      return invalidContract(
+        path,
+        "payment.payment_url must use an allowed HTTPS payment origin without credentials",
+      );
     }
   }
 
@@ -571,10 +574,57 @@ export function parsePaymentRecovery(
   };
 }
 
-export async function getPaymentCapabilities(accessToken: string) {
+function parseExactTransactionResponse(paymentId: string, value: unknown) {
+  const path = "/subscription/transactions/by-id/{payment_id}";
+  const transaction = parsePaymentTransaction(value, path);
+
+  if (transaction.payment_id !== paymentId) {
+    return invalidContract(path, "payment_id does not match the requested transaction");
+  }
+
+  return transaction;
+}
+
+function validatePaymentRecoveryStatus(
+  recovery: RemnashopPaymentRecovery,
+  status: number,
+  path: string,
+) {
+  const expectedStatus = recovery.state === "SUCCEEDED" ? 200 : 202;
+
+  if (status !== expectedStatus) {
+    return invalidContract(
+      path,
+      `${recovery.state} must use HTTP ${expectedStatus}`,
+    );
+  }
+
+  return recovery;
+}
+
+function decodePaymentRecoveryResponse(
+  operation: RemnashopPaymentOperation,
+  path: string,
+  value: unknown,
+  response: { status: number },
+) {
+  return validatePaymentRecoveryStatus(
+    parsePaymentRecovery(value, operation),
+    response.status,
+    path,
+  );
+}
+
+export async function getPaymentCapabilities(
+  accessToken: string,
+  timeoutMs = RECOVERY_TIMEOUT_MS,
+) {
   const value = await remnashopRequest<unknown>(
     "/subscription/capabilities",
-    { accessToken, timeoutMs: RECOVERY_TIMEOUT_MS, allowNotFound: true },
+    bindRemnashopResponseContract(
+      { accessToken, timeoutMs, allowNotFound: true },
+      { decodeResponse: parsePaymentCapabilities },
+    ),
   );
 
   return value === null ? null : parsePaymentCapabilities(value);
@@ -584,6 +634,7 @@ export async function getTransactionPage(input: {
   accessToken: string;
   cursor: string | null;
   limit: number;
+  timeoutMs?: number;
 }) {
   if (!Number.isSafeInteger(input.limit) || input.limit < 1 || input.limit > 100) {
     throw new ServiceError("INTERNAL_ERROR", 500, "Invalid transaction page size");
@@ -597,7 +648,13 @@ export async function getTransactionPage(input: {
 
   const value = await remnashopRequest<unknown>(
     `/subscription/transactions/page?${params.toString()}`,
-    { accessToken: input.accessToken, timeoutMs: RECOVERY_TIMEOUT_MS },
+    bindRemnashopResponseContract(
+      {
+        accessToken: input.accessToken,
+        timeoutMs: input.timeoutMs ?? RECOVERY_TIMEOUT_MS,
+      },
+      { decodeResponse: parseTransactionPage },
+    ),
   );
 
   return parseTransactionPage(value);
@@ -606,41 +663,41 @@ export async function getTransactionPage(input: {
 export async function getExactTransaction(input: {
   accessToken: string;
   paymentId: string;
+  timeoutMs?: number;
 }) {
   const paymentId = textValue(input.paymentId, "local", "paymentId");
   const value = await remnashopRequest<unknown>(
     `/subscription/transactions/by-id/${encodeURIComponent(paymentId)}`,
-    {
-      accessToken: input.accessToken,
-      timeoutMs: RECOVERY_TIMEOUT_MS,
-      allowNotFound: true,
-    },
+    bindRemnashopResponseContract(
+      {
+        accessToken: input.accessToken,
+        timeoutMs: input.timeoutMs ?? RECOVERY_TIMEOUT_MS,
+        allowNotFound: true,
+      },
+      {
+        decodeResponse: parseExactTransactionResponse.bind(null, paymentId),
+      },
+    ),
   );
 
   if (value === null) {
     return null;
   }
 
-  const transaction = parsePaymentTransaction(
-    value,
-    "/subscription/transactions/by-id/{payment_id}",
-  );
-
-  if (transaction.payment_id !== paymentId) {
-    return invalidContract(
-      "/subscription/transactions/by-id/{payment_id}",
-      "payment_id does not match the requested transaction",
-    );
-  }
-
-  return transaction;
+  return parseExactTransactionResponse(paymentId, value);
 }
 
-export async function getLegacyTransactions(accessToken: string) {
-  const value = await remnashopRequest<unknown>("/subscription/transactions", {
-    accessToken,
-    timeoutMs: RECOVERY_TIMEOUT_MS,
-  });
+export async function getLegacyTransactions(
+  accessToken: string,
+  timeoutMs = RECOVERY_TIMEOUT_MS,
+) {
+  const value = await remnashopRequest<unknown>(
+    "/subscription/transactions",
+    bindRemnashopResponseContract(
+      { accessToken, timeoutMs },
+      { decodeResponse: parseLegacyTransactions },
+    ),
+  );
 
   return parseLegacyTransactions(value);
 }
@@ -652,29 +709,36 @@ export async function reconcilePaymentOperation(input: {
   trigger: boolean;
 }) {
   const path = `/subscription/payment-operations/${input.operation}`;
-  const result = await remnashopRequestResult<unknown>(path, {
-    method: input.trigger ? "POST" : "GET",
-    accessToken: input.accessToken,
-    idempotencyKey: input.idempotencyKey,
-    timeoutMs: RECOVERY_TIMEOUT_MS,
-    allowNotFound: true,
-  });
+  const result = await remnashopRequestResult<unknown>(
+    path,
+    bindRemnashopResponseContract(
+      {
+        method: input.trigger ? "POST" as const : "GET" as const,
+        accessToken: input.accessToken,
+        idempotencyKey: input.idempotencyKey,
+        timeoutMs: RECOVERY_TIMEOUT_MS,
+        allowNotFound: true,
+      },
+      {
+        decodeResponse: decodePaymentRecoveryResponse.bind(
+          null,
+          input.operation,
+          path,
+        ),
+      },
+    ),
+  );
 
   if (result.status === 404) {
     return null;
   }
 
-  const recovery = parsePaymentRecovery(result.data, input.operation);
-  const expectedStatus = recovery.state === "SUCCEEDED" ? 200 : 202;
-
-  if (result.status !== expectedStatus) {
-    return invalidContract(
-      path,
-      `${recovery.state} must use HTTP ${expectedStatus}`,
-    );
-  }
-
-  return recovery;
+  return decodePaymentRecoveryResponse(
+    input.operation,
+    path,
+    result.data,
+    { status: result.status },
+  );
 }
 
 export async function reconcilePaymentOperationAsAdmin(input: {
@@ -685,26 +749,34 @@ export async function reconcilePaymentOperationAsAdmin(input: {
 }) {
   const params = new URLSearchParams({ user_id: input.remnashopUserId });
   const path = `/payment-operations/${input.operation}?${params.toString()}`;
-  const result = await remnashopAdminRequestResult<unknown>(path, {
-    method: input.trigger ? "POST" : "GET",
-    idempotencyKey: input.idempotencyKey,
-    timeoutMs: RECOVERY_TIMEOUT_MS,
-    allowNotFound: true,
-  });
+  const metricPath = `/payment-operations/${input.operation}`;
+  const result = await remnashopAdminRequestResult<unknown>(
+    path,
+    bindRemnashopResponseContract(
+      {
+        method: input.trigger ? "POST" as const : "GET" as const,
+        idempotencyKey: input.idempotencyKey,
+        timeoutMs: RECOVERY_TIMEOUT_MS,
+        allowNotFound: true,
+      },
+      {
+        decodeResponse: decodePaymentRecoveryResponse.bind(
+          null,
+          input.operation,
+          metricPath,
+        ),
+      },
+    ),
+  );
 
   if (result.status === 404) {
     return null;
   }
 
-  const recovery = parsePaymentRecovery(result.data, input.operation);
-  const expectedStatus = recovery.state === "SUCCEEDED" ? 200 : 202;
-
-  if (result.status !== expectedStatus) {
-    return invalidContract(
-      `/payment-operations/${input.operation}`,
-      `${recovery.state} must use HTTP ${expectedStatus}`,
-    );
-  }
-
-  return recovery;
+  return decodePaymentRecoveryResponse(
+    input.operation,
+    metricPath,
+    result.data,
+    { status: result.status },
+  );
 }

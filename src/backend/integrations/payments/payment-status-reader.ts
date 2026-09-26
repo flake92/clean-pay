@@ -5,7 +5,8 @@ import {
   type PaymentStatusTransaction,
 } from "@/application/payments/ports/payment-status-reader";
 import { prismaPaymentQueryRepository } from "@/backend/integrations/payments/prisma-payment-query-repository";
-import { getAuthorizedRemnashopTokens, getRemnashopUserIdFromAccessToken, remnashopRequest } from "@/backend/integrations/remnashop/client";
+import { remnashopValidatedRequest } from "@/backend/integrations/remnashop/api-client-runtime";
+import { getAuthorizedRemnashopTokens, getRemnashopUserIdFromAccessToken } from "@/backend/integrations/remnashop/client";
 import { ServiceError } from "@/backend/errors/service-error";
 import { getExactTransaction, getLegacyTransactions, getPaymentCapabilities } from "@/backend/integrations/remnashop/payment-recovery";
 import { isPaymentManualRequired } from "@/backend/payments/manual-review";
@@ -15,6 +16,8 @@ import { getCurrentUser } from "@/backend/integrations/sessions/web-session-serv
 import type { CurrentSubscriptionResponse, PaymentTransactionResponse } from "@/backend/integrations/remnashop/contracts";
 
 type AuthorizationContext = Awaited<ReturnType<typeof getAuthorizedRemnashopTokens>>;
+type UserReader = () => ReturnType<typeof getCurrentUser>;
+type Authorizer = () => Promise<AuthorizationContext>;
 function authorization(value: PaymentStatusAuthorization) { return value.context as AuthorizationContext; }
 function transaction(value: PaymentStatusTransaction) { return value.context as PaymentTransactionResponse; }
 
@@ -38,15 +41,19 @@ async function operation(userId: string, operationId: string | null) {
   } : null;
 }
 
-export const productionPaymentStatusReader: PaymentStatusReader = {
+export function createProductionPaymentStatusReader(
+  readUser: UserReader = getCurrentUser,
+  authorizeSession: Authorizer = getAuthorizedRemnashopTokens,
+): PaymentStatusReader {
+  return {
   async loadActor() {
-    const user = await adapt(() => getCurrentUser());
+    const user = await adapt(readUser);
     if (!user) return null;
     return { id: user.id, emailVerified: user.emailVerified, telegramId: user.telegramId };
   },
   findOperation: operation,
   async authorize() {
-    const authorized = await adapt(() => getAuthorizedRemnashopTokens());
+    const authorized = await adapt(authorizeSession);
     return { context: authorized, upstreamAccountId: getRemnashopUserIdFromAccessToken(authorized.accessToken) };
   },
   async assertUpstreamOwner(userId, upstreamAccountId) {
@@ -70,7 +77,7 @@ export const productionPaymentStatusReader: PaymentStatusReader = {
     await adapt(() => syncPaymentRecordsFromRemnashopTransactions({ userId, upstreamAccountId, transactions: values.map(transaction) }));
   },
   async loadSubscription(value) {
-    return adapt(() => remnashopRequest<CurrentSubscriptionResponse | null>("/subscription/current", { accessToken: authorization(value).accessToken }));
+    return adapt(() => remnashopValidatedRequest<CurrentSubscriptionResponse | null>("/subscription/current", { accessToken: authorization(value).accessToken }));
   },
   async findPayment(userId, paymentId) {
     const record = await prismaPaymentQueryRepository.findRecord(userId, paymentId);
@@ -83,4 +90,5 @@ export const productionPaymentStatusReader: PaymentStatusReader = {
   isSubscriptionMissing(error) {
     return error instanceof PaymentStatusGatewayError && error.code === "SUBSCRIPTION_NOT_FOUND";
   },
-};
+  };
+}

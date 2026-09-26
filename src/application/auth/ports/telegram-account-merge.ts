@@ -1,9 +1,12 @@
+import { serviceErrorPublicMessage } from "@/shared/domain/service-error-catalog";
+
 export type AccountMergeConfirmation = {
   context: unknown;
   id: string;
   userId: string;
   status: "PENDING" | "PROCESSING" | "COMPLETED" | "FAILED";
   expiresAt: Date;
+  recoverableAfterExpiry?: boolean;
   sourceAccountId: string;
   targetAccountId: string;
   sourceEmail: string | null;
@@ -32,7 +35,12 @@ export type AccountMergePreflight = {
 };
 
 export class AccountMergeError extends Error {
-  constructor(public readonly code: string, message?: string) { super(message ?? code); }
+  public readonly prodMessage: string | undefined;
+
+  constructor(public readonly code: string, message?: string) {
+    super(message ?? code);
+    this.prodMessage = serviceErrorPublicMessage(code);
+  }
 }
 
 export interface TelegramAccountMergeGateway {
@@ -46,10 +54,14 @@ export interface TelegramAccountMergeGateway {
   authenticateTelegram(confirmation: AccountMergeConfirmation): Promise<AccountMergeProviderIdentity>;
   preflight(confirmation: AccountMergeConfirmation): Promise<AccountMergePreflight>;
   mergeProviderAccounts(confirmation: AccountMergeConfirmation): Promise<{ targetHasSubscription: boolean }>;
-  synchronizeSubscriptionIdentity(identity: AccountMergeProviderIdentity): Promise<boolean>;
+  synchronizeSubscriptionIdentity(identity: AccountMergeProviderIdentity): Promise<{
+    hasSubscription: boolean;
+    identity: AccountMergeProviderIdentity;
+  }>;
   linkCurrentAccount(identity: AccountMergeProviderIdentity): Promise<{ userId: string }>;
   complete(confirmation: AccountMergeConfirmation): Promise<boolean>;
   cancel(confirmation: AccountMergeConfirmation): Promise<boolean>;
   release(confirmation: AccountMergeConfirmation, input: { terminal: boolean; errorCode: string }): Promise<void>;
   refreshLocalSession(): Promise<void>;
+  reconcileCompletedOwnerChange(confirmation: AccountMergeConfirmation): Promise<void>;
 }

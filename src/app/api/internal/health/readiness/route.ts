@@ -1,10 +1,13 @@
 import { NextResponse } from "next/server";
 
 import { runDetailedReadiness } from "@/application/health/readiness";
-import { getEnv } from "@/backend/config/env";
-import { createProductionReadinessGateway } from "@/backend/health/checks";
-import { safeEqual, sha256 } from "@/backend/security/crypto";
-import { setReadinessMetric } from "@/backend/observability/metrics";
+import { createProductionReadinessGateway } from "@/app/_composition/health-runtime";
+import {
+  getEnv,
+  safeEqual,
+  setReadinessMetric,
+  sha256,
+} from "@/app/_composition/platform-runtime";
 import { APP_VERSION } from "@/shared/app-version";
 
 export const runtime = "nodejs";
@@ -17,7 +20,10 @@ function hasValidSecret(request: Request) {
 
 export async function GET(request: Request) {
   if (!hasValidSecret(request)) {
-    return NextResponse.json({ error: { code: "NOT_FOUND", message: "Not found" } }, { status: 404 });
+    return NextResponse.json(
+      { error: { code: "NOT_FOUND", message: "Not found" } },
+      { status: 404, headers: { "cache-control": "no-store" } },
+    );
   }
 
   try {

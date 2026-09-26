@@ -5,7 +5,7 @@ export interface SubscriptionCatalog {
 }
 
 export class SubscriptionCatalogAccessError extends Error {
-  constructor(public readonly reason: "unauthorized" | "email-required" | "unavailable") {
+  constructor(public readonly reason: "unauthorized" | "provider-session-recovery-required" | "email-required" | "unavailable") {
     super(reason);
   }
 }

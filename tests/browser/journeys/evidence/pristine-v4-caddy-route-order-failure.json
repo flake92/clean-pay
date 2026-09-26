@@ -1,0 +1,22 @@
+{
+  "schemaVersion": 1,
+  "status": "invalid_for_journey_gate",
+  "scope": "authenticated-browser-journey-only",
+  "project": "clean-pay-browser-journey-baseline-ad8f-5dc1c21d1db2-v4",
+  "sourceRevision": "f5cb6f543d85256e7733a1ade6a4f451d86cf378",
+  "applicationImageDigest": "sha256:6909a1b980f72038c732d02f1e29074b16be2c2ce333e8c02ba569d3f2324ded",
+  "migrationImageDigest": "sha256:5092b1aaf6cbc61722cf9ddbfb17a99dc0c1011b3734865b04931eb40adabc3b",
+  "failureClass": "synthetic-caddy-directive-order",
+  "firstFailedJourney": "email-register-verify-and-login",
+  "firstFailedCheckpoint": "identify-before-register",
+  "sanitizedEvidence": {
+    "serverActionCount": 1,
+    "serverActionStatus": 200,
+    "turnstileVerifyObservedByProvider": 0,
+    "directSyntheticTurnstileProbeStatus": 404,
+    "rootCause": "generic respond handler sorted before the intended reverse_proxy outside an explicit route block"
+  },
+  "canonicalJourneyBaselineCreated": false,
+  "publicDeterministicV5EvidenceAffected": false,
+  "credentialsOrPiiPresent": false
+}

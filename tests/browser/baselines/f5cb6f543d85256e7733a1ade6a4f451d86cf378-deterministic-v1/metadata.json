@@ -1,0 +1,61 @@
+{
+  "schemaVersion": 1,
+  "baselineId": "f5cb6f543d85256e7733a1ade6a4f451d86cf378-deterministic-v1",
+  "status": "canonical",
+  "purpose": "candidate behavioral equality gate",
+  "source": {
+    "commit": "f5cb6f543d85256e7733a1ade6a4f451d86cf378",
+    "tree": "6647fc51c61018ba46aae95da21e534434028fbe",
+    "pristineArchiveSha256": "8f424f5d4839d2aa421849bb2c7f8f48420ee675",
+    "productionImage": {
+      "tag": "clean-pay:baseline-f5cb6f543d85-prod-pristine",
+      "digest": "sha256:e0640e36c6221ba8f2dc174ebbea3961fda59f6320aad56d2f071b1c51a75ffc"
+    }
+  },
+  "runtime": {
+    "engine": "chromium",
+    "browserVersion": "151.0.7922.34",
+    "playwrightVersion": "1.62.1",
+    "chromiumRevision": "1234"
+  },
+  "supersedes": {
+    "baselineId": "f5cb6f543d85256e7733a1ade6a4f451d86cf378",
+    "status": "invalid_for_gate",
+    "artifactSet": {
+      "artifactCount": 98,
+      "aggregateSha256": "e839fbc3ae2021504ebe3738d174c613ef5e136c0a41d7ed8ddd60324c0b32da",
+      "aggregateFormat": "sorted path\\0bytes\\0sha256\\n"
+    }
+  },
+  "deterministicDependencies": {
+    "turnstile": {
+      "contract": {
+        "version": 1,
+        "interceptedUrl": "https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit",
+        "request": "GET script only; every near-miss continues to the network",
+        "api": [
+          "render",
+          "reset",
+          "remove"
+        ],
+        "state": "challenge-pending",
+        "callbacks": "never invoked",
+        "token": "never created"
+      },
+      "sourceSha256": "7c4ff13d9675cf2333a106408e532459a99bf18dbee4581fc896b77d0dad88a0"
+    }
+  },
+  "comparison": {
+    "rawArtifactsPreserved": true,
+    "projectionVersion": 1,
+    "exactExclusions": [
+      "network requests whose scope is exactly external",
+      "observed expected console diagnostics with a canonical external origin",
+      "non-Server-Action GET fetches with exact next-router-prefetch=1 and rsc=1 digests"
+    ],
+    "exactNormalization": [
+      "net::ERR_ABORTED on a non-navigation application GET resource with an existing response",
+      "retained request indexes and their redirect/Server Action references after exact exclusions"
+    ]
+  }
+}

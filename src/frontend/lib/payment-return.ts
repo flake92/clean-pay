@@ -5,6 +5,11 @@ type PaymentReturnSnapshot = {
 
 export type PaymentReturnOutcome = "checking" | "success" | "failed" | "pending" | "unknown";
 
+// Covers roughly 4.5 minutes with the default backoff. After that the user can
+// still request an explicit refresh without keeping a forgotten tab polling
+// the server indefinitely.
+export const PAYMENT_RETURN_MAX_AUTO_POLL_ATTEMPTS = 12;
+
 export function paymentReturnOutcome(snapshot: PaymentReturnSnapshot | null): PaymentReturnOutcome {
   if (!snapshot) return "checking";
 
@@ -49,10 +54,18 @@ export function shouldPollPaymentReturn(snapshot: PaymentReturnSnapshot | null) 
 }
 
 export function paymentPollDelayMs(attempt: number, retryAfterSeconds?: number | null) {
-  const serverDelay = typeof retryAfterSeconds === "number" && retryAfterSeconds > 0
-    ? retryAfterSeconds * 1_000
+  const serverDelay = typeof retryAfterSeconds === "number"
+    && Number.isFinite(retryAfterSeconds)
+    && retryAfterSeconds > 0
+    ? Math.min(30_000, retryAfterSeconds * 1_000)
     : 0;
   const exponentialDelay = Math.min(30_000, 2_000 * (2 ** Math.min(attempt, 4)));
 
   return Math.max(serverDelay, exponentialDelay);
+}
+
+export function canAutoPollPaymentReturn(attempt: number) {
+  return Number.isInteger(attempt)
+    && attempt >= 0
+    && attempt < PAYMENT_RETURN_MAX_AUTO_POLL_ATTEMPTS;
 }

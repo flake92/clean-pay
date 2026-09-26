@@ -42,17 +42,13 @@ import { LayoutContext } from "@/frontend/layout/context/layoutcontext";
 
 const navigation = {
   authenticated: true,
-  canRenewSubscription: true,
   emailVerificationRequired: false,
-  hasSubscription: true,
 };
 
 const collapsedState: LayoutState = {
   staticMenuDesktopInactive: true,
-  overlayMenuActive: false,
   profileSidebarVisible: false,
   staticMenuMobileActive: false,
-  menuHoverActive: false,
 };
 
 function renderTopbar(layoutState: LayoutState) {
@@ -71,7 +67,14 @@ function renderTopbar(layoutState: LayoutState) {
 }
 
 describe("AppTopbar accessibility", () => {
-  beforeEach(() => vi.clearAllMocks());
+  beforeEach(() => {
+    vi.clearAllMocks();
+    Object.defineProperty(window, "innerWidth", {
+      configurable: true,
+      value: 1024,
+      writable: true,
+    });
+  });
   afterEach(() => cleanup());
 
   it("names icon-only controls and exposes their controlled expanded state", () => {
@@ -97,6 +100,7 @@ describe("AppTopbar accessibility", () => {
           layoutState: {
             ...collapsedState,
             profileSidebarVisible: true,
+            staticMenuDesktopInactive: false,
             staticMenuMobileActive: true,
           },
           setLayoutState: vi.fn(),
@@ -120,5 +124,21 @@ describe("AppTopbar accessibility", () => {
       item: expect.objectContaining({ label: "Выйти" }),
       originalEvent: expect.any(Object),
     }));
+  });
+
+  it("reports the mobile drawer state independently from the desktop sidebar", () => {
+    window.innerWidth = 390;
+    renderTopbar({
+      ...collapsedState,
+      staticMenuDesktopInactive: false,
+    });
+
+    const menuButton = screen.getByRole("button", { name: "Главное меню" });
+    expect(menuButton.getAttribute("aria-expanded")).toBe("false");
+    expect(screen.getByRole("banner")).toBeTruthy();
+
+    window.innerWidth = 1200;
+    fireEvent(window, new Event("resize"));
+    expect(menuButton.getAttribute("aria-expanded")).toBe("true");
   });
 });

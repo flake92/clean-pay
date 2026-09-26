@@ -3,6 +3,7 @@ import type { CheckoutViewModel, PaymentCommand, PaymentCommandResult } from "@/
 import type { AuthProfileGateway } from "@/application/auth/ports/auth-profile";
 import { AuthProfileError } from "@/application/auth/ports/auth-profile";
 import { resolveAuthProfile } from "@/application/auth/resolve-auth-profile";
+import { isProviderSessionRecoveryRequired } from "@/shared/domain/provider-session-recovery";
 
 export async function loadCheckout(reader: CheckoutReader, auth: AuthProfileGateway): Promise<CheckoutViewModel> {
   try {
@@ -11,6 +12,9 @@ export async function loadCheckout(reader: CheckoutReader, auth: AuthProfileGate
     if (!account.emailVerified) return { status: "account-action-required", action: "linkEmail", message: "Для оплаты добавьте e-mail и пароль, затем подтвердите адрес кодом из письма." };
     return { status: "ready", offers: await reader.loadOffers() };
   } catch (error) {
+    if (isProviderSessionRecoveryRequired(error)) {
+      return { status: "provider-session-recovery-required" };
+    }
     if (error instanceof AuthProfileError && error.code === "UNAUTHORIZED") {
       return { status: "account-action-required", action: "login", message: "Нужно войти в аккаунт." };
     }
@@ -32,11 +36,12 @@ export async function executePayment(commands: PaymentCommands, command: Payment
       OFFER_CHANGED: "Цена или условия предложения изменились. Проверьте новую цену перед оплатой.",
       PLAN_UNAVAILABLE: "Выбранное предложение больше недоступно.",
       PAYMENT_GATEWAY_UNAVAILABLE: "Выбранный способ оплаты больше недоступен.",
+      IDEMPOTENCY_KEY_INVALID: "Не удалось безопасно начать оплату. Обновите страницу и попробуйте снова.",
       EMAIL_REQUIRED: "Добавьте e-mail и пароль, чтобы продолжить.",
       EMAIL_NOT_VERIFIED: "Подтвердите e-mail, чтобы продолжить.",
       RATE_LIMITED: "Слишком много попыток. Попробуйте позже.",
     };
-    const finalCodes = new Set(["OFFER_CHANGED", "PLAN_UNAVAILABLE", "PAYMENT_GATEWAY_UNAVAILABLE", "IDEMPOTENCY_KEY_REUSED", "VALIDATION_ERROR"]);
+    const finalCodes = new Set(["OFFER_CHANGED", "PLAN_UNAVAILABLE", "PAYMENT_GATEWAY_UNAVAILABLE", "IDEMPOTENCY_KEY_INVALID", "IDEMPOTENCY_KEY_REUSED", "VALIDATION_ERROR"]);
     return { ok: false, code, message: messages[code] ?? "Не удалось подтвердить результат оплаты. Повторите попытку с тем же запросом.", retainIdempotencyKey: !finalCodes.has(code) };
   }
 }

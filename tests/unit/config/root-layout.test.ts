@@ -8,10 +8,10 @@ const allowedRootFiles = [
   ".env.example",
   ".gitattributes",
   ".gitignore",
+  ".gitleaksignore",
   ".node-version",
   ".npmrc",
   ".nvmrc",
-  "CHANGELOG.md",
   "deploy.sh",
   "docker-compose.remnashop.yml",
   "docker-compose.yml",
@@ -22,7 +22,6 @@ const allowedRootFiles = [
   "next.config.ts",
   "package-lock.json",
   "package.json",
-  "postcss.config.mjs",
   "prisma.config.ts",
   "README.md",
   "README.ru_RU.md",
@@ -36,7 +35,8 @@ describe("repository root layout", () => {
       .filter((entry) => entry.isFile())
       .map((entry) => entry.name)
       .filter((file) => (
-        file !== "next-env.d.ts"
+        file !== ".git"
+        && file !== "next-env.d.ts"
         && !file.endsWith(".tsbuildinfo")
         && (file === ".env.example" || !file.startsWith(".env."))
         && file !== ".env"

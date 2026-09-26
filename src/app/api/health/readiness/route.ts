@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 
 import { getPublicReadiness } from "@/application/health/readiness";
-import { createProductionReadinessGateway } from "@/backend/health/checks";
+import { createProductionReadinessGateway } from "@/app/_composition/health-runtime";
 import { APP_VERSION } from "@/shared/app-version";
 
 export const runtime = "nodejs";

@@ -1,9 +1,13 @@
-import { runPaymentMaintenance } from "@/application/payments/run-payment-maintenance";
-import { getEnv } from "@/backend/config/env";
-import { ServiceError } from "@/backend/errors/service-error";
-import { productionPaymentMaintenanceRunner } from "@/backend/integrations/payments/payment-maintenance-runner";
-import { safeEqual, sha256 } from "@/backend/security/crypto";
-import { logTechnicalError } from "@/backend/observability/audit";
+import { paymentMaintenanceBatchIsHealthy, runPaymentMaintenance } from "@/application/payments/run-payment-maintenance";
+import {
+  getEnv,
+  ServiceError,
+  safeEqual,
+  sha256,
+  auditLogRequired,
+  logTechnicalError,
+} from "@/app/_composition/platform-runtime";
+import { productionPaymentMaintenanceRunner } from "@/app/_composition/payment-operations-runtime";
 import { NextResponse } from "next/server";
 
 export const runtime = "nodejs";
@@ -32,8 +36,19 @@ export async function POST(request: Request) {
       paymentLimit: config.batchSize,
       deadlineMs: 12_000,
     });
+    const healthy = paymentMaintenanceBatchIsHealthy(result);
+    await auditLogRequired({
+      action: "PAYMENT_RECONCILIATION_INTERNAL_RESULT_ACCESSED",
+      severity: healthy ? "INFO" : "WARN",
+      metadata: {
+        claimedCount: result.claimed,
+        failedCount: result.failed,
+        manualRequiredCount: result.manualRequiredOperationIds.length,
+      },
+    });
 
     return NextResponse.json(result, {
+      status: healthy ? 200 : 503,
       headers: { "cache-control": "no-store" },
     });
   } catch (error) {

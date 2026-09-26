@@ -1,0 +1,7003 @@
+import {
+  mkdtemp,
+  readFile,
+  rmdir,
+  unlink,
+  writeFile,
+} from "node:fs/promises";
+import { createServer } from "node:http";
+import { tmpdir } from "node:os";
+import path from "node:path";
+
+import { chromium, expect, test } from "@playwright/test";
+import Ajv from "ajv";
+
+import {
+  PROVIDER_OVERLAP_BROWSER_PROJECT,
+  assertApplicationImageIdentity,
+  assertDeterministicReset,
+  assertDualProviderOverlapProof,
+  assertJourneyStackContract,
+  assertLoopbackControlUrl,
+  assertLoopbackResolver,
+  assertProviderOverlapClassicImageDescriptor,
+  assertProviderOverlapContainerdImageDescriptorChain,
+  assertProviderOverlapImagePlatformParity,
+  createDualProviderOverlapProof,
+  createProviderOverlapStackReport,
+  extractProviderOverlapProof,
+  resolveProviderOverlapOutputPath,
+  sha256,
+} from "./provider-overlap-proof-contract.mjs";
+import {
+  assertProviderOverlapRedirect,
+  attestProviderOverlapStaticResponse,
+  captureProviderOverlapResponseEvidence,
+  classifyProviderOverlapBrowserRequest,
+  createJourneyBrowserRequestEnvelope,
+  createProviderOverlapCdpResponseBodyCapture,
+  createProviderOverlapEventSeal,
+  createProviderOverlapPendingRequestEvidence,
+  createProviderOverlapPendingRequestEvidenceDocument,
+  createProviderOverlapPendingRequestSeal,
+  createProviderOverlapRejectedRequestProvenance,
+  createProviderOverlapRejectionProvenanceDocument,
+  createProviderOverlapRepeatableStaticResponseUrls,
+  createProviderOverlapStaticAssetContract,
+  extractProviderOverlapCssMediaReferences,
+  extractProviderOverlapResponseStaticDeclarations,
+  finalizeProviderOverlapBrowserContract,
+  finalizeProviderOverlapEventLifecycle,
+  finalizeProviderOverlapHistoryContract,
+  installProviderOverlapHistoryInstrumentation,
+  isExactTerminalProviderOverlapRedirect,
+  isProviderOverlapPlaywrightBodyCdpResponse,
+  isRecoverableProviderOverlapLoginGotoAbort,
+  normalizeProviderOverlapRequestContractSemanticLedger,
+  normalizeProviderOverlapSemanticEntry,
+  normalizeProviderOverlapObservedResponseContentType,
+  providerOverlapChatwootIdentityBoundarySettled,
+  PROVIDER_OVERLAP_MAXIMUM_STATIC_RESPONSE_BYTES,
+  PROVIDER_OVERLAP_REJECTION_PROVENANCE_MAX_PER_ROLE,
+  readProviderOverlapStaticResponseEvidence,
+  resolveProviderOverlapResponseRequestEntry,
+} from "./provider-overlap-browser-contract.mjs";
+import {
+  JOURNEY_FIXTURE_FILENAMES,
+  currentJourneyFixtureContractSha256,
+} from "./journey-fixture-manifest.mjs";
+import {
+  JOURNEY_COMPOSE_EXPECTED_SERVICE_STATES,
+  JOURNEY_COMPOSE_ONE_SHOT_SERVICE_NAMES,
+  JOURNEY_COMPOSE_SERVICE_NAMES,
+  JOURNEY_COMPOSE_VOLUME_NAMES,
+} from "./journey-compose-runtime-attestation.mjs";
+import { withJourneyOwnedStackPair } from "./journey-owned-stack-orchestrator.mjs";
+import {
+  JOURNEY_SYNTHETIC_ENVIRONMENT_FILENAMES,
+  buildJourneySyntheticEnvironment,
+} from "./journey-synthetic-environment-contract.mjs";
+
+const baselineRevision = "f5cb6f543d85256e7733a1ade6a4f451d86cf378";
+const candidateRevision = "6edb677dafbb16bb49899ae40cc406d3c71e1a1b";
+const publicBuildContractSha256 = "5dc1c21d1db2b433736d50c008065d9dfa3adc1ff338fb403569913881b80673";
+const fixtureContractSha256 = currentJourneyFixtureContractSha256();
+const staticJavascriptPath = "/_next/static/chunks/app-123.js";
+const staticStylesheetPath = "/_next/static/chunks/app/layout-123.css";
+const staticEotPath = "/_next/static/media/primeicons-123.eot";
+const staticFontPath = "/_next/static/media/inter-123.woff2";
+const staticSecondFontPath = "/_next/static/media/primeicons-123.woff2";
+const staticImagePath = "/_next/static/media/brand-123.svg";
+const staticTtfPath = "/_next/static/media/primeicons-123.ttf";
+const staticWoffPath = "/_next/static/media/primeicons-123.woff";
+const staticBodyByPath = Object.freeze({
+  [staticJavascriptPath]: "self.__cleanPay = 'provider-overlap';\n",
+  [staticStylesheetPath]: "@font-face{src:url(../../media/primeicons-123.eot);"
+    + "src:url(../../media/primeicons-123.eot),url(../../media/inter-123.woff2),"
+    + "url(../../media/primeicons-123.woff),url(../../media/primeicons-123.ttf),"
+    + "url(../../media/brand-123.svg)}"
+    + "@font-face{src:url(../../media/inter-123.woff2)}"
+    + "@font-face{src:url(../../media/primeicons-123.woff2)}\n",
+  [staticEotPath]: "synthetic-eot-body",
+  [staticFontPath]: "synthetic-woff2-body",
+  [staticSecondFontPath]: "synthetic-primeicons-woff2-body",
+  [staticImagePath]: "<svg xmlns=\"http://www.w3.org/2000/svg\"/>\n",
+  [staticTtfPath]: "synthetic-ttf-body",
+  [staticWoffPath]: "synthetic-woff-body",
+});
+const staticInventoryByPath: Readonly<Record<string, string>> = Object.freeze({
+  [staticJavascriptPath]: sha256(staticBodyByPath[staticJavascriptPath]),
+  [staticStylesheetPath]: sha256(staticBodyByPath[staticStylesheetPath]),
+  [staticEotPath]: sha256(staticBodyByPath[staticEotPath]),
+  [staticFontPath]: sha256(staticBodyByPath[staticFontPath]),
+  [staticSecondFontPath]: sha256(staticBodyByPath[staticSecondFontPath]),
+  [staticImagePath]: sha256(staticBodyByPath[staticImagePath]),
+  [staticTtfPath]: sha256(staticBodyByPath[staticTtfPath]),
+  [staticWoffPath]: sha256(staticBodyByPath[staticWoffPath]),
+});
+const staticInventoryMetadataByPath: Readonly<Record<
+string, { assetBytes: number; extension: string }
+>> = Object.freeze({
+  [staticJavascriptPath]: Object.freeze({
+    assetBytes: Buffer.byteLength(staticBodyByPath[staticJavascriptPath]), extension: "js",
+  }),
+  [staticStylesheetPath]: Object.freeze({
+    assetBytes: Buffer.byteLength(staticBodyByPath[staticStylesheetPath]), extension: "css",
+  }),
+  [staticEotPath]: Object.freeze({
+    assetBytes: Buffer.byteLength(staticBodyByPath[staticEotPath]), extension: "eot",
+  }),
+  [staticFontPath]: Object.freeze({
+    assetBytes: Buffer.byteLength(staticBodyByPath[staticFontPath]), extension: "woff2",
+  }),
+  [staticSecondFontPath]: Object.freeze({
+    assetBytes: Buffer.byteLength(staticBodyByPath[staticSecondFontPath]), extension: "woff2",
+  }),
+  [staticImagePath]: Object.freeze({
+    assetBytes: Buffer.byteLength(staticBodyByPath[staticImagePath]), extension: "svg",
+  }),
+  [staticTtfPath]: Object.freeze({
+    assetBytes: Buffer.byteLength(staticBodyByPath[staticTtfPath]), extension: "ttf",
+  }),
+  [staticWoffPath]: Object.freeze({
+    assetBytes: Buffer.byteLength(staticBodyByPath[staticWoffPath]), extension: "woff",
+  }),
+});
+const staticRouteDeclaredPaths = Object.freeze([
+  staticStylesheetPath, staticJavascriptPath,
+].sort());
+const staticDocumentRouteContracts = Object.freeze([
+  "app-login-document", "app-profile-document", "app-cabinet-document",
+].map((documentKey) => Object.freeze({
+  documentKey,
+  routeDeclaredPaths: staticRouteDeclaredPaths,
+})));
+const staticDocumentRouteLedger = staticDocumentRouteContracts.map(({
+  documentKey, routeDeclaredPaths,
+}) => ({
+  documentKey,
+  routeDeclaredPathSha256s: routeDeclaredPaths.map(sha256).sort(),
+}));
+const staticInventoryLedger = Object.entries(staticInventoryByPath).map(([
+  servedPath, assetSha256,
+]) => ({
+  assetBytes: staticInventoryMetadataByPath[servedPath].assetBytes,
+  assetSha256,
+  extension: staticInventoryMetadataByPath[servedPath].extension,
+  pathSha256: sha256(servedPath),
+}))
+  .sort((left, right) => left.pathSha256.localeCompare(right.pathSha256));
+const staticAssetContract = Object.freeze({
+  attestationSha256: "a".repeat(64),
+  configDigest: `sha256:${"1".repeat(64)}`,
+  documentRouteContracts: staticDocumentRouteContracts,
+  imageDigest: `sha256:${"2".repeat(64)}`,
+  inventoryByPath: staticInventoryByPath,
+  inventoryMetadataByPath: staticInventoryMetadataByPath,
+  inventoryLedgerContractSha256: sha256(JSON.stringify(staticInventoryLedger)),
+  inventorySha256: "d".repeat(64),
+  manifestDigest: `sha256:${"3".repeat(64)}`,
+  routeDeclaredPaths: staticRouteDeclaredPaths,
+  routeDeclaredPathContractSha256: sha256(JSON.stringify(staticDocumentRouteLedger)),
+});
+const staticLoadGraph = Object.freeze({
+  cssMediaReferences: Object.freeze([
+    Object.freeze({ sourcePath: staticStylesheetPath, targetPath: staticEotPath }),
+    Object.freeze({ sourcePath: staticStylesheetPath, targetPath: staticEotPath }),
+    Object.freeze({ sourcePath: staticStylesheetPath, targetPath: staticFontPath }),
+    Object.freeze({ sourcePath: staticStylesheetPath, targetPath: staticFontPath }),
+    Object.freeze({ sourcePath: staticStylesheetPath, targetPath: staticSecondFontPath }),
+    Object.freeze({ sourcePath: staticStylesheetPath, targetPath: staticTtfPath }),
+    Object.freeze({ sourcePath: staticStylesheetPath, targetPath: staticWoffPath }),
+    Object.freeze({ sourcePath: staticStylesheetPath, targetPath: staticImagePath }),
+  ]),
+  responseDeclarationsByDocument: Object.freeze([
+    "app-login-document", "app-profile-document", "app-cabinet-document",
+  ].map((documentKey) => Object.freeze({
+    documentKey,
+    paths: Object.freeze([
+      staticEotPath, staticFontPath, staticSecondFontPath, staticImagePath,
+      staticJavascriptPath, staticStylesheetPath, staticTtfPath, staticWoffPath,
+    ].sort()),
+  }))),
+  staticAssetContract,
+});
+
+test("recovers only the exact provider login navigation abort", () => {
+  expect(isRecoverableProviderOverlapLoginGotoAbort(new Error(
+    "page.goto: net::ERR_ABORTED at https://pay.ci.clean-pay.dev/login?redirect_to=%2Fprofile\nCall log:",
+  ))).toBe(true);
+  for (const error of [
+    new Error("page.goto: net::ERR_ABORTED at https://pay.ci.clean-pay.dev/login?redirect_to=%2Fcabinet"),
+    new Error("page.goto: net::ERR_ABORTED at https://pay.ci.clean-pay.dev/login?redirect_to=%2Fprofile&next=1"),
+    new Error("page.goto: Timeout 30000ms exceeded at https://pay.ci.clean-pay.dev/login?redirect_to=%2Fprofile"),
+    "page.goto: net::ERR_ABORTED at https://pay.ci.clean-pay.dev/login?redirect_to=%2Fprofile",
+  ]) expect(isRecoverableProviderOverlapLoginGotoAbort(error)).toBe(false);
+});
+
+test("compares two exact one-shot overlap reports while retaining observed arrival order", () => {
+  const baselineOverlap = extractedOverlap("offers-first");
+  const candidateOverlap = extractedOverlap("devices-first");
+  const proof = dualProof(
+    stackReport("baseline", baselineOverlap),
+    stackReport("candidate", candidateOverlap),
+  );
+
+  expect(proof.comparison).toEqual({
+    status: "proven",
+    distinctComposeProjects: true,
+    distinctApplicationImages: true,
+    distinctSourceRevisions: true,
+    samePublicBuildContract: true,
+    sameFixtureContract: true,
+    sameScenarioAndSeed: true,
+    sameBrowserProject: true,
+    sameConnectProxyCounters: true,
+    sameHistoryContract: true,
+    sameOwnedResetContract: true,
+    sameProviderRecordSet: true,
+    eachOneShotOverlapProven: true,
+    arrivalOrderRelationship: "reordered",
+  });
+  expect(proof.stacks.baseline.providerOverlap.arrivalOrder)
+    .toEqual(["read_offers", "read_devices"]);
+  expect(proof.stacks.candidate.providerOverlap.arrivalOrder)
+    .toEqual(["read_devices", "read_offers"]);
+  const serialized = JSON.stringify(proof);
+  expect(serialized).not.toContain("synthetic.browser@clean-pay.dev");
+  expect(serialized).not.toContain("access_token=");
+  expect(serialized).not.toContain("refresh_token=");
+  expect(serialized).not.toContain("clean-pay:baseline");
+  expect(serialized).not.toContain("clean-pay:candidate");
+});
+
+test("constructs each stack report directly without ambient labels or hidden state", () => {
+  for (const role of ["baseline", "candidate"] as const) {
+    const expected = stackReport(role, extractedOverlap(
+      role === "baseline" ? "offers-first" : "devices-first",
+    ));
+    const contract = stackContract(role);
+    expect(createProviderOverlapStackReport({
+      role,
+      browser: expected.browser,
+      connectProxyAuthorityLedger: expected.connectProxyAuthorityLedger,
+      connectProxyCounters: expected.connectProxyCounters,
+      contract,
+      fixtureContractSha256: expected.fixtureContract.sha256,
+      imageIdentity: {
+        assetImageDigest: expected.applicationImage.assetImageDigest,
+        configDigest: expected.applicationImage.configDigest,
+        manifestDigest: expected.applicationImage.manifestDigest,
+        publicBuildContract: expected.applicationImage.publicBuildContract,
+        reference: contract.images.application,
+        repoDigestContractSha256: expected.applicationImage.repoDigestContractSha256,
+        revision: expected.applicationImage.revision,
+        role: expected.applicationImage.role,
+        runtimeImageDigest: expected.applicationImage.runtimeImageDigest,
+      },
+      journeyContractSha256: expected.journeyContractSha256,
+      navigation: expected.navigation,
+      providerOverlap: expected.providerOverlap,
+      reset: {
+        database: expected.reset.database,
+        scenarioSha256: expected.scenario.scenarioSha256,
+        seedSha256: expected.scenario.seedSha256,
+      },
+      runtimeBinding: expected.runtimeBinding,
+      scenario: expected.scenario.label,
+    })).toEqual(expected);
+  }
+});
+
+test("executes mocked dual prepare, barrier, factory, serialized reader, and cleanup in order", async () => {
+  const repositoryRoot = path.resolve(__dirname, "../../..");
+  const launchGate = createMockPairLaunchGate();
+  const fixtures = await Promise.all([
+    createMockOwnedStackInput("baseline", repositoryRoot, launchGate),
+    createMockOwnedStackInput("candidate", repositoryRoot, launchGate),
+  ]);
+  try {
+    const session = await withJourneyOwnedStackPair({
+      baseline: fixtures[0].input,
+      candidate: fixtures[1].input,
+    }, async (owned: Readonly<{
+      baseline: MockOwnedCallbackStack;
+      candidate: MockOwnedCallbackStack;
+      launch: Readonly<Record<string, unknown>>;
+    }>) => {
+      launchGate.timeline.push("callback:runtime-attested");
+      const expected = [
+        bindMockOwnedRuntimeReport(
+          stackReport("baseline", extractedOverlap("offers-first")),
+          fixtures[0],
+          owned.baseline,
+          owned.launch,
+        ),
+        bindMockOwnedRuntimeReport(
+          stackReport("candidate", extractedOverlap("devices-first")),
+          fixtures[1],
+          owned.candidate,
+          owned.launch,
+        ),
+      ];
+      launchGate.timeline.push("factory:baseline");
+      const baseline = createStackReportThroughFactory(
+        "baseline",
+        expected[0],
+        fixtures[0].contract,
+      );
+      launchGate.timeline.push("factory:candidate");
+      const candidate = createStackReportThroughFactory(
+        "candidate",
+        expected[1],
+        fixtures[1].contract,
+      );
+      return Object.freeze({ baseline, candidate });
+    });
+    const proof = createDualProviderOverlapProof(
+      session.value.baseline,
+      session.value.candidate,
+      session.cleanup,
+      session.launch,
+    );
+    launchGate.timeline.push("reader:serialized");
+    const result = assertDualProviderOverlapProof(JSON.parse(JSON.stringify(proof)));
+    expect(result.comparison.status).toBe("proven");
+    expect(launchGate.dispatchCount).toBe(2);
+    const firstResolution = launchGate.timeline.findIndex((entry) => entry.startsWith("resolved:"));
+    expect(firstResolution).toBeGreaterThan(
+      Math.max(
+        launchGate.timeline.indexOf("dispatch:baseline"),
+        launchGate.timeline.indexOf("dispatch:candidate"),
+      ),
+    );
+    expect(launchGate.timeline.indexOf("callback:runtime-attested"))
+      .toBeGreaterThan(firstResolution);
+    for (const fixture of fixtures) {
+      expect(fixture.docker.activeProbeCount).toBe(0);
+      expect(fixture.docker.activeResourceCount).toBe(0);
+      expect(fixture.docker.downCalls).toBe(1);
+    }
+    for (const role of ["baseline", "candidate"] as const) {
+      expect(launchGate.timeline.indexOf(`down:${role}`))
+        .toBeGreaterThan(launchGate.timeline.indexOf(`factory:${role}`));
+      expect(launchGate.timeline.indexOf(`down:${role}`))
+        .toBeLessThan(launchGate.timeline.indexOf("reader:serialized"));
+    }
+  } finally {
+    await Promise.all(fixtures.map(({ directory }) => removeMockOwnedInput(directory)));
+  }
+});
+
+test("keeps an undefined callback rejection fail-closed after exact dual cleanup", async () => {
+  const repositoryRoot = path.resolve(__dirname, "../../..");
+  const launchGate = createMockPairLaunchGate();
+  const fixtures = await Promise.all([
+    createMockOwnedStackInput("baseline", repositoryRoot, launchGate),
+    createMockOwnedStackInput("candidate", repositoryRoot, launchGate),
+  ]);
+  try {
+    let rejectedValue: unknown = Symbol("not-rejected");
+    const outcome = await withJourneyOwnedStackPair({
+      baseline: fixtures[0].input,
+      candidate: fixtures[1].input,
+    }, async () => Promise.reject()).then(
+      () => "fulfilled",
+      (reason) => {
+        rejectedValue = reason;
+        return "rejected";
+      },
+    );
+    expect(outcome).toBe("rejected");
+    expect(rejectedValue).toBeUndefined();
+    for (const fixture of fixtures) {
+      expect(fixture.docker.activeProbeCount).toBe(0);
+      expect(fixture.docker.activeResourceCount).toBe(0);
+      expect(fixture.docker.downCalls).toBe(1);
+    }
+  } finally {
+    await Promise.all(fixtures.map(({ directory }) => removeMockOwnedInput(directory)));
+  }
+});
+
+test("rejects concurrency and adjacent-ledger near misses without broadening the proof", () => {
+  const exact = rawOverlap("offers-first");
+  const mutations: Array<[string, (value: ReturnType<typeof rawOverlap>) => void]> = [
+    ["a second window", (value) => { value.concurrency.windows.push(structuredClone(value.concurrency.windows[0])); }],
+    ["an active probe", (value) => { value.concurrency.active = {}; }],
+    ["a sequential max-in-flight value", (value) => { value.concurrency.windows[0].maxInFlight = 1; }],
+    ["a timeout outcome", (value) => { value.concurrency.windows[0].outcome = "timeout"; }],
+    ["an adjacent field", (value) => {
+      (value.concurrency.windows[0] as unknown as Record<string, unknown>).project = "broadened";
+    }],
+    ["a duplicate participant", (value) => {
+      value.concurrency.windows[0].duplicates.push({
+        service: "remnashop",
+        method: "GET",
+        pathname: "/api/v1/public/subscription/offers",
+        ledgerSequence: 4,
+      });
+    }],
+    ["a participant reorder", (value) => { value.concurrency.windows[0].participants.reverse(); }],
+    ["a participant path mutation", (value) => {
+      value.concurrency.windows[0].participants[0].pathname += "/adjacent";
+    }],
+    ["a non-adjacent ledger reference", (value) => {
+      value.ledger.entries.splice(2, 0, fillerRecord(3));
+      value.ledger.entries[3].sequence = 4;
+      value.concurrency.windows[0].participants[0].ledgerSequence = 4;
+    }],
+    ["an extra ledger field", (value) => {
+      (value.ledger.entries[1] as unknown as Record<string, unknown>).authorization = "redacted";
+    }],
+    ["a duplicate offers effect", (value) => {
+      const duplicate = structuredClone(value.ledger.entries[1]);
+      duplicate.sequence = value.ledger.entries.length + 1;
+      value.ledger.entries.push(duplicate);
+    }],
+    ["an extra refresh cookie-name contract", (value) => {
+      value.ledger.entries[1].credential_contract.cookie_names = ["access_token", "refresh_token"];
+    }],
+  ];
+
+  for (const [label, mutate] of mutations) {
+    const nearMiss = structuredClone(exact);
+    mutate(nearMiss);
+    expect(
+      () => extractProviderOverlapProof(nearMiss.concurrency, nearMiss.ledger, label),
+      label,
+    ).toThrow();
+  }
+});
+
+test("rejects dual-image identity, fixture, browser, and semantic comparison near misses", () => {
+  const baseline = stackReport("baseline", extractedOverlap("offers-first"));
+  const candidate = stackReport("candidate", extractedOverlap("devices-first"));
+  const mutations: Array<[string, (value: typeof candidate) => void]> = [
+    ["same image", (value) => {
+      value.applicationImage.assetImageDigest = baseline.applicationImage.assetImageDigest;
+    }],
+    ["same revision", (value) => { value.applicationImage.revision = baseline.applicationImage.revision; }],
+    ["different fixture", (value) => { value.fixtureContract.sha256 = "a".repeat(64); }],
+    ["different scenario", (value) => { value.scenario.seedSha256 = "b".repeat(64); }],
+    ["different browser", (value) => { value.browser.chromiumVersion = "151.0.7922.35"; }],
+    ["different public build", (value) => {
+      value.applicationImage.publicBuildContract.sha256 = "c".repeat(64);
+    }],
+    ["different reset schema", (value) => { value.reset.database.schemaSha256 = "e".repeat(64); }],
+    ["sequential overlap", (value) => {
+      (value.providerOverlap as unknown as { maxInFlight: number }).maxInFlight = 1;
+    }],
+    ["changed provider record", (value) => { value.providerOverlap.records[0].body_bytes = 1; }],
+  ];
+
+  for (const [label, mutate] of mutations) {
+    const nearMiss = structuredClone(candidate);
+    mutate(nearMiss);
+    expect(() => dualProof(baseline, nearMiss), label).toThrow();
+  }
+});
+
+test("requires one normalized application image selection mode across the full proof", () => {
+  const containerd = dualProof(
+    useContainerdApplicationImage(
+      stackReport("baseline", extractedOverlap("offers-first")),
+    ),
+    useContainerdApplicationImage(
+      stackReport("candidate", extractedOverlap("devices-first")),
+    ),
+  );
+  expect(assertDualProviderOverlapProof(structuredClone(containerd))).toEqual(containerd);
+
+  expect(() => dualProof(
+    stackReport("baseline", extractedOverlap("offers-first")),
+    useContainerdApplicationImage(
+      stackReport("candidate", extractedOverlap("devices-first")),
+    ),
+  )).toThrow(/application image selection mode/);
+
+  const serializedMixed = dualProof(
+    stackReport("baseline", extractedOverlap("offers-first")),
+    stackReport("candidate", extractedOverlap("devices-first")),
+  );
+  serializedMixed.stacks.candidate.applicationImage = structuredClone(
+    containerd.stacks.candidate.applicationImage,
+  );
+  serializedMixed.stacks.candidate.runtimeBinding.applicationImageBindingContractSha256
+    = containerd.stacks.candidate.runtimeBinding.applicationImageBindingContractSha256;
+  expect(() => assertDualProviderOverlapProof(serializedMixed))
+    .toThrow(/application image selection mode/);
+});
+
+test("recomputes serialized cross-stack, lifecycle, and runtime invariants", () => {
+  const exact = dualProof(
+    stackReport("baseline", extractedOverlap("offers-first")),
+    stackReport("candidate", extractedOverlap("devices-first")),
+  );
+  expect(assertDualProviderOverlapProof(structuredClone(exact))).toEqual(exact);
+  const mutations: Array<[string, (value: typeof exact) => void]> = [
+    ["claimed comparison", (value) => { value.comparison.arrivalOrderRelationship = "same"; }],
+    ["same project", (value) => {
+      value.stacks.candidate.composeProject = value.stacks.baseline.composeProject;
+      value.stacks.candidate.runtimeBinding.projectSha256 = value.stacks.baseline.runtimeBinding.projectSha256;
+      value.stacks.candidate.runtimeBinding.networkSha256 = value.stacks.baseline.runtimeBinding.networkSha256;
+    }],
+    ["same image", (value) => {
+      value.stacks.candidate.applicationImage.assetImageDigest
+        = value.stacks.baseline.applicationImage.assetImageDigest;
+    }],
+    ["fixture mismatch", (value) => {
+      value.stacks.candidate.fixtureContract.sha256 = "0".repeat(64);
+    }],
+    ["runtime contract mismatch", (value) => {
+      value.stacks.candidate.runtimeBinding.fixtureMountContractSha256 = "0".repeat(64);
+    }],
+    ["same Compose runtime", (value) => {
+      value.stacks.candidate.runtimeBinding.composeRuntimeContractSha256
+        = value.stacks.baseline.runtimeBinding.composeRuntimeContractSha256;
+    }],
+    ["journey contract mismatch", (value) => {
+      value.stacks.candidate.runtimeBinding.journeyContractSha256 = "0".repeat(64);
+    }],
+    ["proxy failure", (value) => { value.stacks.candidate.connectProxyCounters.rejected = 1; }],
+    ["extra CONNECT reconnect", (value) => {
+      value.stacks.candidate.connectProxyCounters.accepted += 1;
+      value.stacks.candidate.connectProxyCounters.upstreamAttempts += 1;
+      value.stacks.candidate.connectProxyCounters.upstreamConnected += 1;
+    }],
+    ["symmetric repeated CONNECT authority", (value) => {
+      for (const stack of [value.stacks.baseline, value.stacks.candidate]) {
+        stack.connectProxyAuthorityLedger = Array(4).fill("pay.ci.clean-pay.dev:443");
+      }
+    }],
+    ["reset scope", (value) => { value.stacks.candidate.reset.database.scopeSha256 = "0".repeat(64); }],
+    ["reset sequence", (value) => { value.stacks.candidate.reset.database.resetSequence = 2; }],
+    ["navigation query", (value) => {
+      value.stacks.candidate.navigation.finalUrl = "https://pay.ci.clean-pay.dev/cabinet?adjacent=1";
+    }],
+    ["symmetric impossible drained event count", (value) => {
+      for (const stack of [value.stacks.baseline, value.stacks.candidate]) {
+        stack.navigation.eventLifecycle.drainedEventCount += 1;
+      }
+    }],
+    ["request contract", (value) => {
+      value.stacks.candidate.navigation.requestContractSha256 = "0".repeat(64);
+    }],
+    ["symmetric semantic status and content forgery", (value) => {
+      for (const stack of [value.stacks.baseline, value.stacks.candidate]) {
+        const entry = stack.navigation.semanticRequestLedger[0];
+        entry.responseStatus = 599;
+        entry.responseContentType = "application/json";
+        stack.navigation.requestContractSha256 = sha256(JSON.stringify({
+          version: 1,
+          semanticLedger: stack.navigation.semanticRequestLedger,
+          staticClasses: [...new Set(stack.navigation.staticRequestLedger.map((item: {
+            class: string;
+          }) => item.class))]
+            .sort(),
+        }));
+      }
+    }],
+    ["symmetric RSC redirect source without successor", (value) => {
+      for (const stack of [value.stacks.baseline, value.stacks.candidate]) {
+        stack.navigation.semanticRequestLedger.push(
+          semantic("app-root-rsc", 307, null),
+        );
+        stack.navigation.requestCount += 1;
+        stack.navigation.requestContractSha256 = sha256(JSON.stringify({
+          version: 1,
+          semanticLedger: stack.navigation.semanticRequestLedger,
+          staticClasses: [...new Set(stack.navigation.staticRequestLedger.map((item: {
+            class: string;
+          }) => item.class))]
+            .sort(),
+        }));
+      }
+    }],
+    ["history mutation", (value) => {
+      value.stacks.candidate.navigation.historyLedger[1].location = "app-login";
+    }],
+    ["symmetric extra canonical history event", (value) => {
+      for (const stack of [value.stacks.baseline, value.stacks.candidate]) {
+        stack.navigation.historyLedger.push(structuredClone(stack.navigation.historyLedger[3]));
+        stack.navigation.historyCount += 1;
+        stack.navigation.historyContractSha256 = sha256(JSON.stringify(
+          stack.navigation.historyLedger,
+        ));
+      }
+    }],
+    ["static duplicate", (value) => {
+      value.stacks.candidate.navigation.staticRequestLedger.push(
+        structuredClone(value.stacks.candidate.navigation.staticRequestLedger[0]),
+      );
+      value.stacks.candidate.navigation.staticRequestCount += 1;
+      value.stacks.candidate.navigation.staticRequestContractSha256 = sha256(
+        JSON.stringify(value.stacks.candidate.navigation.staticRequestLedger),
+      );
+    }],
+    ["symmetric fully rehashed duplicate static occurrence", (value) => {
+      for (const stack of [value.stacks.baseline, value.stacks.candidate]) {
+        const navigation = stack.navigation;
+        navigation.staticRequestLedger.push(structuredClone(
+          navigation.staticRequestLedger.at(-1),
+        ));
+        navigation.staticRequestCount += 1;
+        navigation.staticRequestContractSha256 = sha256(JSON.stringify(
+          navigation.staticRequestLedger,
+        ));
+        navigation.requestCount += 1;
+        navigation.requestOrderLedger.push({ kind: "static", occurrence: 13 });
+        navigation.requestOrderContractSha256 = sha256(JSON.stringify(
+          navigation.requestOrderLedger,
+        ));
+      }
+    }],
+    ["symmetric static occurrence before its document generation", (value) => {
+      for (const stack of [value.stacks.baseline, value.stacks.candidate]) {
+        const order = stack.navigation.requestOrderLedger;
+        const [profileStatic] = order.splice(12, 1);
+        order.splice(11, 0, profileStatic);
+        stack.navigation.requestOrderContractSha256 = sha256(JSON.stringify(order));
+      }
+    }],
+    ["static response class differs from attested extension", (value) => {
+      const navigation = value.stacks.candidate.navigation;
+      const stylesheet = navigation.staticRequestLedger.find((entry: { contentType: string }) => (
+        entry.contentType === "text/css"
+      ));
+      if (!stylesheet) throw new Error("Synthetic stylesheet fixture is missing.");
+      stylesheet.class = "next-static-font";
+      navigation.staticRequestContractSha256 = sha256(
+        JSON.stringify(navigation.staticRequestLedger),
+      );
+      navigation.requestContractSha256 = sha256(JSON.stringify({
+        version: 1,
+        semanticLedger: navigation.semanticRequestLedger,
+        staticClasses: [...new Set(navigation.staticRequestLedger.map((entry: {
+          class: string;
+        }) => entry.class))].sort(),
+      }));
+    }],
+    ["static declaration class differs from attested extension", (value) => {
+      const navigation = value.stacks.candidate.navigation;
+      const declaration = navigation.staticLoadGraph.declaredPathLedger.find((entry: {
+        class: string;
+      }) => entry.class === "chunk");
+      if (!declaration) throw new Error("Synthetic chunk declaration fixture is missing.");
+      declaration.class = "media";
+      navigation.staticLoadGraphContractSha256 = sha256(
+        JSON.stringify(navigation.staticLoadGraph),
+      );
+    }],
+    ["response-declared inventory chunk omitted from request closure", (value) => {
+      const navigation = value.stacks.candidate.navigation;
+      const pathSha256 = sha256("/_next/static/chunks/declared-but-omitted.js");
+      navigation.staticLoadGraph.inventoryLedger.push({
+        assetBytes: 128,
+        assetSha256: "f".repeat(64),
+        extension: "js",
+        pathSha256,
+      });
+      navigation.staticLoadGraph.inventoryLedger.sort((left: { pathSha256: string }, right: {
+        pathSha256: string;
+      }) => (
+        left.pathSha256.localeCompare(right.pathSha256)
+      ));
+      navigation.staticLoadGraph.declaredPathSha256s.push(pathSha256);
+      navigation.staticLoadGraph.declaredPathLedger.push({ class: "chunk", pathSha256 });
+      navigation.staticLoadGraph.declaredPathLedger.sort((left: { pathSha256: string }, right: {
+        pathSha256: string;
+      }) => (
+        left.pathSha256.localeCompare(right.pathSha256)
+      ));
+      navigation.staticLoadGraph.inventoryLedgerContractSha256 = sha256(
+        JSON.stringify(navigation.staticLoadGraph.inventoryLedger),
+      );
+      navigation.staticLoadGraphContractSha256 = sha256(
+        JSON.stringify(navigation.staticLoadGraph),
+      );
+      value.stacks.candidate.runtimeBinding.staticAssetInventoryProjectionSha256
+        = navigation.staticLoadGraph.inventoryLedgerContractSha256;
+    }],
+    ["symmetric unconsumed media declaration", (value) => {
+      for (const stack of [value.stacks.baseline, value.stacks.candidate]) {
+        const pathSha256 = sha256("/_next/static/media/unconsumed.woff2");
+        stack.navigation.staticLoadGraph.declaredPathSha256s.push(pathSha256);
+        stack.navigation.staticLoadGraph.declaredPathLedger.push({ class: "media", pathSha256 });
+        stack.navigation.staticLoadGraph.declaredPathLedger.sort((left: {
+          pathSha256: string;
+        }, right: { pathSha256: string }) => (
+          left.pathSha256.localeCompare(right.pathSha256)
+        ));
+        stack.navigation.staticLoadGraphContractSha256 = sha256(
+          JSON.stringify(stack.navigation.staticLoadGraph),
+        );
+      }
+    }],
+    ["role swap", (value) => { value.stacks.baseline.role = "candidate"; }],
+    ["cleanup association", (value) => {
+      value.lifecycle.projects[0].projectSha256 = "0".repeat(64);
+    }],
+    ["cleanup receipt association", (value) => {
+      value.lifecycle.cleanup.stacks[1].generatedEnvironmentDirectorySha256 = "0".repeat(64);
+    }],
+    ["owned input receipt alias", (value) => {
+      value.stacks.candidate.runtimeBinding.ownedInputReceiptSha256
+        = value.stacks.baseline.runtimeBinding.ownedInputReceiptSha256;
+    }],
+    ["forged symmetric launch barrier", (value) => {
+      value.lifecycle.launch.barrierSha256 = "f".repeat(64);
+      for (const dispatch of value.lifecycle.launch.dispatches) {
+        dispatch.barrierSha256 = value.lifecycle.launch.barrierSha256;
+      }
+    }],
+    ["coexistence stray service substitution", (value) => {
+      const observation = value.lifecycle.launch.coexistence.observations[0];
+      observation.services[0].service = "redis";
+      observation.containerSetSha256 = sha256(JSON.stringify(observation.services));
+    }],
+    ["symmetric coexistence health downgrade", (value) => {
+      for (const observation of value.lifecycle.launch.coexistence.observations) {
+        const app = observation.services.find(({ service }: { service: string }) => service === "app");
+        if (app) app.state = "running";
+        observation.containerSetSha256 = sha256(JSON.stringify(observation.services));
+      }
+    }],
+    ["cross-project container identity reuse with recomputed opaque bindings", (value) => {
+      const [baselineObservation, candidateObservation]
+        = value.lifecycle.launch.coexistence.observations;
+      for (let index = 0; index < candidateObservation.services.length - 1; index += 1) {
+        candidateObservation.services[index].containerIdSha256
+          = baselineObservation.services[index].containerIdSha256;
+      }
+      candidateObservation.containerSetSha256 = sha256(JSON.stringify(
+        candidateObservation.services,
+      ));
+      const coexistenceSha256 = sha256(JSON.stringify(value.lifecycle.launch.coexistence));
+      const launchSha256 = sha256(JSON.stringify(value.lifecycle.launch));
+      for (const stack of [value.stacks.baseline, value.stacks.candidate]) {
+        stack.runtimeBinding.pairCoexistenceContractSha256 = coexistenceSha256;
+        stack.runtimeBinding.pairLaunchContractSha256 = launchSha256;
+      }
+    }],
+  ];
+  for (const [label, mutate] of mutations) {
+    const nearMiss = structuredClone(exact);
+    mutate(nearMiss);
+    expect(() => assertDualProviderOverlapProof(nearMiss), label).toThrow();
+  }
+});
+
+test("binds contracts to exact loopback endpoints and rejects adjacent inputs", () => {
+  const contract = stackContract("baseline");
+  assertJourneyStackContract(contract, "baseline");
+  expect(assertLoopbackControlUrl(
+    "http://127.0.0.1:13100/",
+    contract.publications.providerControl,
+    "baseline control",
+  ).href).toBe("http://127.0.0.1:13100/");
+  expect(assertLoopbackResolver(
+    "127.0.0.2",
+    contract.publications.browserTls,
+    "baseline resolver",
+  )).toBe("127.0.0.2");
+
+  for (const nearMiss of [
+    "http://localhost:13100/",
+    "http://127.0.0.1:13101/",
+    "https://127.0.0.1:13100/",
+    "http://user@127.0.0.1:13100/",
+    "http://127.0.0.1:13100/?extra=1",
+    "http://127.0.0.1:13100/__ledger",
+  ]) {
+    expect(() => assertLoopbackControlUrl(
+      nearMiss,
+      contract.publications.providerControl,
+      "near-miss control",
+    )).toThrow();
+  }
+  for (const nearMiss of ["127.0.0.1", "127.0.0.3", "0.0.0.0", "localhost"]) {
+    expect(() => assertLoopbackResolver(
+      nearMiss,
+      contract.publications.browserTls,
+      "near-miss resolver",
+    )).toThrow();
+  }
+  const adjacentContract = structuredClone(contract) as typeof contract & {
+    credentials?: string;
+  };
+  adjacentContract.credentials = "forbidden";
+  expect(() => assertJourneyStackContract(adjacentContract, "near-miss")).toThrow();
+});
+
+test("validates classic Descriptor identity and the complete containerd descriptor chain", () => {
+  const rootDigest = `sha256:${"1".repeat(64)}`;
+  const manifestDigest = `sha256:${"2".repeat(64)}`;
+  const platform = { architecture: "arm64", os: "linux" };
+  const selectedPlatform = { ...platform, variant: "v8" };
+  const classicDescriptor = {
+    digest: rootDigest,
+    mediaType: "application/vnd.oci.image.index.v1+json",
+    size: 1_024,
+  };
+  expect(assertProviderOverlapClassicImageDescriptor(
+    classicDescriptor,
+    rootDigest,
+    "classic",
+  )).toBe(classicDescriptor);
+  expect(() => assertProviderOverlapClassicImageDescriptor(
+    { ...classicDescriptor, digest: manifestDigest },
+    rootDigest,
+    "classic",
+  )).toThrow(/Descriptor digest/);
+
+  const selectedManifest = {
+    digest: manifestDigest,
+    mediaType: "application/vnd.oci.image.manifest.v1+json",
+    platform: selectedPlatform,
+    size: 2_048,
+  };
+  expect(assertProviderOverlapContainerdImageDescriptorChain(
+    classicDescriptor,
+    selectedManifest,
+    rootDigest,
+    manifestDigest,
+    platform,
+    "multi-platform",
+  )).toEqual({
+    manifestDescriptor: selectedManifest,
+    rootDescriptor: classicDescriptor,
+  });
+
+  const singleManifestRoot = {
+    digest: manifestDigest,
+    mediaType: "application/vnd.oci.image.manifest.v1+json",
+    size: 2_048,
+  };
+  expect(() => assertProviderOverlapContainerdImageDescriptorChain(
+    singleManifestRoot,
+    selectedManifest,
+    manifestDigest,
+    manifestDigest,
+    platform,
+    "single-manifest",
+  )).not.toThrow();
+  expect(() => assertProviderOverlapContainerdImageDescriptorChain(
+    { ...singleManifestRoot, digest: rootDigest },
+    selectedManifest,
+    rootDigest,
+    manifestDigest,
+    platform,
+    "single-manifest",
+  )).toThrow(/single-manifest OCI root differs/);
+  expect(() => assertProviderOverlapContainerdImageDescriptorChain(
+    classicDescriptor,
+    selectedManifest,
+    rootDigest,
+    manifestDigest,
+    { architecture: "amd64", os: "linux" },
+    "wrong-platform",
+  )).toThrow(/selected platform manifest platform/);
+  expect(() => assertProviderOverlapContainerdImageDescriptorChain(
+    classicDescriptor,
+    { ...selectedManifest, platform: { ...platform, variant: "v9" } },
+    rootDigest,
+    manifestDigest,
+    platform,
+    "wrong-variant",
+  )).toThrow(/variant/);
+});
+
+test("binds exact root and selected config annotations without exposing either", () => {
+  const rootDigest = `sha256:${"1".repeat(64)}`;
+  const configDigest = `sha256:${"3".repeat(64)}`;
+  const mediaType = "application/vnd.oci.image.manifest.v1+json";
+  const platform = { architecture: "amd64", os: "linux" };
+  const rootDescriptor = {
+    annotations: { "config.digest": configDigest },
+    digest: rootDigest,
+    mediaType,
+    size: 2_048,
+  };
+  const annotatedManifest = {
+    annotations: { "config.digest": configDigest },
+    digest: rootDigest,
+    mediaType,
+    platform,
+    size: 2_048,
+  };
+  const result = assertProviderOverlapContainerdImageDescriptorChain(
+    rootDescriptor,
+    annotatedManifest,
+    rootDigest,
+    rootDigest,
+    platform,
+    "annotated single-manifest",
+    configDigest,
+  );
+  expect(result).toEqual({
+    manifestDescriptor: {
+      digest: rootDigest,
+      mediaType,
+      platform,
+      size: 2_048,
+    },
+    rootDescriptor: {
+      digest: rootDigest,
+      mediaType,
+      size: 2_048,
+    },
+  });
+  expect(Object.hasOwn(result.manifestDescriptor, "annotations")).toBe(false);
+  expect(Object.hasOwn(result.rootDescriptor, "annotations")).toBe(false);
+
+  const unannotatedRoot = {
+    digest: rootDigest,
+    mediaType,
+    size: 2_048,
+  };
+  const unannotatedManifest = {
+    digest: rootDigest,
+    mediaType,
+    platform,
+    size: 2_048,
+  };
+  const rootOnly = assertProviderOverlapContainerdImageDescriptorChain(
+    rootDescriptor,
+    unannotatedManifest,
+    rootDigest,
+    rootDigest,
+    platform,
+    "root-only annotation",
+    configDigest,
+  );
+  expect(Object.hasOwn(rootOnly.rootDescriptor, "annotations")).toBe(false);
+  expect(rootOnly.manifestDescriptor).toBe(unannotatedManifest);
+
+  const selectedOnly = assertProviderOverlapContainerdImageDescriptorChain(
+    unannotatedRoot,
+    annotatedManifest,
+    rootDigest,
+    rootDigest,
+    platform,
+    "selected-only annotation",
+    configDigest,
+  );
+  expect(selectedOnly.rootDescriptor).toBe(unannotatedRoot);
+  expect(Object.hasOwn(selectedOnly.manifestDescriptor, "annotations")).toBe(false);
+
+  const unannotated = assertProviderOverlapContainerdImageDescriptorChain(
+    unannotatedRoot,
+    unannotatedManifest,
+    rootDigest,
+    rootDigest,
+    platform,
+    "unannotated identity",
+  );
+  expect(unannotated.rootDescriptor).toBe(unannotatedRoot);
+  expect(unannotated.manifestDescriptor).toBe(unannotatedManifest);
+});
+
+test("rejects an unannotated selected media type that differs from its single root", () => {
+  const rootDigest = `sha256:${"1".repeat(64)}`;
+  const platform = { architecture: "amd64", os: "linux" };
+  expect(() => assertProviderOverlapContainerdImageDescriptorChain(
+    {
+      digest: rootDigest,
+      mediaType: "application/vnd.oci.image.manifest.v1+json",
+      size: 1_024,
+    },
+    {
+      digest: rootDigest,
+      mediaType: "application/vnd.docker.distribution.manifest.v2+json",
+      platform,
+      size: 2_048,
+    },
+    rootDigest,
+    rootDigest,
+    platform,
+    "unannotated media mismatch",
+  )).toThrow(/media type differs/);
+});
+
+test("passes the attested application config into live provider descriptor validation", async () => {
+  const runnerSource = await readFile(path.resolve(__dirname, "prove-provider-overlap.mjs"), "utf8");
+  expect(runnerSource).toMatch(
+    /assertProviderOverlapContainerdImageDescriptorChain\([\s\S]{1,512}assetIdentity\.configDigest,\s*\);/,
+  );
+});
+
+test("binds provider failure sanitization into the immutable fixture contract", () => {
+  const required = [
+    "journey-error-evidence.contract.spec.ts",
+    "journey-error-evidence.mjs",
+    "prove-provider-overlap.mjs",
+  ];
+  expect(new Set(JOURNEY_FIXTURE_FILENAMES).size).toBe(JOURNEY_FIXTURE_FILENAMES.length);
+  expect(JOURNEY_FIXTURE_FILENAMES.filter((entry) => required.includes(entry)))
+    .toEqual(required);
+});
+
+test("retains image, preflight, proof, and CONNECT rejection causes for sanitization", async () => {
+  const [orchestrator, runner] = await Promise.all([
+    readFile(path.resolve(__dirname, "journey-owned-stack-orchestrator.mjs"), "utf8"),
+    readFile(path.resolve(__dirname, "prove-provider-overlap.mjs"), "utf8"),
+  ]);
+  expect(orchestrator).toMatch(
+    /new AggregateError\(\s*rejectionReasons\(identitySettlements\),\s*"Both verifier-owned image rechecks/,
+  );
+  expect(runner).toContain('return { reason, status: "rejected" }');
+  expect(runner).toMatch(
+    /new AggregateError\(\s*rejectionReasons\(preflightSettlements\),\s*"Both dual-image preflights/,
+  );
+  expect(runner).toMatch(
+    /new AggregateError\(\s*runErrors,\s*"Both concurrent dual-image proofs/,
+  );
+  expect(runner).toMatch(
+    /new AggregateError\(\s*rejectionReasons\(settled\),\s*"Both isolated CONNECT proxies must stop/,
+  );
+  expect(runner).not.toMatch(/catch\s*\{\s*return \{ status: "rejected" \}/);
+});
+
+test("emits bounded Docker diagnostics only when a provider failure contains them", async () => {
+  const runner = await readFile(
+    path.resolve(__dirname, "prove-provider-overlap.mjs"),
+    "utf8",
+  );
+  expect(runner).toContain("collectJourneyDockerFailureEvidence(error)");
+  expect(runner).toContain(
+    "...(dockerFailures.length === 0 ? {} : { dockerFailures })",
+  );
+});
+
+test("publishes only bounded phase enums for live provider failure diagnosis", async () => {
+  const runner = await readFile(
+    path.resolve(__dirname, "prove-provider-overlap.mjs"),
+    "utf8",
+  );
+  expect(runner).toContain("currentProviderFailurePhases()");
+  expect(runner).toContain("{ providerFailurePhases }");
+  expect(runner).toContain("currentProviderResponseCaptureFailureEvidence()");
+  expect(runner).toContain("{ responseCaptureFailureEvidence }");
+  expect(runner).toContain("currentProviderProjectionFailureEvidence()");
+  expect(runner).toContain("{ projectionFailureEvidence }");
+  expect(runner).toContain("retainProviderProjectionFailure(");
+  expect(runner).toContain("currentProviderBrowserDiagnosticEvidence()");
+  expect(runner).toContain("{ browserDiagnosticEvidence }");
+  expect(runner).toContain("currentProviderProofAssemblyFailureEvidence()");
+  expect(runner).toContain("{ proofAssemblyFailureEvidence }");
+  expect(runner).toContain('retainProviderProofAssemblyFailure("stack-report", error)');
+  expect(runner).toContain('retainProviderProofAssemblyFailure("dual-proof", error, {');
+  expect(runner).toContain("createProviderProofAssemblyRequestContractDiagnostics(");
+  expect(runner).toContain('kind: "browser-request-contract-diagnostics"');
+  expect(runner).toContain("semanticShapeLedgerSha256");
+  expect(runner).toContain("staticClassesSha256");
+  expect(runner).toContain("staticClassCountsSha256");
+  expect(runner).toContain("boundedDiagnosticString(");
+  expect(runner).toContain('new Set(["dual-proof", "stack-report"])');
+  expect(runner).toContain("stage,");
+  expect(runner).toContain('kind: "exact-invariant-mismatch"');
+  expect(runner).toContain('invariantLabel: exactMismatch[1]');
+  expect(runner).toContain('kind: "runtime-binding-alias"');
+  expect(runner).toContain("runtimeBindingName: runtimeAlias[1]");
+  expect(runner).toContain('kind: "connect-proxy-counters-rejected"');
+  expect(runner).toContain("providerProofAssemblyInvariantLabels");
+  expect(runner).toContain("providerProofAssemblyRuntimeBindingNames");
+  expect(runner).toContain('"durable-body-read"');
+  expect(runner).toContain('"final-assert"');
+  expect(runner).toContain('"request-terminal-evidence"');
+  expect(runner).toContain("assertCdpResponseBodyCaptureClean()");
+  expect(runner).toContain("cdpResponseBodyCapture.snapshot()");
+  expect(runner).not.toContain("message: message");
+  expect(runner).not.toContain("record.request.url");
+  expect(runner).not.toContain("record.request.postData");
+  expect(runner).toContain("messageSha256: entry.sha256");
+  expect(runner).toContain("messageShape: entry.messageShape");
+  expect(runner).toContain("wordLengths: entry.wordLengths");
+  expect(runner).toContain('kind = "chromium-unused-preload"');
+  expect(runner).toContain('kind = "playwright-service-worker-block"');
+  expect(runner).toContain('text === "Service Worker registration blocked by Playwright"');
+  expect(runner).toContain("expectedPlaywrightConsole.length !== 1");
+  expect(runner).toContain('kind = "chromium-dom-autocomplete"');
+  expect(runner).toContain('kind = "next-auto-scroll-skip"');
+  expect(runner).toContain('source = "non-url"');
+  expect(runner).not.toContain("message: entry");
+  expect(runner).toContain('markProviderFailurePhase(role, "navigate-login")');
+  expect(runner).toContain('markProviderFailurePhase(role, "navigate-profile")');
+  expect(runner).toContain('markProviderFailurePhase(role, "navigate-cabinet")');
+  expect(runner).toContain('markProviderFailurePhase(role, "finalize-event-lifecycle")');
+  expect(runner).toContain('/^[a-z0-9-]{1,64}$/');
+  expect(runner).toContain("{ terminalEvidence }");
+  expect(runner).not.toContain("urlSha256");
+  expect(runner).not.toContain("postDataSha256");
+});
+
+test("publishes bounded provider finalization subphase enums", async () => {
+  const runner = await readFile(
+    path.resolve(__dirname, "prove-provider-overlap.mjs"),
+    "utf8",
+  );
+  for (const phase of [
+    "finalize-event-drain",
+    "finalize-response-capture",
+    "finalize-browser-projection",
+    "finalize-browser-snapshot",
+    "finalize-browser-close",
+    "finalize-source-revalidation",
+    "finalize-listener-detach",
+    "finalize-event-seal",
+  ]) {
+    expect(runner).toContain(`markProviderFailurePhase(role, "${phase}")`);
+  }
+});
+
+test("rejects malformed or unbound provider manifest config annotations", () => {
+  const rootDigest = `sha256:${"1".repeat(64)}`;
+  const childDigest = `sha256:${"2".repeat(64)}`;
+  const configDigest = `sha256:${"3".repeat(64)}`;
+  const wrongConfigDigest = `sha256:${"4".repeat(64)}`;
+  const manifestMediaType = "application/vnd.oci.image.manifest.v1+json";
+  const platform = { architecture: "amd64", os: "linux" };
+  const singleRoot = {
+    digest: rootDigest,
+    mediaType: manifestMediaType,
+    size: 2_048,
+  };
+  const baseManifest = {
+    digest: rootDigest,
+    mediaType: manifestMediaType,
+    platform,
+    size: 2_048,
+  };
+  const cases: Array<{
+    annotations: unknown;
+    expectedConfigDigest?: string;
+    expectedManifestDigest?: string;
+    label: string;
+    manifestDigest?: string;
+    manifestMediaType?: string;
+    root?: typeof singleRoot;
+  }> = [
+    { annotations: null, expectedConfigDigest: configDigest, label: "null annotations" },
+    { annotations: [], expectedConfigDigest: configDigest, label: "array annotations" },
+    { annotations: {}, expectedConfigDigest: configDigest, label: "empty annotations" },
+    {
+      annotations: { "config.digest": "not-a-digest" },
+      expectedConfigDigest: configDigest,
+      label: "malformed config digest",
+    },
+    {
+      annotations: { "config.digest": configDigest, unexpected: configDigest },
+      expectedConfigDigest: configDigest,
+      label: "extra annotation",
+    },
+    {
+      annotations: { "config.digest": wrongConfigDigest },
+      expectedConfigDigest: configDigest,
+      label: "wrong attested config digest",
+    },
+    { annotations: { "config.digest": configDigest }, label: "missing config attestation" },
+    {
+      annotations: { "config.digest": configDigest },
+      expectedConfigDigest: configDigest,
+      label: "different single-root media type",
+      manifestMediaType: "application/vnd.docker.distribution.manifest.v2+json",
+    },
+    {
+      annotations: { "config.digest": configDigest },
+      expectedConfigDigest: configDigest,
+      expectedManifestDigest: childDigest,
+      label: "annotation on index child",
+      manifestDigest: childDigest,
+      root: {
+        digest: rootDigest,
+        mediaType: "application/vnd.oci.image.index.v1+json",
+        size: 1_024,
+      },
+    },
+  ];
+  for (const testCase of cases) {
+    expect(() => assertProviderOverlapContainerdImageDescriptorChain(
+      testCase.root ?? singleRoot,
+      {
+        ...baseManifest,
+        annotations: testCase.annotations,
+        digest: testCase.manifestDigest ?? rootDigest,
+        mediaType: testCase.manifestMediaType ?? manifestMediaType,
+      },
+      rootDigest,
+      testCase.expectedManifestDigest ?? rootDigest,
+      platform,
+      testCase.label,
+      testCase.expectedConfigDigest,
+    ), testCase.label).toThrow(/annotation|single-root/);
+  }
+});
+
+test("rejects malformed or unbound provider root config annotations", () => {
+  const rootDigest = `sha256:${"1".repeat(64)}`;
+  const childDigest = `sha256:${"2".repeat(64)}`;
+  const configDigest = `sha256:${"3".repeat(64)}`;
+  const wrongConfigDigest = `sha256:${"4".repeat(64)}`;
+  const mediaType = "application/vnd.oci.image.manifest.v1+json";
+  const platform = { architecture: "amd64", os: "linux" };
+  const manifest = {
+    digest: rootDigest,
+    mediaType,
+    platform,
+    size: 2_048,
+  };
+  const cases: Array<{
+    annotations: unknown;
+    expectedConfigDigest?: string;
+    expectedManifestDigest?: string;
+    label: string;
+    manifest?: typeof manifest & { annotations?: unknown };
+    rootMediaType?: string;
+    rootSize?: number;
+  }> = [
+    { annotations: null, expectedConfigDigest: configDigest, label: "null root annotations" },
+    { annotations: [], expectedConfigDigest: configDigest, label: "array root annotations" },
+    { annotations: {}, expectedConfigDigest: configDigest, label: "empty root annotations" },
+    {
+      annotations: { "config.digest": "not-a-digest" },
+      expectedConfigDigest: configDigest,
+      label: "malformed root config digest",
+    },
+    {
+      annotations: { "config.digest": configDigest, unexpected: configDigest },
+      expectedConfigDigest: configDigest,
+      label: "extra root annotation",
+    },
+    {
+      annotations: { "config.digest": wrongConfigDigest },
+      expectedConfigDigest: configDigest,
+      label: "wrong attested root config digest",
+    },
+    {
+      annotations: { "config.digest": configDigest },
+      label: "missing root config attestation",
+    },
+    {
+      annotations: { "config.digest": configDigest },
+      expectedConfigDigest: configDigest,
+      expectedManifestDigest: childDigest,
+      label: "root annotation on index",
+      manifest: { ...manifest, digest: childDigest },
+      rootMediaType: "application/vnd.oci.image.index.v1+json",
+    },
+    {
+      annotations: { "config.digest": configDigest },
+      expectedConfigDigest: configDigest,
+      label: "annotated descriptor size mismatch",
+      rootSize: 1_024,
+    },
+    {
+      annotations: { "config.digest": configDigest },
+      expectedConfigDigest: configDigest,
+      label: "different root and selected config annotations",
+      manifest: {
+        ...manifest,
+        annotations: { "config.digest": wrongConfigDigest },
+      },
+    },
+  ];
+  for (const testCase of cases) {
+    expect(() => assertProviderOverlapContainerdImageDescriptorChain(
+      {
+        annotations: testCase.annotations,
+        digest: rootDigest,
+        mediaType: testCase.rootMediaType ?? mediaType,
+        size: testCase.rootSize ?? 2_048,
+      },
+      testCase.manifest ?? manifest,
+      rootDigest,
+      testCase.expectedManifestDigest ?? rootDigest,
+      platform,
+      testCase.label,
+      testCase.expectedConfigDigest,
+    ), testCase.label).toThrow(/annotation|single-root/);
+  }
+});
+
+test("rejects an OCI index or manifest-list root aliasing its selected manifest", () => {
+  const rootDigest = `sha256:${"1".repeat(64)}`;
+  const platform = { architecture: "amd64", os: "linux" };
+  const manifestDescriptor = {
+    digest: rootDigest,
+    mediaType: "application/vnd.oci.image.manifest.v1+json",
+    platform,
+    size: 2_048,
+  };
+  for (const mediaType of [
+    "application/vnd.oci.image.index.v1+json",
+    "application/vnd.docker.distribution.manifest.list.v2+json",
+  ]) {
+    expect(() => assertProviderOverlapContainerdImageDescriptorChain(
+      { digest: rootDigest, mediaType, size: 1_024 },
+      manifestDescriptor,
+      rootDigest,
+      rootDigest,
+      platform,
+      "aliased index root",
+    ), mediaType).toThrow(/index root aliases/);
+  }
+});
+
+test("requires one attested linux platform across both provider proof images", () => {
+  const arm64 = { architecture: "arm64", os: "linux" };
+  expect(assertProviderOverlapImagePlatformParity(arm64, { ...arm64 })).toBe(arm64);
+  expect(() => assertProviderOverlapImagePlatformParity(
+    { architecture: "amd64", os: "linux" },
+    arm64,
+  )).toThrow(/platform parity/);
+});
+
+test("binds exact running image labels and a pristine deterministic reset", () => {
+  const contract = stackContract("baseline");
+  assertJourneyStackContract(contract, "baseline");
+  const imageIdentity = {
+    assetImageDigest: `sha256:${"1".repeat(64)}`,
+    configDigest: `sha256:${"2".repeat(64)}`,
+    manifestDigest: `sha256:${"3".repeat(64)}`,
+    reference: contract.images.application,
+    repoDigestContractSha256: "4".repeat(64),
+    revision: contract.revision,
+    role: "app",
+    runtimeImageDigest: `sha256:${"2".repeat(64)}`,
+    publicBuildContract: { ...contract.publicBuildContract },
+  };
+  expect(assertApplicationImageIdentity(
+    imageIdentity,
+    contract,
+    {
+      assetImageDigest: imageIdentity.assetImageDigest,
+      configDigest: imageIdentity.configDigest,
+      manifestDigest: imageIdentity.manifestDigest,
+    },
+    "baseline",
+  )).toEqual(imageIdentity);
+  const containerdIdentity = {
+    ...imageIdentity,
+    imageSelectionMode: "containerd-root-manifest",
+    runtimeImageDigest: imageIdentity.assetImageDigest,
+  };
+  expect(assertApplicationImageIdentity(
+    containerdIdentity,
+    contract,
+    {
+      assetImageDigest: imageIdentity.assetImageDigest,
+      configDigest: imageIdentity.configDigest,
+      manifestDigest: imageIdentity.manifestDigest,
+    },
+    "containerd",
+  )).toEqual(containerdIdentity);
+  for (const mutate of [
+    (value: typeof imageIdentity) => { value.runtimeImageDigest = value.assetImageDigest; },
+    (value: typeof imageIdentity) => { value.revision = candidateRevision; },
+    (value: typeof imageIdentity) => { value.role = "migration"; },
+    (value: typeof imageIdentity) => { value.publicBuildContract.sha256 = "3".repeat(64); },
+  ]) {
+    const nearMiss = structuredClone(imageIdentity);
+    mutate(nearMiss);
+    expect(() => assertApplicationImageIdentity(
+      nearMiss,
+      contract,
+      {
+        assetImageDigest: imageIdentity.assetImageDigest,
+        configDigest: imageIdentity.configDigest,
+        manifestDigest: imageIdentity.manifestDigest,
+      },
+      "near-miss",
+    )).toThrow();
+  }
+
+  const scenario = "provider-overlap-v1";
+  const reset = resetEvidence(scenario, contract.project);
+  expect(assertDeterministicReset(reset, scenario, contract.project, "baseline")).toMatchObject({
+    scenarioSha256: sha256(scenario),
+    seedSha256: sha256(`clean-pay-browser-journey-v1:${scenario}`),
+    database: {
+      scopeSha256: sha256(contract.project),
+      sequenceCount: 0,
+      resetSequence: 1,
+    },
+  });
+  const resetMutations: Array<[string, (value: ReturnType<typeof resetEvidence>) => void]> = [
+    ["scenario digest", (value) => { value.scenario_sha256 = "4".repeat(64); }],
+    ["non-pristine ledger", (value) => { value.state.ledger = 1; }],
+    ["armed injection", (value) => { value.state.payment_disconnect_injection_armed = true; }],
+    ["wrong DB scope", (value) => { value.database.scopeSha256 = "5".repeat(64); }],
+    ["DB sequence", (value) => { value.database.sequenceCount = 1; }],
+  ];
+  for (const [label, mutate] of resetMutations) {
+    const nearMiss = structuredClone(reset);
+    mutate(nearMiss);
+    expect(() => assertDeterministicReset(nearMiss, scenario, contract.project, label)).toThrow();
+  }
+});
+
+test("derives the classifier main-frame flag only for a navigation target", async () => {
+  const mainFrame = {};
+  const childFrame = {};
+  const request = (isNavigation: boolean, frame: object) => ({
+    frame: () => frame,
+    isNavigationRequest: () => isNavigation,
+    method: () => "GET",
+    resourceType: () => isNavigation ? "document" : "script",
+    url: () => "https://request-envelope.clean-pay.test/resource",
+  });
+
+  expect(createJourneyBrowserRequestEnvelope(request(true, mainFrame), mainFrame)).toEqual({
+    isMainFrame: true,
+    isNavigation: true,
+    method: "GET",
+    resourceType: "document",
+    url: "https://request-envelope.clean-pay.test/resource",
+  });
+  expect(createJourneyBrowserRequestEnvelope(request(true, childFrame), mainFrame)).toEqual({
+    isMainFrame: false,
+    isNavigation: true,
+    method: "GET",
+    resourceType: "document",
+    url: "https://request-envelope.clean-pay.test/resource",
+  });
+  let nonNavigationFrameReads = 0;
+  const nonNavigationRequest = request(false, mainFrame);
+  nonNavigationRequest.frame = () => {
+    nonNavigationFrameReads += 1;
+    return mainFrame;
+  };
+  expect(createJourneyBrowserRequestEnvelope(nonNavigationRequest, mainFrame)).toEqual({
+    isMainFrame: false,
+    isNavigation: false,
+    method: "GET",
+    resourceType: "script",
+    url: "https://request-envelope.clean-pay.test/resource",
+  });
+  expect(nonNavigationFrameReads).toBe(0);
+  expect(() => createJourneyBrowserRequestEnvelope({
+    ...request(true, mainFrame),
+    isNavigationRequest: () => "true",
+  }, mainFrame)).toThrow(/navigation flag/);
+
+  const captureSource = await readFile(path.resolve(__dirname, "prove-provider-overlap.mjs"), "utf8");
+  expect(captureSource).toContain(
+    "createJourneyBrowserRequestEnvelope(request, page.mainFrame())",
+  );
+  expect(captureSource).not.toContain("isMainFrame: request.frame() === page.mainFrame()");
+});
+
+test("characterizes navigation targets in pinned local Chromium", async () => {
+  const browser = await chromium.launch({ headless: true });
+  try {
+    const context = await browser.newContext({ serviceWorkers: "block" });
+    const page = await context.newPage();
+    const observed: Array<{
+      envelope: ReturnType<typeof createJourneyBrowserRequestEnvelope>;
+      pathname: string;
+    }> = [];
+    const fixtures = new Map([
+      ["/main", {
+        body: "<!doctype html><html><head>"
+          + '<link rel="stylesheet" href="/style.css">'
+          + '<script defer src="/app.js"></script>'
+          + "</head><body>"
+          + '<iframe src="/frame"></iframe>'
+          + "</body></html>",
+        contentType: "text/html",
+      }],
+      ["/style.css", { body: "body{color:#111}", contentType: "text/css" }],
+      ["/app.js", {
+        body: "globalThis.__scriptLoaded=true;"
+          + "fetch('/data').then(response=>response.text())"
+          + ".then(()=>document.body.dataset.fetch='done');",
+        contentType: "application/javascript",
+      }],
+      ["/data", { body: "synthetic-data", contentType: "text/plain" }],
+      ["/frame", { body: "<!doctype html><p>synthetic-frame</p>", contentType: "text/html" }],
+    ]);
+    await context.route("**/*", async (route) => {
+      const request = route.request();
+      const pathname = new URL(request.url()).pathname;
+      observed.push({
+        envelope: createJourneyBrowserRequestEnvelope(request, page.mainFrame()),
+        pathname,
+      });
+      const fixture = fixtures.get(pathname);
+      if (!fixture) throw new Error(`Unexpected local characterization request: ${pathname}`);
+      await route.fulfill({ status: 200, ...fixture });
+    });
+
+    await page.goto("https://request-envelope.clean-pay.test/main", {
+      waitUntil: "load",
+    });
+    await page.waitForFunction(() => (
+      Reflect.get(globalThis, "__scriptLoaded") === true
+        && document.body.dataset.fetch === "done"
+    ));
+    expect(observed).toHaveLength(5);
+    expect(observed.map(({ pathname }) => pathname).sort()).toEqual(
+      ["/app.js", "/data", "/frame", "/main", "/style.css"],
+    );
+    const byPath = new Map(observed.map(({ envelope, pathname }) => [pathname, envelope]));
+    expect(byPath.get("/main")).toMatchObject({
+      isMainFrame: true, isNavigation: true, resourceType: "document",
+    });
+    expect(byPath.get("/frame")).toMatchObject({
+      isMainFrame: false, isNavigation: true, resourceType: "document",
+    });
+    for (const [pathname, resourceType] of [
+      ["/style.css", "stylesheet"],
+      ["/app.js", "script"],
+      ["/data", "fetch"],
+    ] as const) {
+      expect(byPath.get(pathname)).toMatchObject({
+        isMainFrame: false, isNavigation: false, resourceType,
+      });
+    }
+    await context.close();
+  } finally {
+    await browser.close();
+  }
+});
+
+test("rejects arbitrary same-host paths, queries, redirects, methods, and transports", async () => {
+  const opaque = "opaque-state_1";
+  const loginDocument = browserClassification(
+    "https://pay.ci.clean-pay.dev/login?redirect_to=%2Fprofile",
+    { resourceType: "document", isNavigation: true, isMainFrame: true },
+  );
+  const telegramStart = browserClassification(
+      "https://pay.ci.clean-pay.dev/auth/telegram/start?redirect_to=%2Fprofile"
+        + "&turnstile_token=synthetic-turnstile-token%3Aauth_login%3Asynthetic-turnstile-1%3A1",
+      { resourceType: "document", isNavigation: true, isMainFrame: true },
+    );
+  const oidcAuthorize = browserClassification(
+      "https://oauth.telegram.org/auth?response_type=code&client_id=7654321098"
+        + "&redirect_uri=https%3A%2F%2Fpay.ci.clean-pay.dev%2Fauth%2Ftelegram%2Fcallback"
+        + `&scope=openid%20profile&state=${opaque}&nonce=${opaque}`
+        + `&code_challenge=${opaque}&code_challenge_method=S256`,
+      { resourceType: "document", isNavigation: true, isMainFrame: true },
+    );
+  const telegramCallback = browserClassification(
+      `https://pay.ci.clean-pay.dev/auth/telegram/callback?code=${opaque}&state=${opaque}`,
+      { resourceType: "document", isNavigation: true, isMainFrame: true },
+    );
+  const profileDocument = browserClassification("https://pay.ci.clean-pay.dev/profile", {
+    resourceType: "document", isNavigation: true, isMainFrame: true,
+  });
+  const cabinetDocument = browserClassification("https://pay.ci.clean-pay.dev/cabinet", {
+    resourceType: "document", isNavigation: true, isMainFrame: true,
+  }, true);
+  const staticClassifications = [
+    browserClassification(`https://pay.ci.clean-pay.dev${staticJavascriptPath}`, {
+      resourceType: "script",
+    }),
+    browserClassification(`https://pay.ci.clean-pay.dev${staticStylesheetPath}`, {
+      resourceType: "stylesheet",
+    }),
+    browserClassification(`https://pay.ci.clean-pay.dev${staticFontPath}`, {
+      resourceType: "font",
+    }),
+    browserClassification(`https://pay.ci.clean-pay.dev${staticSecondFontPath}`, {
+      resourceType: "font",
+    }),
+  ];
+  const turnstile = browserClassification(
+      "https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit",
+      { resourceType: "script" },
+    );
+  const chatwootSdk = browserClassification(
+    "https://chatwoot.browser.clean-pay.dev/packs/js/sdk.js",
+    { resourceType: "script" },
+  );
+  const chatwootWidget = browserClassification(
+      `https://chatwoot.browser.clean-pay.dev/widget?website_token=${"a".repeat(64)}`,
+      { resourceType: "document", isNavigation: true },
+    );
+  const rootRsc = browserClassification(
+    "https://pay.ci.clean-pay.dev/?_rsc=opaque-state_1",
+    { resourceType: "fetch" },
+  );
+  const loginRootRedirect = browserClassification(
+    "https://pay.ci.clean-pay.dev/login?redirect_to=%2F",
+    { resourceType: "fetch" },
+  );
+  const loginRootRsc = browserClassification(
+    "https://pay.ci.clean-pay.dev/login?redirect_to=%2F&_rsc=opaque-state_1",
+    { resourceType: "fetch" },
+  );
+  const loginProfileRsc = browserClassification(
+    "https://pay.ci.clean-pay.dev/login?redirect_to=%2Fprofile&_rsc=opaque-state_1",
+    { resourceType: "fetch" },
+  );
+  const profileAction = browserClassification("https://pay.ci.clean-pay.dev/profile", {
+    method: "POST", resourceType: "fetch",
+  });
+  const cabinetRootRsc = browserClassification("https://pay.ci.clean-pay.dev/?_rsc=opaque-state_2", {
+    resourceType: "fetch",
+  });
+  expect(rootRsc.key).toBe("app-root-rsc");
+  expect(loginRootRedirect.key).toBe("app-login-root-rsc");
+  expect(loginRootRsc.key).toBe("app-login-root-rsc");
+  expect(loginProfileRsc.key).toBe("app-login-rsc");
+  expect(profileAction.key).toBe("app-profile-action");
+  expect(cabinetRootRsc.key).toBe("app-root-rsc");
+  expect(assertProviderOverlapRedirect({
+    from: { classification: rootRsc, url: "https://pay.ci.clean-pay.dev/?_rsc=opaque-state_1" },
+    location: "/login?redirect_to=%2F",
+    status: 307,
+    to: {
+      classification: loginRootRedirect,
+      url: "https://pay.ci.clean-pay.dev/login?redirect_to=%2F",
+    },
+  })).toBe("app-root-rsc:307->app-login-root-rsc");
+  expect(assertProviderOverlapRedirect({
+    from: {
+      classification: loginRootRedirect,
+      url: "https://pay.ci.clean-pay.dev/login?redirect_to=%2F",
+    },
+    location: "/login?redirect_to=%2F&_rsc=opaque-state_1",
+    status: 307,
+    to: {
+      classification: loginRootRsc,
+      url: "https://pay.ci.clean-pay.dev/login?redirect_to=%2F&_rsc=opaque-state_1",
+    },
+  })).toBe("app-login-root-rsc:307->app-login-root-rsc");
+  expect(() => assertProviderOverlapRedirect({
+    from: { classification: rootRsc, url: "https://pay.ci.clean-pay.dev/?_rsc=opaque-state_1" },
+    location: "/login?redirect_to=%2Fprofile&_rsc=opaque-state_1",
+    status: 307,
+    to: {
+      classification: loginProfileRsc,
+      url: "https://pay.ci.clean-pay.dev/login?redirect_to=%2Fprofile&_rsc=opaque-state_1",
+    },
+  })).toThrow(/Redirect edge/);
+  expect(() => browserClassification(
+    "https://pay.ci.clean-pay.dev/auth/telegram/start?redirect_to=%2Fprofile"
+      + "&turnstile_token=synthetic-turnstile-token%3Alogin%3Asynthetic-turnstile-1%3A1",
+    { resourceType: "document", isNavigation: true, isMainFrame: true },
+  )).toThrow(/Turnstile token/);
+  const requestRecord = (
+    classification: ProviderBrowserClassification,
+    documentKey: "app-login-document" | "app-profile-document" | "app-cabinet-document",
+    responseStatus: number | null,
+    responseContentType: string | null,
+    redirectEdge: string | null = null,
+    responseFailureSha256: string | null = null,
+  ) => ({
+    classification,
+    documentKey,
+    redirectEdge,
+    responseContentType,
+    responseFailureSha256,
+    responseStatus,
+    staticResponseBytes: classification.staticPath === null
+      ? null
+      : staticInventoryMetadataByPath[classification.staticPath].assetBytes,
+    staticResponseSha256: classification.staticPath === null
+      ? null
+      : staticInventoryByPath[classification.staticPath],
+  });
+  const staticRecords = (documentKey: Parameters<typeof requestRecord>[1]) => (
+    staticClassifications.map((classification) => requestRecord(
+      classification,
+      documentKey,
+      200,
+      classification.key === "next-static-js" ? "application/javascript"
+        : classification.key === "next-static-css" ? "text/css" : "font/woff2",
+    ))
+  );
+  const validRecords = [
+    requestRecord(loginDocument, "app-login-document", 200, "text/html"),
+    ...staticRecords("app-login-document"),
+    requestRecord(turnstile, "app-login-document", 200, "application/javascript"),
+    requestRecord(chatwootSdk, "app-login-document", 200, "application/javascript"),
+    requestRecord(chatwootWidget, "app-login-document", 200, "text/html"),
+    requestRecord(telegramStart, "app-login-document", 307, "application/octet-stream"),
+    requestRecord(
+      oidcAuthorize,
+      "app-login-document",
+      302,
+      null,
+      "app-telegram-start:307->telegram-oidc-authorize",
+    ),
+    requestRecord(
+      telegramCallback,
+      "app-login-document",
+      307,
+      "application/octet-stream",
+      "telegram-oidc-authorize:302->app-telegram-callback",
+    ),
+    requestRecord(
+      profileDocument,
+      "app-profile-document",
+      200,
+      "text/html",
+      "app-telegram-callback:307->app-profile-document",
+    ),
+    ...staticRecords("app-profile-document"),
+    requestRecord(cabinetDocument, "app-cabinet-document", 200, "text/html"),
+    ...staticRecords("app-cabinet-document"),
+  ];
+  const exactBrowserContract = finalizeProviderOverlapBrowserContract(validRecords, staticLoadGraph);
+  expect(exactBrowserContract).toMatchObject({
+    requestCount: validRecords.length,
+    requestContractSha256: expect.stringMatching(/^[a-f0-9]{64}$/),
+    staticRequestCount: 12,
+  });
+  const exactSemanticKeys = exactBrowserContract.semanticRequestLedger.map((entry) => (
+    entry as Readonly<{ key: string }>
+  ).key);
+  expect(exactSemanticKeys).not.toContain("app-profile-action");
+  expect(exactSemanticKeys).not.toContain("app-root-rsc");
+  expect(exactBrowserContract.requestOrderLedger).toHaveLength(validRecords.length);
+  expect(exactBrowserContract.staticLoadGraph.documentLoadLedger).toHaveLength(3);
+  expect(exactBrowserContract.staticLoadGraph.cssMediaReferenceLedger).toHaveLength(8);
+  const rootPrefetchRecords = structuredClone(validRecords);
+  const telegramStartIndex = rootPrefetchRecords.findIndex((record) => (
+    record.classification.key === "app-telegram-start"
+  ));
+  rootPrefetchRecords.splice(
+    telegramStartIndex,
+    0,
+    requestRecord(rootRsc, "app-login-document", 307, null),
+    requestRecord(
+      loginRootRedirect,
+      "app-login-document",
+      307,
+      null,
+      "app-root-rsc:307->app-login-root-rsc",
+    ),
+    requestRecord(
+      loginRootRsc,
+      "app-login-document",
+      200,
+      "text/x-component",
+      "app-login-root-rsc:307->app-login-root-rsc",
+    ),
+    requestRecord(loginRootRsc, "app-login-document", 200, "text/x-component"),
+  );
+  expect(finalizeProviderOverlapBrowserContract(
+    rootPrefetchRecords,
+    staticLoadGraph,
+  ).semanticRequestLedger.filter((entry) => (
+    (entry as Readonly<{ key: string }>).key === "app-login-root-rsc"
+  ))).toEqual([
+    expect.objectContaining({ redirectEdge: "app-root-rsc:307->app-login-root-rsc" }),
+    expect.objectContaining({ redirectEdge: "app-login-root-rsc:307->app-login-root-rsc" }),
+    expect.objectContaining({ redirectEdge: null }),
+  ]);
+  const terminalLoginRscRedirectRecords = structuredClone(validRecords);
+  terminalLoginRscRedirectRecords.splice(
+    telegramStartIndex,
+    0,
+    requestRecord(loginProfileRsc, "app-login-document", 307, "application/octet-stream"),
+  );
+  expect(finalizeProviderOverlapBrowserContract(
+    terminalLoginRscRedirectRecords,
+    staticLoadGraph,
+  ).semanticRequestLedger).toContainEqual(expect.objectContaining({
+    key: "app-login-rsc",
+    redirectEdge: null,
+    responseStatus: 307,
+  }));
+  const terminalRootRscRedirectRecords = structuredClone(validRecords);
+  terminalRootRscRedirectRecords.splice(
+    telegramStartIndex,
+    0,
+    requestRecord(rootRsc, "app-login-document", 307, null),
+  );
+  expect(finalizeProviderOverlapBrowserContract(
+    terminalRootRscRedirectRecords,
+    staticLoadGraph,
+  ).semanticRequestLedger).toContainEqual(expect.objectContaining({
+    key: "app-root-rsc",
+    redirectEdge: null,
+    responseStatus: 307,
+  }));
+  const forgedTerminalLoginRscRedirectRecords = structuredClone(terminalLoginRscRedirectRecords);
+  forgedTerminalLoginRscRedirectRecords[telegramStartIndex].responseContentType = null;
+  expect(() => finalizeProviderOverlapBrowserContract(
+    forgedTerminalLoginRscRedirectRecords,
+    staticLoadGraph,
+  )).toThrow(/response content type is not exact/);
+  const exactAbortedRootPrefetchRecords = structuredClone(rootPrefetchRecords);
+  const exactAbortedRootPrefetchIndex = exactAbortedRootPrefetchRecords.findLastIndex((record) => (
+    record.classification.key === "app-login-root-rsc" && record.responseStatus === 200
+  ));
+  exactAbortedRootPrefetchRecords[exactAbortedRootPrefetchIndex].responseFailureSha256 =
+    sha256("net::ERR_ABORTED");
+  expect(finalizeProviderOverlapBrowserContract(
+    exactAbortedRootPrefetchRecords,
+    staticLoadGraph,
+  ).semanticRequestLedger).toContainEqual(expect.objectContaining({
+    key: "app-login-root-rsc",
+    responseFailureSha256: sha256("net::ERR_ABORTED"),
+  }));
+  const firstAbortedRootPrefetchRecords = structuredClone(rootPrefetchRecords);
+  const exactFirstAbortedRootPrefetchIndex = firstAbortedRootPrefetchRecords.findIndex((
+    record,
+  ) => (
+    record.classification.key === "app-login-root-rsc" && record.responseStatus === 200
+  ));
+  firstAbortedRootPrefetchRecords[exactFirstAbortedRootPrefetchIndex].responseFailureSha256 =
+    sha256("net::ERR_ABORTED");
+  const firstAbortedRootPrefetchContract = finalizeProviderOverlapBrowserContract(
+    firstAbortedRootPrefetchRecords,
+    staticLoadGraph,
+  );
+  const lastAbortedRootPrefetchContract = finalizeProviderOverlapBrowserContract(
+    exactAbortedRootPrefetchRecords,
+    staticLoadGraph,
+  );
+  expect(firstAbortedRootPrefetchContract.semanticRequestLedger)
+    .not.toEqual(lastAbortedRootPrefetchContract.semanticRequestLedger);
+  expect(firstAbortedRootPrefetchContract.requestContractSha256)
+    .toBe(lastAbortedRootPrefetchContract.requestContractSha256);
+  const optionalAbortedRootPrefetchContract = finalizeProviderOverlapBrowserContract(
+    rootPrefetchRecords,
+    staticLoadGraph,
+  );
+  expect(optionalAbortedRootPrefetchContract.semanticRequestLedger)
+    .not.toEqual(lastAbortedRootPrefetchContract.semanticRequestLedger);
+  expect(optionalAbortedRootPrefetchContract.requestContractSha256)
+    .toBe(lastAbortedRootPrefetchContract.requestContractSha256);
+  const textPlainRootRedirectContract = finalizeProviderOverlapBrowserContract(
+    rootPrefetchRecords.map((record) => (
+      record.classification.key === "app-root-rsc" && record.responseStatus === 307
+        ? { ...record, responseContentType: "text/plain" }
+        : record
+    )),
+    staticLoadGraph,
+  );
+  expect(textPlainRootRedirectContract.semanticRequestLedger)
+    .not.toEqual(optionalAbortedRootPrefetchContract.semanticRequestLedger);
+  expect(textPlainRootRedirectContract.requestContractSha256)
+    .toBe(optionalAbortedRootPrefetchContract.requestContractSha256);
+  const profileActionAbortRecords = structuredClone(rootPrefetchRecords);
+  const cabinetDocumentIndex = profileActionAbortRecords.findIndex((record) => (
+    record.classification.key === "app-cabinet-document"
+  ));
+  profileActionAbortRecords.splice(
+    cabinetDocumentIndex,
+    0,
+    requestRecord(profileAction, "app-profile-document", 200, "text/x-component"),
+    requestRecord(cabinetRootRsc, "app-profile-document", 200, "text/x-component"),
+    requestRecord(chatwootSdk, "app-profile-document", 200, "application/javascript"),
+    requestRecord(chatwootWidget, "app-profile-document", 200, "text/html"),
+    requestRecord(cabinetRootRsc, "app-profile-document", 200, "text/x-component"),
+    requestRecord(
+      profileAction,
+      "app-profile-document",
+      200,
+      "text/x-component",
+      null,
+      sha256("net::ERR_ABORTED"),
+    ),
+  );
+  const firstProfileActionAbortRecords = structuredClone(profileActionAbortRecords);
+  const firstProfileActionIndex = firstProfileActionAbortRecords.findIndex((record) => (
+    record.classification.key === "app-profile-action"
+  ));
+  firstProfileActionAbortRecords[firstProfileActionIndex].responseFailureSha256 =
+    sha256("net::ERR_ABORTED");
+  const lastProfileActionIndex = firstProfileActionAbortRecords.findLastIndex((record) => (
+    record.classification.key === "app-profile-action"
+  ));
+  firstProfileActionAbortRecords[lastProfileActionIndex].responseFailureSha256 = null;
+  const firstProfileActionAbortContract = finalizeProviderOverlapBrowserContract(
+    firstProfileActionAbortRecords,
+    staticLoadGraph,
+  );
+  const lastProfileActionAbortContract = finalizeProviderOverlapBrowserContract(
+    profileActionAbortRecords,
+    staticLoadGraph,
+  );
+  expect(firstProfileActionAbortContract.semanticRequestLedger)
+    .not.toEqual(lastProfileActionAbortContract.semanticRequestLedger);
+  expect(firstProfileActionAbortContract.requestContractSha256)
+    .toBe(lastProfileActionAbortContract.requestContractSha256);
+  const frameBeforeRootLedger = lastProfileActionAbortContract.semanticRequestLedger;
+  const rootBeforeFrameLedger = [...frameBeforeRootLedger];
+  const frameIndex = rootBeforeFrameLedger.findLastIndex((entry) => (
+    (entry as { key?: unknown }).key === "chatwoot-widget-frame"
+  ));
+  const frameEntry = rootBeforeFrameLedger[frameIndex];
+  const nextEntry = rootBeforeFrameLedger[frameIndex + 1];
+  if (frameEntry === undefined || nextEntry === undefined) {
+    throw new Error("Provider overlap frame/root regression pair is incomplete.");
+  }
+  expect((frameEntry as { key?: unknown }).key).toBe("chatwoot-widget-frame");
+  expect((nextEntry as { key?: unknown }).key).toBe("app-root-rsc");
+  rootBeforeFrameLedger[frameIndex] = nextEntry;
+  rootBeforeFrameLedger[frameIndex + 1] = frameEntry;
+  expect(rootBeforeFrameLedger).not.toEqual(frameBeforeRootLedger);
+  expect(normalizeProviderOverlapRequestContractSemanticLedger(rootBeforeFrameLedger))
+    .toEqual(normalizeProviderOverlapRequestContractSemanticLedger(frameBeforeRootLedger));
+  const forgedAbortedRootPrefetchRecords = structuredClone(exactAbortedRootPrefetchRecords);
+  forgedAbortedRootPrefetchRecords[exactAbortedRootPrefetchIndex].responseFailureSha256 =
+    sha256("net::ERR_FAILED");
+  expect(() => finalizeProviderOverlapBrowserContract(
+    forgedAbortedRootPrefetchRecords,
+    staticLoadGraph,
+  )).toThrow(/response failure is outside the exact contract/);
+  const rootPrefetchWithInventedContentType = structuredClone(rootPrefetchRecords);
+  const rootRedirectIndex = rootPrefetchWithInventedContentType.findIndex((record) => (
+    record.classification.key === "app-root-rsc"
+  ));
+  rootPrefetchWithInventedContentType[rootRedirectIndex].responseContentType =
+    "application/octet-stream";
+  expect(() => finalizeProviderOverlapBrowserContract(
+    rootPrefetchWithInventedContentType,
+    staticLoadGraph,
+  )).toThrow(/response content type is not exact/);
+  const loginRootPrefetchWithInventedContentType = structuredClone(rootPrefetchRecords);
+  const loginRootRedirectIndex = loginRootPrefetchWithInventedContentType.findIndex((record) => (
+    record.classification.key === "app-login-root-rsc" && record.responseStatus === 307
+  ));
+  loginRootPrefetchWithInventedContentType[loginRootRedirectIndex].responseContentType =
+    "application/octet-stream";
+  expect(() => finalizeProviderOverlapBrowserContract(
+    loginRootPrefetchWithInventedContentType,
+    staticLoadGraph,
+  )).toThrow(/response content type is not exact/);
+  expect(() => finalizeProviderOverlapBrowserContract(validRecords, {
+    ...staticLoadGraph,
+    cssMediaReferences: staticLoadGraph.cssMediaReferences.slice(0, -1),
+  })).toThrow(/CSS media fallback extension closure/);
+  expect(() => finalizeProviderOverlapBrowserContract(validRecords, {
+    ...staticLoadGraph,
+    cssMediaReferences: [
+      ...staticLoadGraph.cssMediaReferences,
+      staticLoadGraph.cssMediaReferences[0],
+    ],
+  })).toThrow(/CSS media fallback extension closure/);
+  const staticRecordIndexes = validRecords.flatMap((record, index) => (
+    record.classification.staticPath === null ? [] : [index]
+  ));
+  for (const index of [staticRecordIndexes[2], staticRecordIndexes[6]]) {
+    const tamperedStaticBody = JSON.parse(JSON.stringify(validRecords));
+    tamperedStaticBody[index] = {
+      ...tamperedStaticBody[index],
+      classification: {
+        ...tamperedStaticBody[index].classification,
+        staticAssetSha256: "0".repeat(64),
+      },
+    };
+    expect(() => finalizeProviderOverlapBrowserContract(
+      tamperedStaticBody,
+      staticLoadGraph,
+    ), `static body ${index}`).toThrow(/attested image inventory/);
+  }
+  const tamperedObservedBody = structuredClone(validRecords);
+  tamperedObservedBody[staticRecordIndexes[6]].staticResponseSha256 = "0".repeat(64);
+  expect(() => finalizeProviderOverlapBrowserContract(
+    tamperedObservedBody,
+    staticLoadGraph,
+  )).toThrow(/attested image inventory/);
+  const missingObservedBody = structuredClone(validRecords);
+  missingObservedBody[staticRecordIndexes[10]].staticResponseBytes = null;
+  missingObservedBody[staticRecordIndexes[10]].staticResponseSha256 = null;
+  expect(() => finalizeProviderOverlapBrowserContract(
+    missingObservedBody,
+    staticLoadGraph,
+  )).toThrow(/attested image inventory/);
+  const missingFontInventory = Object.fromEntries(Object.entries(
+    staticAssetContract.inventoryByPath,
+  ).filter(([servedPath]) => servedPath !== staticFontPath));
+  const missingFontMetadata = Object.fromEntries(Object.entries(
+    staticAssetContract.inventoryMetadataByPath,
+  ).filter(([servedPath]) => servedPath !== staticFontPath));
+  const missingFontLedger = staticInventoryLedgerFor(missingFontInventory, missingFontMetadata);
+  const missingFontContract = {
+    ...staticAssetContract,
+    inventoryByPath: missingFontInventory,
+    inventoryMetadataByPath: missingFontMetadata,
+    inventoryLedgerContractSha256: sha256(JSON.stringify(missingFontLedger)),
+  };
+  expect(() => browserClassification(
+    `https://pay.ci.clean-pay.dev${staticFontPath}`,
+    { resourceType: "font" },
+    false,
+    missingFontContract as unknown as typeof staticAssetContract,
+  )).toThrow(/absent from the attested production image inventory/);
+
+  const extraImagePath = "/_next/static/media/unexpected.svg";
+  const extraImageInventory = {
+    ...staticAssetContract.inventoryByPath,
+    [extraImagePath]: "f".repeat(64),
+  };
+  const extraImageMetadata = {
+    ...staticAssetContract.inventoryMetadataByPath,
+    [extraImagePath]: { assetBytes: 17, extension: "svg" },
+  };
+  const extraImageLedger = staticInventoryLedgerFor(extraImageInventory, extraImageMetadata);
+  const extraImageContract = {
+    ...staticAssetContract,
+    inventoryByPath: extraImageInventory,
+    inventoryMetadataByPath: extraImageMetadata,
+    inventoryLedgerContractSha256: sha256(JSON.stringify(extraImageLedger)),
+  };
+  const extraImageRecords = structuredClone(validRecords);
+  extraImageRecords.push({
+    classification: browserClassification(
+      `https://pay.ci.clean-pay.dev${extraImagePath}`,
+      { resourceType: "image" },
+      false,
+      extraImageContract,
+    ),
+    documentKey: "app-cabinet-document",
+    redirectEdge: null,
+    responseContentType: "image/svg+xml",
+    responseFailureSha256: null,
+    responseStatus: 200,
+    staticResponseBytes: 17,
+    staticResponseSha256: "f".repeat(64),
+  });
+  expect(() => finalizeProviderOverlapBrowserContract(extraImageRecords, {
+    cssMediaReferences: staticLoadGraph.cssMediaReferences,
+    responseDeclarationsByDocument: staticLoadGraph.responseDeclarationsByDocument,
+    staticAssetContract: extraImageContract,
+  })).toThrow(/negotiated media|static media declaration closure/);
+  const repartitionedStaticRecords = structuredClone(validRecords);
+  repartitionedStaticRecords.splice(
+    staticRecordIndexes[0] + 1,
+    0,
+    structuredClone(validRecords[staticRecordIndexes[0]]),
+  );
+  expect(() => finalizeProviderOverlapBrowserContract(
+    repartitionedStaticRecords,
+    staticLoadGraph,
+  )).toThrow();
+  const missingProfileOccurrence = structuredClone(validRecords);
+  missingProfileOccurrence.splice(staticRecordIndexes[4], 1);
+  expect(() => finalizeProviderOverlapBrowserContract(
+    missingProfileOccurrence,
+    staticLoadGraph,
+  )).toThrow(/app-profile-document static chunk load graph/);
+  const movedProfileOccurrence = structuredClone(validRecords);
+  movedProfileOccurrence[staticRecordIndexes[4]].documentKey = "app-cabinet-document";
+  expect(() => finalizeProviderOverlapBrowserContract(
+    movedProfileOccurrence,
+    staticLoadGraph,
+  )).toThrow(/exact static generation/);
+  expect(browserClassification(
+    `https://chatwoot.browser.clean-pay.dev/widget?website_token=${"a".repeat(64)}`
+      + "&cw_conversation=synthetic-conversation",
+    { resourceType: "document", isNavigation: true },
+  ).key).toBe("chatwoot-widget-conversation-frame");
+  const wrongContentType = structuredClone(validRecords);
+  wrongContentType[staticRecordIndexes[0]].responseContentType = "text/html";
+  expect(() => finalizeProviderOverlapBrowserContract(wrongContentType, staticLoadGraph)).toThrow();
+  const orphanedRedirect = structuredClone(validRecords);
+  orphanedRedirect.push({
+    classification: telegramStart,
+    documentKey: "app-cabinet-document",
+    redirectEdge: null,
+    responseContentType: "application/octet-stream",
+    responseFailureSha256: null,
+    responseStatus: 307,
+    staticResponseBytes: null,
+    staticResponseSha256: null,
+  });
+  expect(() => finalizeProviderOverlapBrowserContract(orphanedRedirect, staticLoadGraph)).toThrow();
+
+  const unreachableExistingChunk = "/_next/static/chunks/unused-existing.js";
+  const expandedInventoryByPath = {
+    ...staticAssetContract.inventoryByPath,
+    [unreachableExistingChunk]: "e".repeat(64),
+  };
+  const expandedInventoryMetadata = {
+    ...staticAssetContract.inventoryMetadataByPath,
+    [unreachableExistingChunk]: { assetBytes: 19, extension: "js" },
+  };
+  const expandedInventoryLedger = staticInventoryLedgerFor(
+    expandedInventoryByPath,
+    expandedInventoryMetadata,
+  );
+  const expandedStaticContract = {
+    ...staticAssetContract,
+    inventoryByPath: expandedInventoryByPath,
+    inventoryMetadataByPath: expandedInventoryMetadata,
+    inventoryLedgerContractSha256: sha256(JSON.stringify(expandedInventoryLedger)),
+  };
+  const extraUnique = structuredClone(validRecords);
+  extraUnique.push({
+    classification: browserClassification(
+      `https://pay.ci.clean-pay.dev${unreachableExistingChunk}`,
+      { resourceType: "script" },
+      false,
+      expandedStaticContract,
+    ),
+    documentKey: "app-cabinet-document",
+    redirectEdge: null,
+    responseContentType: "application/javascript",
+    responseFailureSha256: null,
+    responseStatus: 200,
+    staticResponseBytes: 19,
+    staticResponseSha256: "e".repeat(64),
+  });
+  expect(() => finalizeProviderOverlapBrowserContract(extraUnique, {
+    cssMediaReferences: staticLoadGraph.cssMediaReferences,
+    responseDeclarationsByDocument: staticLoadGraph.responseDeclarationsByDocument,
+    staticAssetContract: expandedStaticContract,
+  })).toThrow();
+
+  const checkpoint = {
+    frameId: "main-frame-1",
+    historyLength: 4,
+    kind: "checkpoint",
+    loaderId: "profile-loader-1",
+    url: "https://pay.ci.clean-pay.dev/profile",
+  };
+  const documentNavigation = {
+    frameId: "main-frame-1",
+    kind: "document-navigation",
+    loaderId: "cabinet-loader-2",
+    navigationType: "Navigation",
+    url: "https://pay.ci.clean-pay.dev/cabinet",
+  };
+  const replaceState = {
+    afterNextAppRouterState: true,
+    argumentUrl: "https://pay.ci.clean-pay.dev/cabinet",
+    beforeHistoryLength: 5,
+    beforeNextAppRouterState: false,
+    beforeUrl: "https://pay.ci.clean-pay.dev/cabinet",
+    historyLength: 5,
+    kind: "replaceState",
+    operationSequence: 1,
+    url: "https://pay.ci.clean-pay.dev/cabinet",
+  };
+  const sameDocumentNavigation = {
+    frameId: "main-frame-1",
+    kind: "same-document-navigation",
+    navigationType: "historyApi",
+    url: "https://pay.ci.clean-pay.dev/cabinet",
+  };
+  const finalFrame = {
+    frameId: "main-frame-1",
+    loaderId: "cabinet-loader-2",
+    url: "https://pay.ci.clean-pay.dev/cabinet",
+  };
+  const history = finalizeProviderOverlapHistoryContract([
+    checkpoint, documentNavigation, replaceState, sameDocumentNavigation,
+  ], finalFrame);
+  const reversedDelivery = finalizeProviderOverlapHistoryContract([
+    checkpoint, documentNavigation, sameDocumentNavigation, replaceState,
+  ], finalFrame);
+  expect(history.historyContractSha256).toMatch(/^[a-f0-9]{64}$/);
+  expect(reversedDelivery).toEqual(history);
+  const historyMutations: Array<[
+    string,
+    (
+      records: Array<Record<string, boolean | number | string>>,
+      barrier: Record<string, string>,
+    ) => void,
+  ]> = [
+    ["missing signal", (records) => { records.pop(); }],
+    ["duplicate signal", (records) => { records[3] = structuredClone(records[2]); }],
+    ["reused loader", (records) => { records[1].loaderId = records[0].loaderId; }],
+    ["BFCache", (records) => { records[1].navigationType = "BackForwardCacheRestore"; }],
+    ["query mutation", (records) => {
+      records[2].url = "https://pay.ci.clean-pay.dev/cabinet?transient=1";
+    }],
+    ["state mismatch", (records) => { records[2].afterNextAppRouterState = false; }],
+    ["history length", (records) => { records[2].historyLength = 6; }],
+    ["cabinet document replaced history entry", (records) => {
+      records[2].beforeHistoryLength = 4;
+      records[2].historyLength = 4;
+    }],
+    ["cabinet document decremented history entry", (records) => {
+      records[2].beforeHistoryLength = 3;
+      records[2].historyLength = 3;
+    }],
+    ["frame mismatch", (records) => { records[3].frameId = "other-frame"; }],
+    ["fragment navigation", (records) => { records[3].navigationType = "fragment"; }],
+    ["final loader", (_records, barrier) => { barrier.loaderId = "other-loader"; }],
+    ["extra raw field", (records) => { records[2].extra = true; }],
+  ];
+  for (const [label, mutate] of historyMutations) {
+    const records = structuredClone([
+      checkpoint, documentNavigation, replaceState, sameDocumentNavigation,
+    ]);
+    const barrier = structuredClone(finalFrame);
+    mutate(records, barrier);
+    expect(() => finalizeProviderOverlapHistoryContract(records, barrier), label).toThrow();
+  }
+
+  for (const [label, url, overrides, cabinetAllowed] of [
+    ["path", "https://pay.ci.clean-pay.dev/admin", {}, false],
+    ["query", "https://pay.ci.clean-pay.dev/profile?extra=1", {
+      resourceType: "document", isNavigation: true, isMainFrame: true,
+    }, false],
+    ["login redirect target", "https://pay.ci.clean-pay.dev/login?redirect_to=%2Fcabinet", {
+      resourceType: "fetch",
+    }, false],
+    ["login redirect adjacent target", "https://pay.ci.clean-pay.dev/login?redirect_to=%2Freferral", {
+      resourceType: "fetch",
+    }, false],
+    ["login redirect query", "https://pay.ci.clean-pay.dev/login?redirect_to=%2F&extra=1", {
+      resourceType: "fetch",
+    }, false],
+    ["login redirect duplicate", "https://pay.ci.clean-pay.dev/login?redirect_to=%2F&redirect_to=%2F", {
+      resourceType: "fetch",
+    }, false],
+    ["login redirect query order", "https://pay.ci.clean-pay.dev/login?_rsc=opaque-state_1&redirect_to=%2F", {
+      resourceType: "fetch",
+    }, false],
+    ["login redirect transport", "https://pay.ci.clean-pay.dev/login?redirect_to=%2F", {
+      resourceType: "xhr",
+    }, false],
+    ["login redirect method", "https://pay.ci.clean-pay.dev/login?redirect_to=%2F", {
+      method: "POST", resourceType: "fetch",
+    }, false],
+    ["login redirect navigation", "https://pay.ci.clean-pay.dev/login?redirect_to=%2F", {
+      isMainFrame: true, isNavigation: true, resourceType: "document",
+    }, false],
+    ["login redirect main frame", "https://pay.ci.clean-pay.dev/login?redirect_to=%2F", {
+      isMainFrame: true, resourceType: "fetch",
+    }, false],
+    ["hash", "https://pay.ci.clean-pay.dev/profile#extra", {
+      resourceType: "document", isNavigation: true, isMainFrame: true,
+    }, false],
+    ["method", "https://pay.ci.clean-pay.dev/profile", {
+      method: "DELETE", resourceType: "fetch",
+    }, false],
+    ["resource", "https://pay.ci.clean-pay.dev/_next/static/chunks/app-123.js", {
+      resourceType: "fetch",
+    }, false],
+    ["early cabinet", "https://pay.ci.clean-pay.dev/cabinet", {
+      resourceType: "document", isNavigation: true, isMainFrame: true,
+    }, false],
+    ["external", "https://example.com/profile", {
+      resourceType: "document", isNavigation: true, isMainFrame: true,
+    }, false],
+    ["chatwoot query", `https://chatwoot.browser.clean-pay.dev/widget?website_token=${"a".repeat(64)}&extra=1`, {
+      resourceType: "document", isNavigation: true,
+    }, false],
+  ] as const) {
+    expect(() => browserClassification(url, overrides, cabinetAllowed), label).toThrow();
+  }
+  expect(() => assertProviderOverlapRedirect({
+    from: { classification: telegramStart, url: "https://pay.ci.clean-pay.dev/auth/telegram/start" },
+    to: { classification: oidcAuthorize, url: "https://oauth.telegram.org/auth" },
+    status: 308,
+    location: "https://oauth.telegram.org/auth",
+  })).toThrow();
+  expect(() => assertProviderOverlapRedirect({
+    from: { classification: telegramStart, url: "https://pay.ci.clean-pay.dev/auth/telegram/start" },
+    to: { classification: oidcAuthorize, url: "https://oauth.telegram.org/auth" },
+    status: 307,
+    location: "https://oauth.telegram.org/other",
+  })).toThrow();
+
+  const scriptSource = await readFile(path.resolve(__dirname, "prove-provider-overlap.mjs"), "utf8");
+  expect(scriptSource).toContain('await context.routeWebSocket("**/*"');
+  expect(scriptSource).toContain('context.on("serviceworker"');
+  expect(scriptSource).toContain('serviceWorkers: "block"');
+  expect(scriptSource).toContain("createProviderOverlapEventSeal(1_024)");
+  expect(installProviderOverlapHistoryInstrumentation.toString()).toContain(
+    "historyBindingRejected = true",
+  );
+  expect(installProviderOverlapHistoryInstrumentation.toString()).not.toContain(
+    "binding.finally",
+  );
+});
+
+test("canonicalizes the passive profile action and Chatwoot SDK arrival pair", () => {
+  const exactFailureSha256 = sha256("net::ERR_ABORTED");
+  const profileSdkFirst = [
+    semantic("app-profile-document", 200, "text/html"),
+    semantic("turnstile-widget-script", 200, "application/javascript"),
+    semantic("chatwoot-sdk-script", 200, "application/javascript"),
+    semantic("app-profile-action", 200, "text/x-component"),
+    semantic("app-root-rsc", 200, "text/x-component"),
+  ];
+  const profileActionFirst = [
+    semantic("app-profile-document", 200, "text/html"),
+    semantic("turnstile-widget-script", 200, "application/javascript"),
+    {
+      ...semantic("app-profile-action", 200, "text/x-component"),
+      responseFailureSha256: exactFailureSha256,
+    },
+    semantic("chatwoot-sdk-script", 200, "application/javascript"),
+    semantic("app-root-rsc", 200, "text/x-component"),
+  ];
+  expect(profileActionFirst).not.toEqual(profileSdkFirst);
+  expect(normalizeProviderOverlapRequestContractSemanticLedger(profileActionFirst))
+    .toEqual(normalizeProviderOverlapRequestContractSemanticLedger(profileSdkFirst));
+  expect(normalizeProviderOverlapRequestContractSemanticLedger([
+    ...profileSdkFirst.slice(0, 2),
+    {
+      ...semantic("app-profile-action", 200, "text/x-component"),
+      responseFailureSha256: sha256("net::ERR_FAILED"),
+    },
+    semantic("chatwoot-sdk-script", 200, "application/javascript"),
+    ...profileSdkFirst.slice(4),
+  ])).not.toEqual(normalizeProviderOverlapRequestContractSemanticLedger(profileSdkFirst));
+});
+
+test("canonicalizes the passive cabinet action and Chatwoot SDK arrival pair", () => {
+  const cabinetSdkFirst = [
+    semantic("app-cabinet-document", 200, "text/html"),
+    semantic("app-brand-logo", 200, "image/png"),
+    semantic("chatwoot-sdk-script", 200, "application/javascript"),
+    semantic("app-cabinet-action", 200, "text/x-component"),
+    semantic("app-root-rsc", 200, "text/x-component"),
+  ];
+  const cabinetActionFirst = [
+    ...cabinetSdkFirst.slice(0, 2),
+    semantic("app-cabinet-action", 200, "text/x-component"),
+    semantic("chatwoot-sdk-script", 200, "application/javascript"),
+    ...cabinetSdkFirst.slice(4),
+  ];
+  expect(cabinetActionFirst).not.toEqual(cabinetSdkFirst);
+  expect(normalizeProviderOverlapRequestContractSemanticLedger(cabinetActionFirst))
+    .toEqual(normalizeProviderOverlapRequestContractSemanticLedger(cabinetSdkFirst));
+  expect(normalizeProviderOverlapRequestContractSemanticLedger([
+    ...cabinetSdkFirst.slice(0, 2),
+    {
+      ...semantic("chatwoot-sdk-script", 200, "application/javascript"),
+      responseFailureSha256: sha256("net::ERR_FAILED"),
+    },
+    semantic("app-cabinet-action", 200, "text/x-component"),
+    ...cabinetSdkFirst.slice(4),
+  ])).not.toEqual(normalizeProviderOverlapRequestContractSemanticLedger(cabinetActionFirst));
+});
+
+test("prearms profile load and keeps the exact cabinet URL at DOM content", async () => {
+  const runnerSource = await readFile(
+    path.resolve(__dirname, "prove-provider-overlap.mjs"),
+    "utf8",
+  );
+  expect(runnerSource.match(/page\.waitForURL\(/g)).toHaveLength(3);
+  expect(runnerSource).toContain(
+    '(url) => url.href === "https://pay.ci.clean-pay.dev/login?redirect_to=%2Fprofile",\n'
+      + '        { timeout: 5_000 },',
+  );
+  expect(runnerSource).toContain(
+    '(url) => url.href === "https://pay.ci.clean-pay.dev/profile",\n'
+      + '      { waitUntil: "load", timeout: 30_000 },',
+  );
+  expect(runnerSource).toContain(
+    '(url) => url.href === "https://pay.ci.clean-pay.dev/cabinet",\n'
+      + '      { waitUntil: "domcontentloaded", timeout: 30_000 },',
+  );
+  expect(runnerSource).toMatch(
+    /const profileNavigation = page\.waitForURL\([\s\S]{1,384}await Promise\.all\(\[\s*profileNavigation,\s*telegram\.click\(\),\s*\]\);/,
+  );
+  expect(runnerSource).toMatch(
+    /await waitForProviderTurnstileToken\(page\);[\s\S]{1,512}const profileNavigation/,
+  );
+  expect(runnerSource).toContain(
+    'Object.keys(challenge).sort().join(",") === "action,issue,widgetId"',
+  );
+  expect(runnerSource).not.toContain("waitForProviderProfileBackgroundRequests");
+  expect(runnerSource).toContain('const finishRequest = beginBrowserEvent("terminal");');
+  expect(runnerSource).toContain("browserResponseEvidenceByIdentity.set(request, evidence);");
+  const responseListenerIndex = runnerSource.indexOf('context.on("response"');
+  const captureIndex = runnerSource.indexOf(
+    "evidence = captureProviderOverlapResponseEvidence",
+    responseListenerIndex,
+  );
+  const terminalHandlerIndex = runnerSource.indexOf(
+    "const completeRequest = (request, finished) =>",
+    captureIndex,
+  );
+  const requestFinishedIndex = runnerSource.indexOf('context.on("requestfinished"');
+  const firstNavigationIndex = runnerSource.indexOf("await page.goto(");
+  expect(responseListenerIndex).toBeGreaterThan(-1);
+  expect(captureIndex).toBeGreaterThan(responseListenerIndex);
+  expect(terminalHandlerIndex).toBeGreaterThan(captureIndex);
+  expect(requestFinishedIndex).toBeGreaterThan(terminalHandlerIndex);
+  expect(firstNavigationIndex).toBeGreaterThan(requestFinishedIndex);
+  expect(runnerSource.slice(responseListenerIndex, terminalHandlerIndex))
+    .not.toContain("eventSeal.begin()");
+  expect(runnerSource).toContain(
+    'context.on("requestfinished", (request) => completeRequest(request, true));',
+  );
+  expect(runnerSource).toContain(
+    'context.on("requestfailed", (request) => completeRequest(request, false));',
+  );
+  expect(runnerSource.match(/request\.response\(\)/g) ?? []).toHaveLength(0);
+  expect(runnerSource).not.toContain("response.body()");
+  expect(runnerSource).not.toMatch(/\broute\.fetch\s*\(/);
+  expect(runnerSource).not.toContain("Network.loadNetworkResource");
+  expect(runnerSource).not.toContain("Network.streamResourceContent");
+  expect(runnerSource).toContain("enableDurableMessages: true");
+  expect(runnerSource).toContain('cdp.on("Network.responseReceived", handleCdpResponseReceived);');
+  expect(runnerSource).toContain('cdp.on("Network.loadingFinished", handleCdpLoadingFinished);');
+  expect(runnerSource).toContain('cdp.on("Network.loadingFailed", handleCdpLoadingFailed);');
+  expect(runnerSource).toContain("readBody: ({ maximumBodyBytes, readPlaywrightBody }) =>");
+  expect(runnerSource).toContain("providerPlaywrightBodyKeys.includes(entry.classification.key)");
+  expect(runnerSource).toContain("cdpResponseBodyCapture.skipResponseBody(responseClaim)");
+  expect(runnerSource).toContain("isProviderOverlapPlaywrightBodyCdpResponse(event)");
+  expect(runnerSource).toContain('"chatwoot-widget-conversation-frame",\n'
+    + '  "chatwoot-widget-frame",');
+  expect(PROVIDER_OVERLAP_MAXIMUM_STATIC_RESPONSE_BYTES).toBe(256 * 1024 * 1024);
+  expect(runnerSource).toContain(
+    "staticResponseBytes > PROVIDER_OVERLAP_MAXIMUM_STATIC_RESPONSE_BYTES",
+  );
+  expect(runnerSource).toContain(
+    "providerResponseDurableNetworkBufferBytes = 1024 * 1024 * 1024",
+  );
+  const revalidationIndex = runnerSource.indexOf("finalize-source-revalidation");
+  const revalidationEnd = runnerSource.indexOf("mutableSourceContractSha256()", revalidationIndex);
+  const revalidationSource = runnerSource.slice(revalidationIndex, revalidationEnd);
+  expect(revalidationSource).toContain(
+    "if (browserResponseCaptureFailure) throw browserResponseCaptureFailure;",
+  );
+  expect(revalidationSource).toContain("cdpResponseBodyCapture.assertClean();");
+  expect(revalidationSource.indexOf("cdpResponseBodyCapture.assertClean();"))
+    .toBeLessThan(revalidationSource.indexOf("pendingRequestSeal.assertClean();"));
+  expect(createProviderOverlapCdpResponseBodyCapture.toString())
+    .toContain('"Network.getResponseBody"');
+  expect(runnerSource).toContain("await waitForProviderCabinetNavigation(page);");
+  expect(runnerSource).toContain("Provider profile navigation barrier failed.");
+  expect(runnerSource).toContain("Provider cabinet navigation barrier failed.");
+  expect(runnerSource).not.toContain("await telegram.click();");
+
+  const browser = await chromium.launch({ headless: true });
+  try {
+    const context = await browser.newContext({ serviceWorkers: "block" });
+    let releasePendingAsset: (() => void) | undefined;
+    await context.route("**/*", async (route) => {
+      const pathname = new URL(route.request().url()).pathname;
+      if (pathname === "/pending.png") {
+        await new Promise<void>((resolve) => {
+          releasePendingAsset = resolve;
+        });
+        await route.abort("blockedbyclient");
+        return;
+      }
+      if (pathname !== "/cabinet") {
+        throw new Error(`Unexpected DOM-content characterization request: ${pathname}`);
+      }
+      await route.fulfill({
+        body: '<!doctype html><html><body><h1>Cabinet</h1><img src="/pending.png"></body></html>',
+        contentType: "text/html",
+        status: 200,
+      });
+    });
+    const page = await context.newPage();
+    try {
+      const pendingAssetRequest = page.waitForRequest(
+        (request) => new URL(request.url()).pathname === "/pending.png",
+        { timeout: 5_000 },
+      );
+      await Promise.all([
+        pendingAssetRequest,
+        page.goto("https://provider-navigation.clean-pay.test/cabinet", {
+          waitUntil: "domcontentloaded",
+          timeout: 5_000,
+        }),
+      ]);
+      await expect.poll(() => typeof releasePendingAsset, { timeout: 500 })
+        .toBe("function");
+      await expect(page.waitForURL(
+        (url) => url.href === "https://provider-navigation.clean-pay.test/cabinet",
+        { waitUntil: "domcontentloaded", timeout: 500 },
+      )).resolves.toBeUndefined();
+      await expect(page.waitForLoadState("load", { timeout: 100 })).rejects.toThrow(/Timeout/);
+    } finally {
+      releasePendingAsset?.();
+      await page.waitForLoadState("load", { timeout: 1_000 }).catch(() => undefined);
+      await context.close();
+    }
+  } finally {
+    await browser.close();
+  }
+});
+
+test("drains profile requests before the synthetic cabinet navigation", async () => {
+  const source = await readFile(
+    path.resolve(__dirname, "prove-provider-overlap.mjs"),
+    "utf8",
+  );
+  const profileHeading = source.indexOf(
+    'page.getByRole("heading", { name: "Профиль", level: 1 })',
+  );
+  const profileNetworkQuiescence = source.indexOf(
+    'await page.waitForLoadState("networkidle", { timeout: 15_000 });',
+    profileHeading,
+  );
+  const quiescentHistoryDrain = source.indexOf(
+    "await drainProviderOverlapHistoryBindings(page);",
+    profileNetworkQuiescence,
+  );
+  const overlapArm = source.indexOf("await armOverlap();", profileNetworkQuiescence);
+  const cabinetNavigation = source.indexOf(
+    'await page.goto("https://pay.ci.clean-pay.dev/cabinet"',
+    overlapArm,
+  );
+
+  expect(profileHeading).toBeGreaterThan(-1);
+  expect(profileNetworkQuiescence).toBeGreaterThan(profileHeading);
+  expect(source.slice(profileHeading, profileNetworkQuiescence))
+    .toContain("await drainProviderOverlapHistoryBindings(page);");
+  expect(quiescentHistoryDrain).toBeGreaterThan(profileNetworkQuiescence);
+  expect(overlapArm).toBeGreaterThan(quiescentHistoryDrain);
+  expect(cabinetNavigation).toBeGreaterThan(overlapArm);
+  expect(source).toContain("Provider profile network quiescence barrier failed.");
+});
+
+test("checkpoints response capture before each navigation and the final seal", async () => {
+  const source = await readFile(
+    path.resolve(__dirname, "prove-provider-overlap.mjs"),
+    "utf8",
+  );
+  const loginRequestCheckpoint = source.indexOf(
+    'markProviderFailurePhase(role, "drain-login-requests")',
+  );
+  const loginCheckpointCall = source.indexOf(
+    "await waitForResponseCaptureQuiet();",
+    loginRequestCheckpoint,
+  );
+  const profileNavigation = source.indexOf("const profileNavigation =", loginCheckpointCall);
+  const profileHistoryDrain = source.indexOf(
+    "await drainProviderOverlapHistoryBindings(page);",
+    source.indexOf('markProviderFailurePhase(role, "drain-profile-history-after-idle")'),
+  );
+  const profileRequestCheckpoint = source.indexOf(
+    'markProviderFailurePhase(role, "drain-profile-requests")',
+    profileHistoryDrain,
+  );
+  const profileCheckpointCall = source.indexOf(
+    "await waitForResponseCaptureQuiet();",
+    profileRequestCheckpoint,
+  );
+  const cabinetNavigation = source.indexOf(
+    'await page.goto("https://pay.ci.clean-pay.dev/cabinet"',
+    profileCheckpointCall,
+  );
+  const cabinetRequestCheckpoint = source.indexOf(
+    'markProviderFailurePhase(role, "drain-cabinet-requests")',
+    cabinetNavigation,
+  );
+  const cabinetCheckpointCall = source.indexOf(
+    "await waitForResponseCaptureQuiet();",
+    cabinetRequestCheckpoint,
+  );
+  const finalPendingRequestSeal = source.indexOf(
+    "await pendingRequestSeal.drainAndSeal({ timeoutMs: 15_000 })",
+    cabinetCheckpointCall,
+  );
+
+  expect(loginRequestCheckpoint).toBeGreaterThan(-1);
+  expect(loginCheckpointCall).toBeGreaterThan(loginRequestCheckpoint);
+  expect(profileNavigation).toBeGreaterThan(loginCheckpointCall);
+  expect(profileHistoryDrain).toBeGreaterThan(profileNavigation);
+  expect(profileRequestCheckpoint).toBeGreaterThan(profileHistoryDrain);
+  expect(profileCheckpointCall).toBeGreaterThan(profileRequestCheckpoint);
+  expect(cabinetNavigation).toBeGreaterThan(profileCheckpointCall);
+  expect(cabinetRequestCheckpoint).toBeGreaterThan(cabinetNavigation);
+  expect(cabinetCheckpointCall).toBeGreaterThan(cabinetRequestCheckpoint);
+  expect(finalPendingRequestSeal).toBeGreaterThan(cabinetCheckpointCall);
+  expect(source.match(/await waitForResponseCaptureQuiet\(\);/g))
+    .toHaveLength(3);
+  const helperStart = source.indexOf("const waitForResponseCaptureQuiet = async () =>");
+  const helperEnd = source.indexOf("const recordUnexpectedRequest =", helperStart);
+  expect(source.slice(helperStart, helperEnd)).toContain(
+    "await pendingRequestSeal.waitForQuiet({ timeoutMs: 15_000 })",
+  );
+  expect(source.slice(helperStart, helperEnd)).toContain(
+    "if (browserResponseCaptureFailure) throw browserResponseCaptureFailure;",
+  );
+});
+
+test("registers exact request identities before response capture and routed continuation", async () => {
+  const runnerSource = await readFile(
+    path.resolve(__dirname, "prove-provider-overlap.mjs"),
+    "utf8",
+  );
+  const proofContractSource = await readFile(
+    path.resolve(__dirname, "provider-overlap-proof-contract.mjs"),
+    "utf8",
+  );
+  const requestListenerIndex = runnerSource.indexOf('context.on("request"');
+  const responseListenerIndex = runnerSource.indexOf('context.on("response"');
+  const terminalHandlerIndex = runnerSource.indexOf(
+    "const completeRequest = (request, finished) =>",
+    responseListenerIndex,
+  );
+  const routeHandlerIndex = runnerSource.indexOf('await context.route("**/*"');
+  const firstNavigationIndex = runnerSource.indexOf("await page.goto(", routeHandlerIndex);
+
+  expect(requestListenerIndex).toBeGreaterThan(-1);
+  expect(responseListenerIndex).toBeGreaterThan(requestListenerIndex);
+  expect(terminalHandlerIndex).toBeGreaterThan(responseListenerIndex);
+  expect(routeHandlerIndex).toBeGreaterThan(terminalHandlerIndex);
+  expect(firstNavigationIndex).toBeGreaterThan(routeHandlerIndex);
+
+  const preparationIndex = runnerSource.indexOf("const prepareBrowserRequest = (request) =>");
+  expect(preparationIndex).toBeGreaterThan(-1);
+  expect(preparationIndex).toBeLessThan(requestListenerIndex);
+  const preparation = runnerSource.slice(preparationIndex, requestListenerIndex);
+  const requestListener = runnerSource.slice(requestListenerIndex, responseListenerIndex);
+  const responseListener = runnerSource.slice(responseListenerIndex, terminalHandlerIndex);
+  const routeHandler = runnerSource.slice(routeHandlerIndex, firstNavigationIndex);
+
+  expect(preparation).toContain("classifyProviderOverlapBrowserRequest(");
+  expect(preparation).toContain("browserRequestByIdentity.set(request, entry);");
+  expect(preparation).toContain("browserRequestPreparationByIdentity.set(request, preparation);");
+  expect(preparation).toContain("browserRequests.push(entry);");
+  expect(preparation).toContain("browserRequests.length > 256");
+  expect(preparation).toContain("recordUnexpectedRequest(rawUrl);");
+  expect(requestListener).toContain("prepareBrowserRequest(request);");
+  expect(responseListener).toContain("browserRequestByIdentity.get(request)");
+  expect(requestListener).toContain("pendingRequestSeal.observe(request);");
+  expect(responseListener).toContain("pendingRequestSeal.observe(request);");
+  expect(responseListener).toContain("resolveProviderOverlapResponseRequestEntry({");
+  expect(responseListener).toContain("prepare: prepareBrowserRequest,");
+  expect(responseListener).toContain("browserResponseFallbackRequestIdentities.add(request)");
+  expect(responseListener).toContain('recordBrowserEvent("responseFallback")');
+  expect(responseListener).not.toMatch(/eventSeal\.(?:begin|record)\(/);
+  const terminalHandler = runnerSource.slice(terminalHandlerIndex, routeHandlerIndex);
+  expect(terminalHandler).toMatch(
+    /const entry = browserRequestByIdentity\.get\(request\);[\s\S]{1,512}if \(!entry\) return;[\s\S]{1,512}recordBrowserEvent\("routeFallback"\);[\s\S]{1,512}const finishRequest = beginBrowserEvent\("terminal"\);/,
+  );
+  expect(routeHandler).toContain("browserRequestPreparationByIdentity.get(request)");
+  expect(routeHandler).toContain("browserRoutedRequestIdentities.add(request)");
+  expect(routeHandler).not.toContain("prepareBrowserRequest(");
+  expect(routeHandler).not.toContain("classifyProviderOverlapBrowserRequest(");
+  expect(routeHandler).toMatch(
+    /if \(!preparation\s*\|\| \(preparation\.entry !== null\s*&& preparation\.entry\.request !== request\)\)[\s\S]{1,384}route\.abort/,
+  );
+  expect(routeHandler.indexOf("browserRequestPreparationByIdentity.get(request)"))
+    .toBeLessThan(routeHandler.indexOf("await route.continue()"));
+  expect(routeHandler).toContain('await route.abort("blockedbyclient")');
+  const classifiedAbortBranch = routeHandler.slice(
+    routeHandler.indexOf('if (preparation.disposition === "abort")'),
+    routeHandler.indexOf("if (preparation.entry.classification.navigation)"),
+  );
+  expect(classifiedAbortBranch).not.toContain("recordUnexpectedRequest(");
+  expect(classifiedAbortBranch.match(/route\.abort\(/g)).toHaveLength(1);
+  const navigationCaptureBarrier = routeHandler.indexOf(
+    "await pendingRequestSeal.waitForPriorRequests(",
+  );
+  expect(routeHandler).toContain("preparation.entry.classification.navigation");
+  expect(navigationCaptureBarrier).toBeGreaterThan(
+    routeHandler.indexOf('if (preparation.disposition === "abort")'),
+  );
+  expect(navigationCaptureBarrier).toBeLessThan(routeHandler.indexOf("await route.continue()"));
+  expect(routeHandler.slice(navigationCaptureBarrier, routeHandler.indexOf("await route.continue()")))
+    .toContain('await route.abort("blockedbyclient")');
+  expect(routeHandler.slice(navigationCaptureBarrier, routeHandler.indexOf("await route.continue()")))
+    .not.toContain("throw error");
+  expect(proofContractSource).toContain("sourceCounts.request + sourceCounts.responseFallback");
+  expect(proofContractSource).toContain(
+    "sourceCounts.route + sourceCounts.routeFallback + sourceCounts.responseFallback",
+  );
+  expect(proofContractSource).toContain("causal browser request preparation count");
+  const pendingDrainIndex = runnerSource.indexOf(
+    "await pendingRequestSeal.drainAndSeal({ timeoutMs: 15_000 })",
+  );
+  const finalizerIndex = runnerSource.indexOf("await finalizeProviderOverlapEventLifecycle({");
+  expect(pendingDrainIndex).toBeGreaterThan(firstNavigationIndex);
+  expect(pendingDrainIndex).toBeLessThan(finalizerIndex);
+  const finalResponseCaptureBarrier = runnerSource.indexOf(
+    'markProviderFailurePhase(role, "verify-final-response-captures")',
+    pendingDrainIndex,
+  );
+  expect(finalResponseCaptureBarrier).toBeGreaterThan(pendingDrainIndex);
+  expect(finalResponseCaptureBarrier).toBeLessThan(finalizerIndex);
+});
+
+test("keeps page-startup requests outside the measured provider event lifecycle", async () => {
+  const source = await readFile(
+    path.resolve(__dirname, "prove-provider-overlap.mjs"),
+    "utf8",
+  );
+  const preLedgerObserver = source.indexOf(
+    'context.addListener("request", observePreLedgerRequest)',
+  );
+  const pageCreation = source.indexOf("const page = await context.newPage()");
+  const proofRequestListener = source.indexOf('context.on("request", (request) =>');
+  const responseListener = source.indexOf('context.on("response", (response) =>');
+  const terminalHandler = source.indexOf("const completeRequest = (request, finished) =>");
+  const routeHandler = source.indexOf('await context.route("**/*"');
+  const preLedgerRelease = source.indexOf(
+    'context.removeListener("request", observePreLedgerRequest)',
+  );
+
+  expect(preLedgerObserver).toBeGreaterThan(-1);
+  expect(preLedgerObserver).toBeLessThan(pageCreation);
+  expect(pageCreation).toBeLessThan(proofRequestListener);
+  expect(proofRequestListener).toBeLessThan(responseListener);
+  expect(preLedgerRelease).toBeGreaterThan(terminalHandler);
+  expect(routeHandler).toBeGreaterThan(terminalHandler);
+  expect(preLedgerRelease).toBeGreaterThan(routeHandler);
+
+  const requestSource = source.slice(proofRequestListener, responseListener);
+  expect(requestSource).toMatch(
+    /if \(preLedgerRequestIdentities\.has\(request\)\s*&& !browserRequestPreparationByIdentity\.has\(request\)\) \{\s*return;\s*\}[\s\S]{1,256}recordBrowserEvent\("request"\);/,
+  );
+  const responseSource = source.slice(responseListener, terminalHandler);
+  expect(responseSource).toMatch(
+    /if \(preLedgerRequestIdentities\.has\(request\)\s*&& !browserRequestPreparationByIdentity\.has\(request\)\) \{\s*return;\s*\}[\s\S]{1,256}pendingRequestSeal\.observe\(request\);/,
+  );
+  const terminalSource = source.slice(terminalHandler, preLedgerRelease);
+  expect(source).toContain(
+    'new Error("Synthetic browser terminal event escaped its proof request ledger.")',
+  );
+  expect(terminalSource).toContain("retainUnownedTerminalFailure();");
+  expect(terminalSource.indexOf("!preLedgerRequestIdentities.has(request)"))
+    .toBeLessThan(terminalSource.indexOf("if (!entry) return;"));
+  const routeSource = source.slice(routeHandler, preLedgerRelease);
+  expect(routeSource).toMatch(
+    /const request = route\.request\(\);[\s\S]{1,256}if \(preLedgerRequestIdentities\.has\(request\)\s*&& !browserRequestPreparationByIdentity\.has\(request\)\) \{[\s\S]{1,256}await route\.abort\("blockedbyclient"\);[\s\S]{1,256}return;[\s\S]{1,256}let finishRoute = null;/,
+  );
+  expect(routeSource.indexOf('"route-preparation-missing"'))
+    .toBeLessThan(routeSource.indexOf('finishRoute = beginBrowserEvent("route")'));
+  expect(routeSource).toContain("finishRoute?.();");
+});
+
+test("lazily prepares only a response identity that has no prior preparation", () => {
+  const request = {};
+  const requestByIdentity = new Map<object, object>();
+  const preparationByIdentity = new Map<object, { disposition: string; entry: object | null }>();
+  let prepareCount = 0;
+  const prepare = (identity: object) => {
+    prepareCount += 1;
+    const entry = Object.freeze({ classification: Object.freeze({ key: "static" }), request: identity });
+    const preparation = Object.freeze({ disposition: "continue", entry });
+    requestByIdentity.set(identity, entry);
+    preparationByIdentity.set(identity, preparation);
+    return preparation;
+  };
+
+  expect(resolveProviderOverlapResponseRequestEntry({
+    preparationByIdentity,
+    prepare,
+    request,
+    requestByIdentity,
+  })).toBe(requestByIdentity.get(request));
+  expect(prepareCount).toBe(1);
+
+  const rejectedRequest = {};
+  preparationByIdentity.set(
+    rejectedRequest,
+    Object.freeze({ disposition: "abort", entry: null }),
+  );
+  expect(() => resolveProviderOverlapResponseRequestEntry({
+    preparationByIdentity,
+    prepare,
+    request: rejectedRequest,
+    requestByIdentity,
+  })).toThrow(/explicitly rejected/);
+  expect(prepareCount).toBe(1);
+  expect(requestByIdentity.has(rejectedRequest)).toBe(false);
+});
+
+test("rejects a response fallback that does not register the exact prepared identity", () => {
+  const request = {};
+  const differentRequest = {};
+  const requestByIdentity = new Map<object, object>();
+  const preparationByIdentity = new Map<object, { disposition: string; entry: object | null }>();
+  const prepare = (identity: object) => {
+    const entry = Object.freeze({ classification: Object.freeze({ key: "static" }), request: identity });
+    const preparation = Object.freeze({ disposition: "continue", entry });
+    preparationByIdentity.set(identity, preparation);
+    requestByIdentity.set(differentRequest, entry);
+    return preparation;
+  };
+
+  expect(() => resolveProviderOverlapResponseRequestEntry({
+    preparationByIdentity,
+    prepare,
+    request,
+    requestByIdentity,
+  })).toThrow(/exact request identity ledger/);
+});
+
+test("publishes bounded rejected request provenance without raw URL or query values", () => {
+  const privateMarker = "private-provider-query-value";
+  const baseline = createProviderOverlapRejectedRequestProvenance({
+    reasonCode: "request-classification-rejected",
+    rejectionMessage: `classifier rejected ${privateMarker}`,
+    requestEnvelope: {
+      isMainFrame: false,
+      isNavigation: false,
+      method: "GET",
+      resourceType: "fetch",
+      url: `https://pay.ci.clean-pay.dev/profile?_rsc=${privateMarker}`,
+    },
+  });
+  const sameShape = createProviderOverlapRejectedRequestProvenance({
+    reasonCode: "request-classification-rejected",
+    rejectionMessage: `classifier rejected ${privateMarker}`,
+    requestEnvelope: {
+      isMainFrame: false,
+      isNavigation: false,
+      method: "GET",
+      resourceType: "fetch",
+      url: "https://pay.ci.clean-pay.dev/profile?_rsc=different-private-value",
+    },
+  });
+  const candidate = createProviderOverlapRejectedRequestProvenance({
+    reasonCode: "request-page-mismatch",
+    rejectionMessage: "request-page-mismatch",
+    requestEnvelope: {
+      isMainFrame: true,
+      isNavigation: true,
+      method: "GET",
+      resourceType: "document",
+      url: "https://pay.ci.clean-pay.dev/cabinet",
+    },
+  });
+
+  expect(baseline).toEqual(sameShape);
+  expect(baseline).toEqual({
+    reasonCode: "request-classification-rejected",
+    rejectionMessageSha256: expect.stringMatching(/^[a-f0-9]{64}$/),
+    requestEnvelopeSha256: expect.stringMatching(/^[a-f0-9]{64}$/),
+    requestPathSha256: sha256("/profile"),
+  });
+  expect(candidate.requestPathSha256).toBe(sha256("/cabinet"));
+  expect(candidate.requestEnvelopeSha256).not.toBe(baseline.requestEnvelopeSha256);
+
+  const document = createProviderOverlapRejectionProvenanceDocument({
+    baseline: { entries: [baseline], truncated: false },
+    candidate: { entries: [candidate], truncated: true },
+  });
+  expect(document).toEqual({
+    maximumEntriesPerRole: PROVIDER_OVERLAP_REJECTION_PROVENANCE_MAX_PER_ROLE,
+    roles: {
+      baseline: { entries: [baseline], truncated: false },
+      candidate: { entries: [candidate], truncated: true },
+    },
+    schemaVersion: 1,
+  });
+  const serialized = JSON.stringify(document);
+  expect(serialized).not.toContain(privateMarker);
+  expect(serialized).not.toContain("different-private-value");
+  expect(serialized).not.toContain("https://");
+  expect(serialized).not.toContain("/profile");
+  expect(serialized).not.toContain("/cabinet");
+  expect(serialized).not.toContain("_rsc");
+  expect(() => createProviderOverlapRejectionProvenanceDocument({
+    baseline: {
+      entries: Array.from(
+        { length: PROVIDER_OVERLAP_REJECTION_PROVENANCE_MAX_PER_ROLE + 1 },
+        () => baseline,
+      ),
+      truncated: true,
+    },
+    candidate: { entries: [], truncated: false },
+  })).toThrow(/outside its bound/);
+  expect(() => createProviderOverlapRejectedRequestProvenance({
+    reasonCode: "unbounded-reason",
+    rejectionMessage: "unbounded-reason",
+    requestEnvelope: {
+      isMainFrame: false,
+      isNavigation: false,
+      method: "GET",
+      resourceType: "fetch",
+      url: "https://pay.ci.clean-pay.dev/profile",
+    },
+  })).toThrow(/reason code is invalid/);
+});
+
+test("stores rejected preparation provenance and conditionally publishes it on provider failure", async () => {
+  const runnerSource = await readFile(
+    path.resolve(__dirname, "prove-provider-overlap.mjs"),
+    "utf8",
+  );
+  expect(runnerSource).toContain("rejectionProvenance: provenance");
+  expect(runnerSource).toContain('"request-page-mismatch"');
+  expect(runnerSource).toContain('"request-page-unavailable"');
+  expect(runnerSource).toContain('"request-classification-rejected"');
+  expect(runnerSource).toContain('"route-preparation-missing"');
+  expect(runnerSource).toContain("currentProviderRejectionProvenance()");
+  expect(runnerSource).toContain("{ rejectedRequestProvenance }");
+});
+
+test("publishes only bounded hashed identities for requests left pending at failure", async () => {
+  const privateMarker = "pending-private-marker";
+  const pending = createProviderOverlapPendingRequestEvidence({
+    isNavigation: false,
+    method: "POST",
+    resourceType: "fetch",
+    url: `https://fixture-user:${privateMarker}@pay.ci.clean-pay.dev/private/path`
+      + `?token=${privateMarker}#${privateMarker}`,
+  });
+  expect(pending).toEqual({
+    isNavigation: false,
+    methodSha256: sha256("POST"),
+    originSha256: sha256("https://pay.ci.clean-pay.dev"),
+    pathSha256: sha256("/private/path"),
+    resourceTypeSha256: sha256("fetch"),
+  });
+  const document = createProviderOverlapPendingRequestEvidenceDocument({
+    baseline: { entries: [], trackedPendingCount: 0, truncated: false },
+    candidate: { entries: [pending], trackedPendingCount: 1, truncated: false },
+  });
+  expect(document).toEqual({
+    maximumEntriesPerRole: 16,
+    roles: {
+      baseline: { entries: [], trackedPendingCount: 0, truncated: false },
+      candidate: { entries: [pending], trackedPendingCount: 1, truncated: false },
+    },
+    schemaVersion: 1,
+  });
+  const serialized = JSON.stringify(document);
+  expect(serialized).not.toContain(privateMarker);
+  expect(serialized).not.toContain("fixture-user");
+  expect(serialized).not.toContain("https://");
+  expect(serialized).not.toContain("/private/path");
+  expect(serialized).not.toContain("token");
+  expect(createProviderOverlapPendingRequestEvidenceDocument({
+    baseline: { entries: [], trackedPendingCount: 0, truncated: true },
+    candidate: { entries: [], trackedPendingCount: 0, truncated: false },
+  })).toMatchObject({
+    roles: { baseline: { trackedPendingCount: 0, truncated: true } },
+  });
+  expect(() => createProviderOverlapPendingRequestEvidenceDocument({
+    baseline: { entries: [], trackedPendingCount: 0, truncated: false },
+    candidate: { entries: [pending], trackedPendingCount: 17, truncated: true },
+  })).toThrow(/outside its bound/);
+  expect(() => createProviderOverlapPendingRequestEvidenceDocument({
+    baseline: { entries: [], trackedPendingCount: 0, truncated: false },
+    candidate: { entries: [], trackedPendingCount: 0, truncated: false },
+  })).toThrow(/unexpectedly empty/);
+
+  const runnerSource = await readFile(
+    path.resolve(__dirname, "prove-provider-overlap.mjs"),
+    "utf8",
+  );
+  expect(runnerSource).toContain("currentProviderPendingRequestEvidence()");
+  expect(runnerSource).toContain("{ pendingRequestEvidence }");
+  expect(runnerSource).toContain("recordProviderPendingRequest(role, request);");
+  expect(runnerSource).toContain("completeProviderPendingRequest(role, request);");
+  expect(runnerSource).not.toContain("pendingRequestEvidence: request.url()");
+});
+
+test("keeps one exact request identity across a held route, response, and terminal event", async () => {
+  const browser = await chromium.launch({ headless: true });
+  let releaseRoute: () => void = () => undefined;
+  try {
+    const context = await browser.newContext({ serviceWorkers: "block" });
+    const page = await context.newPage();
+    const eventSeal = createProviderOverlapEventSeal(32);
+    const browserRequestByIdentity = new Map<object, {
+      classification: ProviderBrowserClassification;
+      request: object;
+    }>();
+    const browserResponseEvidenceByIdentity = new Map<object, Promise<unknown>>();
+    const pendingRequests = new Set<object>();
+    let observedFailure: unknown = null;
+    let responseCapturePrearmed = false;
+    let routeReturned = false;
+    const routeGate = new Promise<void>((resolve) => {
+      releaseRoute = resolve;
+    });
+
+    context.on("request", (request) => {
+      try {
+        eventSeal.record();
+        pendingRequests.add(request);
+        const classification: unknown = classifyProviderOverlapBrowserRequest(
+          createJourneyBrowserRequestEnvelope(request, page.mainFrame()),
+          { cabinetDocumentAllowed: false, staticAssetContract },
+        );
+        const entry = {
+          classification: classification as ProviderBrowserClassification,
+          request,
+        };
+        browserRequestByIdentity.set(request, entry);
+      } catch (error) {
+        observedFailure ??= error;
+      }
+    });
+    context.on("response", (response) => {
+      try {
+        const request = response.request();
+        const entry = browserRequestByIdentity.get(request);
+        if (!entry || entry.request !== request) {
+          throw new Error("Synthetic response crossed its exact request identity.");
+        }
+        const evidence = captureProviderOverlapResponseEvidence({
+          classification: entry.classification,
+          request,
+          response,
+        });
+        browserResponseEvidenceByIdentity.set(request, evidence);
+        responseCapturePrearmed = true;
+      } catch (error) {
+        observedFailure ??= error;
+      }
+    });
+    const completeRequest = (request: object) => {
+      const finishRequest = eventSeal.begin();
+      const evidence = browserResponseEvidenceByIdentity.get(request);
+      if (!evidence) {
+        observedFailure ??= new Error("Terminal request has no prearmed evidence.");
+        pendingRequests.delete(request);
+        finishRequest();
+        return;
+      }
+      void evidence.then(
+        () => {
+          pendingRequests.delete(request);
+          finishRequest();
+        },
+        (error) => {
+          observedFailure ??= error;
+          pendingRequests.delete(request);
+          finishRequest();
+        },
+      );
+    };
+    context.on("requestfinished", completeRequest);
+    context.on("requestfailed", completeRequest);
+    await context.route("**/*", async (route) => {
+      const finishRoute = eventSeal.begin();
+      try {
+        const request = route.request();
+        const entry = browserRequestByIdentity.get(request);
+        if (!entry || entry.request !== request) {
+          throw new Error("Synthetic route crossed its exact request identity.");
+        }
+        await route.fulfill({
+          body: "<!doctype html><html><head><link rel=\"icon\" href=\"data:,\"></head>"
+            + "<body><h1>Login</h1></body></html>",
+          contentType: "text/html",
+          status: 200,
+        });
+        await routeGate;
+      } finally {
+        routeReturned = true;
+        finishRoute();
+      }
+    });
+
+    try {
+      const navigation = page.goto(
+        "https://pay.ci.clean-pay.dev/login?redirect_to=%2Fprofile",
+        { waitUntil: "domcontentloaded", timeout: 5_000 },
+      );
+      await expect.poll(() => responseCapturePrearmed, { timeout: 5_000 }).toBe(true);
+      expect(routeReturned).toBe(false);
+      releaseRoute();
+      await navigation;
+      await expect.poll(() => pendingRequests.size, { timeout: 5_000 }).toBe(0);
+      if (observedFailure) throw observedFailure;
+
+      await expect(eventSeal.drainAndSeal(() => pendingRequests.size === 0, {
+        pollMs: 1,
+        quietMs: 3,
+        timeoutMs: 100,
+      })).resolves.toEqual({ eventCount: 3, status: "drained-and-sealed" });
+      expect(eventSeal.assertClean()).toEqual({
+        eventCount: 3,
+        lateEventCount: 0,
+        status: "sealed-clean",
+      });
+      expect(browserRequestByIdentity.size).toBe(1);
+      expect(browserResponseEvidenceByIdentity.size).toBe(1);
+    } finally {
+      releaseRoute();
+      await context.close();
+    }
+  } finally {
+    await browser.close();
+  }
+});
+
+test("holds an automatic Playwright navigation until prior response bytes are captured", async () => {
+  const browser = await chromium.launch({ headless: true });
+  let releaseLoginCapture: () => void = () => undefined;
+  try {
+    const context = await browser.newContext({ serviceWorkers: "block" });
+    const page = await context.newPage();
+    const pendingRequestSeal = createProviderOverlapPendingRequestSeal(4);
+    const responseEvidenceByIdentity = new Map<object, Promise<{
+      body: Uint8Array | null;
+    }>>();
+    const loginCaptureGate = new Promise<void>((resolve) => {
+      releaseLoginCapture = resolve;
+    });
+    let profileRouteReached = false;
+    let profileRouteReleased = false;
+
+    context.on("request", (request) => pendingRequestSeal.observe(request));
+    context.on("response", (response) => {
+      const request = response.request();
+      const requestPathname = new URL(request.url()).pathname;
+      const classification = browserClassification(request.url(), {
+        isMainFrame: true,
+        isNavigation: true,
+        resourceType: "document",
+      });
+      const capture = captureProviderOverlapResponseEvidence({
+        classification,
+        request,
+        response,
+      });
+      responseEvidenceByIdentity.set(request, requestPathname === "/login"
+        ? capture.then(async (evidence) => {
+            await loginCaptureGate;
+            return evidence;
+          })
+        : capture);
+    });
+    const completeRequest = (request: object) => {
+      const evidence = responseEvidenceByIdentity.get(request) ?? Promise.resolve(null);
+      void evidence.then(
+        () => pendingRequestSeal.complete(request),
+        () => pendingRequestSeal.complete(request),
+      );
+    };
+    context.on("requestfinished", completeRequest);
+    context.on("requestfailed", completeRequest);
+    await context.route("**/*", async (route) => {
+      const request = route.request();
+      const requestPathname = new URL(request.url()).pathname;
+      if (request.isNavigationRequest()) {
+        if (requestPathname === "/profile") profileRouteReached = true;
+        await pendingRequestSeal.waitForPriorRequests(request, {
+          pollMs: 1,
+          quietMs: 3,
+          timeoutMs: 5_000,
+        });
+      }
+      if (requestPathname === "/login") {
+        await route.fulfill({
+          body: "<!doctype html><html><head><link rel=\"icon\" href=\"data:,\"></head>"
+            + "<body><h1>Login</h1><script>setTimeout(() => location.assign('/profile'), 25)"
+            + "</script></body></html>",
+          contentType: "text/html",
+          status: 200,
+        });
+        return;
+      }
+      profileRouteReleased = true;
+      await route.fulfill({
+        body: "<!doctype html><html><head><link rel=\"icon\" href=\"data:,\"></head>"
+          + "<body><h1>Profile</h1></body></html>",
+        contentType: "text/html",
+        status: 200,
+      });
+    });
+
+    try {
+      await page.goto("https://pay.ci.clean-pay.dev/login?redirect_to=%2Fprofile", {
+        waitUntil: "domcontentloaded",
+        timeout: 5_000,
+      });
+      await expect.poll(() => profileRouteReached, { timeout: 5_000 }).toBe(true);
+      expect(profileRouteReleased).toBe(false);
+      expect(page.url()).toBe(
+        "https://pay.ci.clean-pay.dev/login?redirect_to=%2Fprofile",
+      );
+      releaseLoginCapture();
+      await page.waitForURL("https://pay.ci.clean-pay.dev/profile", {
+        waitUntil: "domcontentloaded",
+        timeout: 5_000,
+      });
+      expect(profileRouteReleased).toBe(true);
+      const captures = await Promise.all(responseEvidenceByIdentity.values());
+      expect(Buffer.from(captures[0].body ?? []).toString("utf8"))
+        .toContain("location.assign('/profile')");
+      await pendingRequestSeal.drainAndSeal({
+        pollMs: 1,
+        quietMs: 3,
+        timeoutMs: 100,
+      });
+      expect(pendingRequestSeal.assertClean()).toMatchObject({ status: "sealed-clean" });
+    } finally {
+      releaseLoginCapture();
+      await context.close();
+    }
+  } finally {
+    await browser.close();
+  }
+});
+
+test("prearms response body capture before request completion and navigation", async () => {
+  const request = {};
+  const classification = browserClassification(
+    "https://pay.ci.clean-pay.dev/login?redirect_to=%2Fprofile",
+    { resourceType: "document", isNavigation: true, isMainFrame: true },
+  );
+  let navigatedAway = false;
+  let requestFinished = false;
+  let bodyCalls = 0;
+  const lifecycle: string[] = [];
+  const body = Buffer.from("<!doctype html><h1>Login</h1>");
+  const response = {
+    body: async () => {
+      lifecycle.push("body-prearmed");
+      bodyCalls += 1;
+      expect(requestFinished).toBe(false);
+      if (navigatedAway) throw new Error("body was read after navigation");
+      return body;
+    },
+    finished: async () => {
+      lifecycle.push("response-completion-observed");
+      return null;
+    },
+    headers: () => ({ "content-type": "text/html; charset=utf-8" }),
+    request: () => request,
+    status: () => 200,
+  };
+
+  const capturePromise = captureProviderOverlapResponseEvidence({
+    classification,
+    request,
+    response,
+  });
+  expect(lifecycle).toEqual(["body-prearmed", "response-completion-observed"]);
+  requestFinished = true;
+  navigatedAway = true;
+
+  await expect(capturePromise).resolves.toMatchObject({
+    body,
+    classification,
+    request,
+    response,
+    responseContentType: "text/html",
+    responseStatus: 200,
+  });
+  expect(bodyCalls).toBe(1);
+
+  const crossedRequest = {};
+  await expect(captureProviderOverlapResponseEvidence({
+    classification,
+    request: crossedRequest,
+    response,
+  })).rejects.toThrow(/identity/);
+});
+
+test("uses terminal-gated raw response content type without delaying body prearming", async () => {
+  const request = {};
+  const classification = browserClassification(
+    "https://pay.ci.clean-pay.dev/login?redirect_to=%2Fprofile",
+    { resourceType: "document", isNavigation: true, isMainFrame: true },
+  );
+  type TerminalResult = Readonly<{ failureSha256: string | null; finished: boolean }>;
+  let releaseTerminal: (result: TerminalResult) => void = () => undefined;
+  const terminal = new Promise<TerminalResult>((resolve) => {
+    releaseTerminal = resolve;
+  });
+  const lifecycle: string[] = [];
+  const body = Buffer.from("<!doctype html><h1>Login</h1>");
+  const response = {
+    headerValue: async (name: string) => {
+      expect(name).toBe("content-type");
+      lifecycle.push("raw-content-type-prearmed");
+      return "text/html; charset=utf-8";
+    },
+    body: async () => {
+      lifecycle.push("body-prearmed");
+      await terminal;
+      lifecycle.push("body-completed-after-terminal");
+      return body;
+    },
+    finished: async () => {
+      throw new Error("terminal-gated capture must not duplicate requestfinished");
+    },
+    headers: () => ({ "content-type": "application/octet-stream" }),
+    request: () => request,
+    status: () => 200,
+  };
+
+  let settled = false;
+  const capture = captureProviderOverlapResponseEvidence({
+    classification,
+    request,
+    response,
+    terminal,
+  }).finally(() => {
+    settled = true;
+  });
+  expect(lifecycle).toEqual([
+    "raw-content-type-prearmed",
+    "body-prearmed",
+  ]);
+  // The unchanged five-second evidence bound must not start at the response
+  // headers event; it starts only after the terminal request event below.
+  await new Promise((resolve) => setTimeout(resolve, 5_100));
+  expect(settled).toBe(false);
+
+  releaseTerminal({ failureSha256: null, finished: true });
+  await expect(capture).resolves.toMatchObject({
+    body,
+    responseContentType: "text/html",
+    responseStatus: 200,
+  });
+  expect(lifecycle.slice(2)).toEqual(["body-completed-after-terminal"]);
+});
+
+test("falls back to synchronous response headers when raw headerValue fails", async () => {
+  const request = {};
+  const classification = browserClassification(
+    "https://pay.ci.clean-pay.dev/login?redirect_to=%2Fprofile",
+    { resourceType: "document", isNavigation: true, isMainFrame: true },
+  );
+  const body = Buffer.from("<!doctype html><h1>Login</h1>");
+  const response = {
+    headerValue: () => {
+      throw new Error("response.allHeaders: synthetic read failure");
+    },
+    body: async () => body,
+    finished: async () => null,
+    headers: () => ({ "content-type": "text/html; charset=utf-8" }),
+    request: () => request,
+    status: () => 200,
+  };
+
+  await expect(captureProviderOverlapResponseEvidence({
+    classification,
+    request,
+    response,
+  })).resolves.toMatchObject({
+    body,
+    responseContentType: "text/html",
+    responseStatus: 200,
+  });
+});
+
+test("uses the exact raw content type for bodyless Telegram redirects", async () => {
+  const request = {};
+  const classification = browserClassification(
+    "https://pay.ci.clean-pay.dev/auth/telegram/start?redirect_to=%2Fprofile"
+      + "&turnstile_token=synthetic-turnstile-token%3Aauth_login%3Asynthetic-turnstile-1%3A1",
+    { resourceType: "document", isNavigation: true, isMainFrame: true },
+  );
+  let bodyCalls = 0;
+  const response = {
+    headerValue: async (name: string) => {
+      expect(name).toBe("content-type");
+      return null;
+    },
+    body: async () => {
+      bodyCalls += 1;
+      return Buffer.alloc(0);
+    },
+    finished: async () => null,
+    headers: () => ({}),
+    request: () => request,
+    status: () => 307,
+  };
+
+  await expect(captureProviderOverlapResponseEvidence({
+    classification,
+    request,
+    response,
+    terminal: Promise.resolve({ failureSha256: null, finished: true }),
+  })).resolves.toMatchObject({
+    body: null,
+    responseContentType: "application/octet-stream",
+    responseStatus: 307,
+  });
+  expect(bodyCalls).toBe(0);
+  expect(normalizeProviderOverlapObservedResponseContentType({
+    key: "app-telegram-start",
+    rawContentType: "application/octet-stream",
+    status: 307,
+  })).toBe("application/octet-stream");
+  expect(normalizeProviderOverlapObservedResponseContentType({
+    key: "app-root-rsc",
+    rawContentType: null,
+    status: 307,
+  })).toBeNull();
+  expect(normalizeProviderOverlapSemanticEntry({
+    disposition: "continue",
+    key: "app-root-rsc",
+    redirectEdge: null,
+    responseContentType: "text/plain",
+    responseFailureSha256: null,
+    responseStatus: 307,
+  })).toMatchObject({
+    key: "app-root-rsc",
+    responseContentType: "text/plain",
+    responseStatus: 307,
+  });
+  expect(normalizeProviderOverlapObservedResponseContentType({
+    key: "app-telegram-start",
+    rawContentType: "text/plain",
+    status: 307,
+  })).toBe("text/plain");
+  expect(isExactTerminalProviderOverlapRedirect({
+    key: "app-telegram-start",
+    redirectEdge: null,
+    responseContentType: "application/octet-stream",
+    responseFailureSha256: null,
+    responseStatus: 307,
+  })).toBe(true);
+  expect(isExactTerminalProviderOverlapRedirect({
+    key: "app-telegram-start",
+    redirectEdge: null,
+    responseContentType: "text/plain",
+    responseFailureSha256: null,
+    responseStatus: 307,
+  })).toBe(false);
+  await expect(captureProviderOverlapResponseEvidence({
+    classification,
+    request,
+    response,
+    terminal: Promise.resolve({ failureSha256: "a".repeat(64), finished: false }),
+  })).rejects.toThrow(/did not finish cleanly/);
+});
+
+test("records only the exact aborted login-root RSC terminal outcome", async () => {
+  const request = {};
+  const classification = browserClassification(
+    "https://pay.ci.clean-pay.dev/login?redirect_to=%2F&_rsc=opaque-state_1",
+    { resourceType: "fetch" },
+  );
+  const exactFailureSha256 = sha256("net::ERR_ABORTED");
+  let bodyCalls = 0;
+  const response = {
+    body: async () => {
+      bodyCalls += 1;
+      throw new Error("aborted response body is unavailable");
+    },
+    finished: async () => {
+      throw new Error("terminal-gated capture must not duplicate requestfailed");
+    },
+    headerValue: async () => "text/x-component; charset=utf-8",
+    headers: () => ({ "content-type": "text/x-component; charset=utf-8" }),
+    request: () => request,
+    status: () => 200,
+  };
+
+  await expect(captureProviderOverlapResponseEvidence({
+    classification,
+    request,
+    response,
+    terminal: Promise.resolve({ failureSha256: exactFailureSha256, finished: false }),
+  })).resolves.toMatchObject({
+    body: null,
+    responseContentType: "text/x-component",
+    responseFailureSha256: exactFailureSha256,
+    responseStatus: 200,
+  });
+  expect(bodyCalls).toBe(1);
+
+  await expect(captureProviderOverlapResponseEvidence({
+    classification,
+    request,
+    response,
+    terminal: Promise.resolve({ failureSha256: sha256("net::ERR_FAILED"), finished: false }),
+  })).rejects.toThrow(/did not finish cleanly/);
+  const otherClassification = browserClassification(
+    "https://pay.ci.clean-pay.dev/profile?_rsc=opaque-state_1",
+    { resourceType: "fetch" },
+  );
+  await expect(captureProviderOverlapResponseEvidence({
+    classification: otherClassification,
+    request,
+    response,
+    terminal: Promise.resolve({ failureSha256: exactFailureSha256, finished: false }),
+  })).rejects.toThrow(/did not finish cleanly/);
+});
+
+test("records only the immutable response-backed cabinet action abort", async () => {
+  const request = {};
+  const classification = browserClassification(
+    "https://pay.ci.clean-pay.dev/cabinet",
+    { method: "POST", resourceType: "fetch" },
+  );
+  const exactFailureSha256 = sha256("net::ERR_ABORTED");
+  let bodyCalls = 0;
+  const response = {
+    body: async () => {
+      bodyCalls += 1;
+      throw new Error("aborted response body is unavailable");
+    },
+    finished: async () => {
+      throw new Error("terminal-gated capture must not duplicate requestfailed");
+    },
+    headerValue: async () => "text/x-component; charset=utf-8",
+    headers: () => ({ "content-type": "text/x-component; charset=utf-8" }),
+    request: () => request,
+    status: () => 200,
+  };
+
+  await expect(captureProviderOverlapResponseEvidence({
+    classification,
+    request,
+    response,
+    terminal: Promise.resolve({ failureSha256: exactFailureSha256, finished: false }),
+  })).resolves.toMatchObject({
+    body: null,
+    responseContentType: "text/x-component",
+    responseFailureSha256: exactFailureSha256,
+    responseStatus: 200,
+  });
+  expect(bodyCalls).toBe(1);
+
+  const exactSemanticEntry = {
+    disposition: "continue",
+    key: "app-cabinet-action",
+    redirectEdge: null,
+    responseContentType: "text/x-component",
+    responseFailureSha256: exactFailureSha256,
+    responseStatus: 200,
+  };
+  expect(normalizeProviderOverlapSemanticEntry(exactSemanticEntry))
+    .toEqual(exactSemanticEntry);
+
+  const exactProfileActionAbort = {
+    ...exactSemanticEntry,
+    key: "app-profile-action",
+  };
+  expect(normalizeProviderOverlapSemanticEntry(exactProfileActionAbort))
+    .toEqual(exactProfileActionAbort);
+
+  for (const nearMiss of [
+    { ...exactSemanticEntry, key: "app-login-action" },
+    { ...exactSemanticEntry, responseContentType: "text/html" },
+    { ...exactSemanticEntry, responseFailureSha256: sha256("net::ERR_FAILED") },
+    { ...exactSemanticEntry, responseStatus: 307 },
+    { ...exactProfileActionAbort, responseContentType: "text/html" },
+    { ...exactProfileActionAbort, responseFailureSha256: sha256("net::ERR_FAILED") },
+    { ...exactProfileActionAbort, responseStatus: 307 },
+  ]) {
+    expect(() => normalizeProviderOverlapSemanticEntry(nearMiss))
+      .toThrow();
+  }
+});
+
+test("waits for Playwright-deferred response body capture before navigation", async () => {
+  const request = {};
+  const classification = browserClassification(
+    "https://pay.ci.clean-pay.dev/login?redirect_to=%2Fprofile",
+    { resourceType: "document", isNavigation: true, isMainFrame: true },
+  );
+  const seal = createProviderOverlapPendingRequestSeal(1);
+  seal.observe(request);
+  let navigatedAway = false;
+  let captureSettled = false;
+  let releaseResponseCompletion: () => void = () => undefined;
+  const responseCompletion = new Promise<void>((resolve) => {
+    releaseResponseCompletion = resolve;
+  });
+  const lifecycle: string[] = [];
+  const body = Buffer.from("<!doctype html><h1>Login</h1>");
+  const response = {
+    body: async () => {
+      lifecycle.push("body-registered");
+      await responseCompletion;
+      lifecycle.push("body-read-after-completion");
+      if (navigatedAway) throw new Error("body was evicted by navigation");
+      return body;
+    },
+    finished: async () => {
+      lifecycle.push("response-completion-registered");
+      await responseCompletion;
+      lifecycle.push("response-completed");
+      return null;
+    },
+    headers: () => ({ "content-type": "text/html; charset=utf-8" }),
+    request: () => request,
+    status: () => 200,
+  };
+
+  const capturePromise = captureProviderOverlapResponseEvidence({
+    classification,
+    request,
+    response,
+  });
+  const terminalCapture = capturePromise.then(
+    (evidence) => {
+      captureSettled = true;
+      seal.complete(request);
+      return evidence;
+    },
+    (error) => {
+      seal.complete(request);
+      throw error;
+    },
+  );
+  const checkpoint = seal.waitForQuiet({ pollMs: 1, quietMs: 3, timeoutMs: 100 });
+  expect(lifecycle).toEqual(["body-registered", "response-completion-registered"]);
+  expect(captureSettled).toBe(false);
+  expect(seal.pendingCount()).toBe(1);
+
+  releaseResponseCompletion();
+  await expect(checkpoint).resolves.toEqual({
+    completedRequestCount: 1,
+    observedRequestCount: 1,
+    status: "quiet-checkpoint",
+  });
+  expect(captureSettled).toBe(true);
+  await expect(terminalCapture).resolves.toMatchObject({ body, classification, request, response });
+  navigatedAway = true;
+  expect(lifecycle).toEqual([
+    "body-registered",
+    "response-completion-registered",
+    "body-read-after-completion",
+    "response-completed",
+  ]);
+  await expect(seal.drainAndSeal({ pollMs: 1, quietMs: 3, timeoutMs: 100 }))
+    .resolves.toMatchObject({ status: "drained-and-sealed" });
+  expect(seal.assertClean()).toMatchObject({ status: "sealed-clean" });
+});
+
+test("excludes only exact Playwright-owned response shapes from CDP", () => {
+  const websiteToken = "a".repeat(64);
+  const event = (url: string, type?: string, status?: number) => ({
+    ...(type === undefined ? {} : { type }),
+    response: {
+      ...(status === undefined ? {} : { status }),
+      url,
+    },
+  });
+  expect(isProviderOverlapPlaywrightBodyCdpResponse(event(
+    `https://chatwoot.browser.clean-pay.dev/widget?website_token=${websiteToken}`,
+  ))).toBe(true);
+  expect(isProviderOverlapPlaywrightBodyCdpResponse(event(
+    `https://chatwoot.browser.clean-pay.dev/widget?website_token=${websiteToken}`
+      + "&cw_conversation=synthetic-conversation",
+  ))).toBe(true);
+  for (const url of [
+    `https://chatwoot.browser.clean-pay.dev/widget-extra?website_token=${websiteToken}`,
+    `https://other.clean-pay.dev/widget?website_token=${websiteToken}`,
+    `http://chatwoot.browser.clean-pay.dev/widget?website_token=${websiteToken}`,
+    `https://chatwoot.browser.clean-pay.dev/widget?website_token=${websiteToken}&extra=1`,
+    "https://chatwoot.browser.clean-pay.dev/widget?website_token=invalid",
+  ]) {
+    expect(isProviderOverlapPlaywrightBodyCdpResponse(event(url)), url).toBe(false);
+  }
+  const loginRootRsc = "https://pay.ci.clean-pay.dev/login?redirect_to=%2F&_rsc=opaque-state_1";
+  expect(isProviderOverlapPlaywrightBodyCdpResponse(
+    event(loginRootRsc, "Fetch", 200),
+  )).toBe(true);
+  for (const [url, type, status] of [
+    [loginRootRsc, "Document", 200],
+    [loginRootRsc, "Fetch", 307],
+    ["https://pay.ci.clean-pay.dev/login?redirect_to=%2Fprofile&_rsc=opaque-state_1",
+      "Fetch", 200],
+    ["https://pay.ci.clean-pay.dev/login?_rsc=opaque-state_1&redirect_to=%2F",
+      "Fetch", 200],
+    ["https://pay.ci.clean-pay.dev/login?redirect_to=%2F&_rsc=invalid%20state",
+      "Fetch", 200],
+    ["https://pay.ci.clean-pay.dev/login?redirect_to=%2F&_rsc=opaque-state_1&extra=1",
+      "Fetch", 200],
+  ] as const) {
+    expect(isProviderOverlapPlaywrightBodyCdpResponse(event(url, type, status)), url)
+      .toBe(false);
+  }
+  expect(isProviderOverlapPlaywrightBodyCdpResponse({ response: null })).toBe(false);
+});
+
+test("excludes only the exact Playwright-owned cabinet action response from CDP", () => {
+  const event = (url: string, type: string = "Fetch", status: number = 200) => ({
+    response: { status, url },
+    type,
+  });
+  const cabinetAction = "https://pay.ci.clean-pay.dev/cabinet";
+  expect(isProviderOverlapPlaywrightBodyCdpResponse(event(cabinetAction))).toBe(true);
+
+  for (const [url, type, status] of [
+    ["https://pay.ci.clean-pay.dev/cabinet?_rsc=opaque-state_1", "Fetch", 200],
+    ["https://pay.ci.clean-pay.dev/cabinet?extra=1", "Fetch", 200],
+    ["https://pay.ci.clean-pay.dev/cabinet#fragment", "Fetch", 200],
+    ["https://other.clean-pay.dev/cabinet", "Fetch", 200],
+    ["https://pay.ci.clean-pay.dev/cabinet", "Document", 200],
+    ["https://pay.ci.clean-pay.dev/cabinet", "Fetch", 201],
+  ] as const) {
+    expect(isProviderOverlapPlaywrightBodyCdpResponse(event(url, type, status)), url)
+      .toBe(false);
+  }
+});
+
+test("excludes only the exact Playwright-owned profile action response from CDP", () => {
+  const event = (url: string, type: string = "Fetch", status: number = 200) => ({
+    response: { status, url },
+    type,
+  });
+  const profileAction = "https://pay.ci.clean-pay.dev/profile";
+  expect(isProviderOverlapPlaywrightBodyCdpResponse(event(profileAction))).toBe(true);
+
+  for (const [url, type, status] of [
+    ["https://pay.ci.clean-pay.dev/profile?_rsc=opaque-state_1", "Fetch", 200],
+    ["https://pay.ci.clean-pay.dev/profile?extra=1", "Fetch", 200],
+    ["https://pay.ci.clean-pay.dev/profile#fragment", "Fetch", 200],
+    ["https://other.clean-pay.dev/profile", "Fetch", 200],
+    ["https://pay.ci.clean-pay.dev/profile", "Document", 200],
+    ["https://pay.ci.clean-pay.dev/profile", "Fetch", 201],
+  ] as const) {
+    expect(isProviderOverlapPlaywrightBodyCdpResponse(event(url, type, status)), url)
+      .toBe(false);
+  }
+});
+
+test("recognizes only a settled ordered synthetic Chatwoot identity boundary", () => {
+  const scope = (calls: unknown, phase: unknown = undefined) => ({
+    __cleanPayChatwootBoundaryCalls: calls,
+    cleanPayChatwootPendingIdentity: phase === undefined ? undefined : { phase },
+  });
+  const settled = [
+    { method: "run" },
+    { method: "frame.loaded" },
+    { method: "setUser" },
+    { method: "identity.confirmed" },
+  ];
+  expect(providerOverlapChatwootIdentityBoundarySettled(scope(undefined))).toBe(false);
+  expect(providerOverlapChatwootIdentityBoundarySettled(scope(settled, "sent"))).toBe(true);
+  expect(providerOverlapChatwootIdentityBoundarySettled(scope([
+    { method: "identity.confirmed" },
+    { method: "setUser" },
+  ]))).toBe(false);
+  expect(providerOverlapChatwootIdentityBoundarySettled(scope([
+    ...settled,
+    { method: "identity.confirmed" },
+  ]))).toBe(false);
+  expect(providerOverlapChatwootIdentityBoundarySettled(scope([
+    { method: "setUser" },
+    { unexpected: true },
+    { method: "identity.confirmed" },
+  ]))).toBe(false);
+  expect(providerOverlapChatwootIdentityBoundarySettled(scope(
+    Array.from({ length: 65 }, () => ({ method: "run" })),
+  ))).toBe(false);
+  expect(providerOverlapChatwootIdentityBoundarySettled(scope(settled))).toBe(true);
+});
+
+test("binds same-CDP response bodies in either event order and fails closed", async () => {
+  type BodyResult = { base64Encoded: boolean; body: string };
+  const results = new Map<string, BodyResult>([
+    ["durable.1", { base64Encoded: false, body: "<h1>Login</h1>" }],
+    ["durable.2", { base64Encoded: true, body: Buffer.from([0, 1, 2]).toString("base64") }],
+  ]);
+  const calls: Array<{ method: string; requestId: string }> = [];
+  const capture = createProviderOverlapCdpResponseBodyCapture({
+    send: async (method: string, parameters: { requestId: string }) => {
+      calls.push({ method, requestId: parameters.requestId });
+      const result = results.get(parameters.requestId);
+      if (!result) throw new Error("synthetic-dynamic-cdp-body-failure");
+      return result;
+    },
+  });
+  capture.observeResponseReceived({
+    requestId: "durable.1",
+    response: { status: 200, url: "https://pay.ci.clean-pay.dev/login" },
+    type: "Document",
+  });
+  capture.observeLoadingFinished({ encodedDataLength: 16, requestId: "durable.1" });
+  const eventFirstBody = capture.readBody({
+    maximumBodyBytes: 128,
+    resourceType: "document",
+    status: 200,
+    url: "https://pay.ci.clean-pay.dev/login",
+  });
+
+  const claimFirstBody = capture.readBody({
+    maximumBodyBytes: 3,
+    resourceType: "fetch",
+    status: 200,
+    url: "https://pay.ci.clean-pay.dev/profile?_rsc=opaque-state_1",
+  });
+  capture.observeResponseReceived({
+    requestId: "durable.2",
+    response: {
+      status: 200,
+      url: "https://pay.ci.clean-pay.dev/profile?_rsc=opaque-state_1",
+    },
+    type: "Fetch",
+  });
+  capture.observeLoadingFinished({ encodedDataLength: 3, requestId: "durable.2" });
+
+  const skipFirstBodyless = capture.skipResponseBody({
+    resourceType: "manifest",
+    status: 200,
+    url: "https://pay.ci.clean-pay.dev/manifest.webmanifest",
+  });
+  capture.observeResponseReceived({
+    requestId: "durable.3",
+    response: { status: 200, url: "https://pay.ci.clean-pay.dev/manifest.webmanifest" },
+    type: "Manifest",
+  });
+  capture.observeLoadingFinished({ encodedDataLength: 16, requestId: "durable.3" });
+
+  capture.observeResponseReceived({
+    requestId: "durable.4",
+    response: { status: 204, url: "https://pay.ci.clean-pay.dev/probe.png" },
+    type: "Image",
+  });
+  capture.observeLoadingFinished({ encodedDataLength: 0, requestId: "durable.4" });
+  const eventFirstBodyless = capture.skipResponseBody({
+    resourceType: "image",
+    status: 204,
+    url: "https://pay.ci.clean-pay.dev/probe.png",
+  });
+
+  await expect(eventFirstBody).resolves.toEqual(Buffer.from("<h1>Login</h1>"));
+  await expect(claimFirstBody).resolves.toEqual(Buffer.from([0, 1, 2]));
+  await expect(skipFirstBodyless).resolves.toBeNull();
+  await expect(eventFirstBodyless).resolves.toBeNull();
+  expect(calls).toEqual([
+    { method: "Network.getResponseBody", requestId: "durable.1" },
+    { method: "Network.getResponseBody", requestId: "durable.2" },
+  ]);
+  expect(capture.assertClean()).toEqual({
+    bodyClaimCount: 2,
+    bodySettledCount: 2,
+    bodylessClaimCount: 2,
+    observedResponseCount: 4,
+    responseClaimCount: 4,
+    responseSettledCount: 4,
+    status: "cdp-response-bodies-clean",
+  });
+
+  const createRejectedCapture = (result: unknown) => (
+    createProviderOverlapCdpResponseBodyCapture({
+      send: async () => result,
+    })
+  );
+  const rejectedBody = async (result: unknown, maximumBodyBytes: number) => {
+    const rejected = createRejectedCapture(result);
+    const body = rejected.readBody({
+      maximumBodyBytes,
+      resourceType: "document",
+      status: 200,
+      url: "https://pay.ci.clean-pay.dev/login",
+    });
+    rejected.observeResponseReceived({
+      requestId: "rejected.1",
+      response: { status: 200, url: "https://pay.ci.clean-pay.dev/login" },
+      type: "Document",
+    });
+    rejected.observeLoadingFinished({ encodedDataLength: 1, requestId: "rejected.1" });
+    return body;
+  };
+  await expect(rejectedBody({ base64Encoded: true, body: "***=" }, 3))
+    .rejects.toThrow(/base64 encoding is invalid/);
+  await expect(rejectedBody({ base64Encoded: false, body: "four" }, 3))
+    .rejects.toThrow(/oversized/);
+  await expect(rejectedBody({ base64Encoded: false, body: "ok", extra: true }, 3))
+    .rejects.toThrow(/field set/);
+
+  const failed = createProviderOverlapCdpResponseBodyCapture({
+    send: async () => {
+      throw new Error("body read must not follow loadingFailed");
+    },
+  });
+  const failedBody = failed.readBody({
+    maximumBodyBytes: 64,
+    resourceType: "document",
+    status: 200,
+    url: "https://pay.ci.clean-pay.dev/login",
+  });
+  failed.observeResponseReceived({
+    requestId: "failed.1",
+    response: { status: 200, url: "https://pay.ci.clean-pay.dev/login" },
+    type: "Document",
+  });
+  const failureText = "net::ERR_ABORTED synthetic-sensitive-diagnostic";
+  failed.observeLoadingFailed({ errorText: failureText, requestId: "failed.1" });
+  const failedMessage = await failedBody.then(
+    () => "unexpected-success",
+    (error: unknown) => error instanceof Error ? error.message : String(error),
+  );
+  expect(failedMessage).toContain(sha256(failureText));
+  expect(failedMessage).not.toContain("synthetic-sensitive-diagnostic");
+
+  const ambiguous = createRejectedCapture({ base64Encoded: false, body: "ok" });
+  ambiguous.observeResponseReceived({
+    requestId: "ambiguous.1",
+    response: { status: 200, url: "https://pay.ci.clean-pay.dev/login" },
+    type: "Document",
+  });
+  expect(() => ambiguous.observeResponseReceived({
+    requestId: "ambiguous.2",
+    response: { status: 200, url: "https://pay.ci.clean-pay.dev/login" },
+    type: "Document",
+  })).toThrow(/ambiguous/);
+
+  const terminalUnclaimed = createRejectedCapture({ base64Encoded: false, body: "unused" });
+  terminalUnclaimed.observeResponseReceived({
+    requestId: "bodyless.1",
+    response: { status: 200, url: "https://pay.ci.clean-pay.dev/manifest.webmanifest" },
+    type: "Manifest",
+  });
+  terminalUnclaimed.observeLoadingFinished({ encodedDataLength: 16, requestId: "bodyless.1" });
+  expect(() => terminalUnclaimed.observeResponseReceived({
+    requestId: "bodyless.2",
+    response: { status: 200, url: "https://pay.ci.clean-pay.dev/manifest.webmanifest" },
+    type: "Manifest",
+  })).toThrow(/ambiguous/);
+  expect(terminalUnclaimed.snapshot()).toMatchObject({
+    fatal: true,
+    unclaimedResponseCount: 0,
+  });
+  expect(() => terminalUnclaimed.skipResponseBody({
+    resourceType: "manifest",
+    status: 200,
+    url: "https://pay.ci.clean-pay.dev/manifest.webmanifest",
+  })).toThrow(/ambiguous/);
+
+  const duplicateTerminal = createRejectedCapture({ base64Encoded: false, body: "ok" });
+  const duplicateTerminalBody = duplicateTerminal.readBody({
+    maximumBodyBytes: 2,
+    resourceType: "document",
+    status: 200,
+    url: "https://pay.ci.clean-pay.dev/login",
+  });
+  duplicateTerminal.observeResponseReceived({
+    requestId: "duplicate.1",
+    response: { status: 200, url: "https://pay.ci.clean-pay.dev/login" },
+    type: "Document",
+  });
+  duplicateTerminal.observeLoadingFinished({ encodedDataLength: 2, requestId: "duplicate.1" });
+  expect(() => duplicateTerminal.observeLoadingFinished({
+    encodedDataLength: 2,
+    requestId: "duplicate.1",
+  })).toThrow(/terminal event more than once/);
+  await expect(duplicateTerminalBody).rejects.toThrow(/terminal event more than once/);
+
+  const unresolved = createRejectedCapture({ base64Encoded: false, body: "ok" });
+  const unresolvedBody = unresolved.readBody({
+    maximumBodyBytes: 2,
+    resourceType: "document",
+    status: 200,
+    url: "https://pay.ci.clean-pay.dev/login",
+  });
+  expect(() => unresolved.assertClean()).toThrow(/did not settle cleanly/);
+  await expect(unresolvedBody).rejects.toThrow(/did not settle cleanly/);
+
+  const ambiguousClaim = createRejectedCapture({ base64Encoded: false, body: "ok" });
+  const firstAmbiguousClaim = ambiguousClaim.readBody({
+    maximumBodyBytes: 2,
+    resourceType: "document",
+    status: 200,
+    url: "https://pay.ci.clean-pay.dev/login",
+  });
+  expect(() => ambiguousClaim.readBody({
+    maximumBodyBytes: 2,
+    resourceType: "document",
+    status: 200,
+    url: "https://pay.ci.clean-pay.dev/login",
+  })).toThrow(/claim is ambiguous/);
+  await expect(firstAmbiguousClaim).rejects.toThrow(/claim is ambiguous/);
+
+  const malformed = createRejectedCapture({ base64Encoded: false, body: "ok" });
+  expect(() => malformed.observeResponseReceived({
+    requestId: "malformed.1",
+    response: null,
+    type: "Document",
+  })).toThrow(/response event is invalid/);
+});
+
+test("queues only explicitly attested repeatable static response identities", async () => {
+  const staticUrl = `https://pay.ci.clean-pay.dev${staticJavascriptPath}`;
+  const capture = createProviderOverlapCdpResponseBodyCapture({
+    repeatableStaticResponseUrls:
+      createProviderOverlapRepeatableStaticResponseUrls(staticAssetContract),
+    send: async (
+      method: string,
+      parameters: { requestId: string },
+    ) => {
+      expect(method).toBe("Network.getResponseBody");
+      expect(["static.1", "static.2"]).toContain(parameters.requestId);
+      return { base64Encoded: false, body: staticBodyByPath[staticJavascriptPath] };
+    },
+  });
+
+  for (const requestId of ["static.1", "static.2"]) {
+    capture.observeResponseReceived({
+      requestId,
+      response: { status: 200, url: staticUrl },
+      type: "Script",
+    });
+    capture.observeLoadingFinished({ encodedDataLength: 64, requestId });
+  }
+
+  const bodies = await Promise.all([1, 2].map(() => capture.readBody({
+    maximumBodyBytes: 1024,
+    resourceType: "script",
+    status: 200,
+    url: staticUrl,
+  })));
+  expect(bodies.map((body) => Buffer.from(body).toString("utf8"))).toEqual([
+    staticBodyByPath[staticJavascriptPath],
+    staticBodyByPath[staticJavascriptPath],
+  ]);
+  expect(capture.assertClean()).toEqual({
+    bodyClaimCount: 2,
+    bodySettledCount: 2,
+    bodylessClaimCount: 0,
+    observedResponseCount: 2,
+    responseClaimCount: 2,
+    responseSettledCount: 2,
+    status: "cdp-response-bodies-clean",
+  });
+
+  expect(() => createProviderOverlapCdpResponseBodyCapture({
+    repeatableStaticResponseUrls: ["https://pay.ci.clean-pay.dev/login"],
+    send: async () => ({ base64Encoded: false, body: "unused" }),
+  })).toThrow(/outside its exact contract/);
+});
+
+test("queues repeated bodyless response identities but rejects ambiguous body reads", async () => {
+  const bodylessUrl = "https://chatwoot.browser.clean-pay.dev/api/v1/widget/contact";
+  const bodyless = createProviderOverlapCdpResponseBodyCapture({
+    send: async () => {
+      throw new Error("Bodyless responses must not be read.");
+    },
+  });
+  for (const requestId of ["bodyless.1", "bodyless.2"]) {
+    bodyless.observeResponseReceived({
+      requestId,
+      response: { status: 200, url: bodylessUrl },
+      type: "Fetch",
+    });
+    bodyless.observeLoadingFinished({ encodedDataLength: 32, requestId });
+  }
+  await Promise.all([1, 2].map(() => bodyless.skipResponseBody({
+    resourceType: "fetch",
+    status: 200,
+    url: bodylessUrl,
+  })));
+  expect(bodyless.assertClean()).toEqual({
+    bodyClaimCount: 0,
+    bodySettledCount: 0,
+    bodylessClaimCount: 2,
+    observedResponseCount: 2,
+    responseClaimCount: 2,
+    responseSettledCount: 2,
+    status: "cdp-response-bodies-clean",
+  });
+
+  const ambiguousBody = createProviderOverlapCdpResponseBodyCapture({
+    send: async () => ({ base64Encoded: false, body: "unused" }),
+  });
+  for (const requestId of ["body.1", "body.2"]) {
+    ambiguousBody.observeResponseReceived({
+      requestId,
+      response: { status: 200, url: "https://pay.ci.clean-pay.dev/profile" },
+      type: "Fetch",
+    });
+  }
+  expect(() => ambiguousBody.readBody({
+    maximumBodyBytes: 1024,
+    resourceType: "fetch",
+    status: 200,
+    url: "https://pay.ci.clean-pay.dev/profile",
+  })).toThrow(/response body identity is ambiguous/);
+});
+
+test("reconciles only one finished bodyless Fetch shadow after an exact settled claim", async () => {
+  const bodylessUrl = "https://chatwoot.browser.clean-pay.dev/api/v1/widget/contact";
+  const capture = createProviderOverlapCdpResponseBodyCapture({
+    send: async () => ({ base64Encoded: false, body: "unused" }),
+  });
+  for (const requestId of ["bodyless-shadow.1", "bodyless-shadow.2"]) {
+    capture.observeResponseReceived({
+      requestId,
+      response: { status: 200, url: bodylessUrl },
+      type: "Fetch",
+    });
+    capture.observeLoadingFinished({ encodedDataLength: 32, requestId });
+  }
+  await expect(capture.skipResponseBody({
+    resourceType: "fetch",
+    status: 200,
+    url: bodylessUrl,
+  })).resolves.toBeNull();
+  expect(capture.snapshot()).toMatchObject({
+    observedResponseCount: 2,
+    responseClaimCount: 1,
+    responseSettledCount: 1,
+    unclaimedResponseCount: 1,
+  });
+  expect(capture.reconcileFinishedBodylessDuplicates()).toEqual({
+    reconciledResponseCount: 1,
+    status: "finished-bodyless-duplicates-reconciled",
+  });
+  expect(capture.assertClean()).toEqual({
+    bodyClaimCount: 0,
+    bodySettledCount: 0,
+    bodylessClaimCount: 1,
+    observedResponseCount: 1,
+    responseClaimCount: 1,
+    responseSettledCount: 1,
+    status: "cdp-response-bodies-clean",
+  });
+
+  const unfinished = createProviderOverlapCdpResponseBodyCapture({
+    send: async () => ({ base64Encoded: false, body: "unused" }),
+  });
+  for (const requestId of ["unfinished-shadow.1", "unfinished-shadow.2"]) {
+    unfinished.observeResponseReceived({
+      requestId,
+      response: { status: 200, url: bodylessUrl },
+      type: "Fetch",
+    });
+  }
+  unfinished.observeLoadingFinished({ encodedDataLength: 32, requestId: "unfinished-shadow.1" });
+  await expect(unfinished.skipResponseBody({
+    resourceType: "fetch",
+    status: 200,
+    url: bodylessUrl,
+  })).resolves.toBeNull();
+  expect(unfinished.reconcileFinishedBodylessDuplicates()).toEqual({
+    reconciledResponseCount: 0,
+    status: "finished-bodyless-duplicates-reconciled",
+  });
+  expect(() => unfinished.assertClean()).toThrow(/did not settle cleanly/);
+});
+
+test("bounds all response claims and atomically drains fatal CDP capture state", async () => {
+  let sendCalls = 0;
+  const bounded = createProviderOverlapCdpResponseBodyCapture({
+    send: async () => {
+      sendCalls += 1;
+      return { base64Encoded: false, body: "unused" };
+    },
+  });
+  const waitingClaims: Array<Promise<unknown>> = [];
+  for (let index = 0; index < 256; index += 1) {
+    const responseIdentity = {
+      resourceType: index % 2 === 0 ? "fetch" : "image",
+      status: 200,
+      url: `https://pay.ci.clean-pay.dev/bounded/${index}`,
+    };
+    waitingClaims.push(index % 2 === 0
+      ? bounded.readBody({ maximumBodyBytes: 1, ...responseIdentity })
+      : bounded.skipResponseBody(responseIdentity));
+  }
+  expect(() => bounded.skipResponseBody({
+    resourceType: "other",
+    status: 204,
+    url: "https://pay.ci.clean-pay.dev/bounded/overflow",
+  })).toThrow(/response claim bound/);
+  const claimFailures = await Promise.all(waitingClaims.map((claim) => claim.then(
+    () => "unexpected-success",
+    (error: unknown) => error instanceof Error ? error.message : String(error),
+  )));
+  expect(new Set(claimFailures)).toEqual(new Set([
+    "CDP response body capture exceeded its response claim bound.",
+  ]));
+  expect(sendCalls).toBe(0);
+  expect(bounded.snapshot()).toEqual({
+    bodyClaimCount: 128,
+    bodySettledCount: 128,
+    bodylessClaimCount: 128,
+    fatal: true,
+    observedResponseCount: 0,
+    pendingResponseCount: 0,
+    responseClaimCount: 257,
+    responseFailureCount: 256,
+    responseSettledCount: 256,
+    unclaimedResponseCount: 0,
+  });
+  expect(() => bounded.observeResponseReceived({
+    requestId: "bounded.late",
+    response: { status: 200, url: "https://pay.ci.clean-pay.dev/bounded/late" },
+    type: "Fetch",
+  })).toThrow(/response claim bound/);
+
+  let releaseSend: (result: { base64Encoded: boolean; body: string }) => void = () => undefined;
+  let sendStarted = false;
+  const delayedSend = new Promise<{ base64Encoded: boolean; body: string }>((resolve) => {
+    releaseSend = resolve;
+  });
+  const fatal = createProviderOverlapCdpResponseBodyCapture({
+    send: async () => {
+      sendStarted = true;
+      return delayedSend;
+    },
+  });
+  const boundBody = fatal.readBody({
+    maximumBodyBytes: 2,
+    resourceType: "document",
+    status: 200,
+    url: "https://pay.ci.clean-pay.dev/login",
+  });
+  fatal.observeResponseReceived({
+    requestId: "fatal.1",
+    response: { status: 200, url: "https://pay.ci.clean-pay.dev/login" },
+    type: "Document",
+  });
+  fatal.observeLoadingFinished({ encodedDataLength: 2, requestId: "fatal.1" });
+  await expect.poll(() => sendStarted).toBe(true);
+  const waitingBodyless = fatal.skipResponseBody({
+    resourceType: "manifest",
+    status: 200,
+    url: "https://pay.ci.clean-pay.dev/manifest.webmanifest",
+  });
+  expect(() => fatal.observeResponseReceived({
+    requestId: "fatal.invalid",
+    response: null,
+    type: "Document",
+  })).toThrow(/response event is invalid/);
+  await expect(boundBody).rejects.toThrow(/response event is invalid/);
+  await expect(waitingBodyless).rejects.toThrow(/response event is invalid/);
+  const fatalSnapshot = fatal.snapshot();
+  expect(fatalSnapshot).toEqual({
+    bodyClaimCount: 1,
+    bodySettledCount: 1,
+    bodylessClaimCount: 1,
+    fatal: true,
+    observedResponseCount: 1,
+    pendingResponseCount: 0,
+    responseClaimCount: 2,
+    responseFailureCount: 2,
+    responseSettledCount: 2,
+    unclaimedResponseCount: 0,
+  });
+  expect(() => fatal.skipResponseBody({
+    resourceType: "image",
+    status: 204,
+    url: "https://pay.ci.clean-pay.dev/late.png",
+  })).toThrow(/response event is invalid/);
+  releaseSend({ base64Encoded: false, body: "ok" });
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  expect(fatal.snapshot()).toEqual(fatalSnapshot);
+});
+
+test("durably captures a prior document across immediate real Chromium navigation", async () => {
+  // The old fixture navigated while its HTML was still being parsed. That can
+  // cancel the very response whose successful completion this test requires.
+  // Complete the first response, then deliberately defer its CDP body read
+  // until the next document has loaded. This tests durability, not cancellation.
+  const loginBody = "<!doctype html><html><head><link rel=\"icon\" href=\"data:,\"></head>"
+    + "<body><h1>Login</h1></body></html>";
+  const profileBody = "<!doctype html><html><head><link rel=\"icon\" href=\"data:,\"></head>"
+    + "<body><h1>Profile</h1></body></html>";
+  const upstreamPaths: string[] = [];
+  const server = createServer((incoming, outgoing) => {
+    const pathname = new URL(incoming.url ?? "/", "http://127.0.0.1").pathname;
+    upstreamPaths.push(pathname);
+    const body = pathname === "/login" ? loginBody : profileBody;
+    outgoing.writeHead(200, {
+      "content-length": Buffer.byteLength(body),
+      "content-type": "text/html; charset=utf-8",
+    });
+    outgoing.end(body);
+  });
+  await new Promise<void>((resolve, reject) => {
+    server.once("error", reject);
+    server.listen(0, "127.0.0.1", resolve);
+  });
+  const address = server.address();
+  if (!address || typeof address === "string") {
+    throw new Error("Durable response server address is invalid.");
+  }
+  const origin = "http://provider-durable.clean-pay.test";
+  const browser = await chromium.launch({ args: [], headless: true });
+  try {
+    const context = await browser.newContext({
+      proxy: { server: `http://127.0.0.1:${address.port}` },
+      serviceWorkers: "block",
+    });
+    const page = await context.newPage();
+    const cdp = await context.newCDPSession(page);
+    await cdp.send("Network.enable", {
+      enableDurableMessages: true,
+      maxResourceBufferSize: 128 * 1024 * 1024,
+      maxTotalBufferSize: 1024 * 1024 * 1024,
+    });
+    let loginRequestId: string | null = null;
+    let loginBodyReadArmed = false;
+    let loginBodyReadAfterNavigation = false;
+    let releaseLoginBodyRead: () => void = () => undefined;
+    const loginBodyReadGate = new Promise<void>((resolve) => {
+      releaseLoginBodyRead = resolve;
+    });
+    const cdpBodyCapture = createProviderOverlapCdpResponseBodyCapture({
+      send: async (
+        method: "Network.getResponseBody",
+        parameters: { requestId: string },
+      ) => {
+        if (parameters.requestId === loginRequestId) {
+          loginBodyReadArmed = true;
+          await loginBodyReadGate;
+          loginBodyReadAfterNavigation = page.url() === `${origin}/profile`;
+        }
+        return cdp.send(method, parameters);
+      },
+    });
+    cdp.on("Network.responseReceived", (event) => {
+      if (event.response.url === `${origin}/login`) loginRequestId = event.requestId;
+      cdpBodyCapture.observeResponseReceived(event);
+    });
+    cdp.on("Network.loadingFinished", (event) => {
+      cdpBodyCapture.observeLoadingFinished(event);
+    });
+    cdp.on("Network.loadingFailed", (event) => {
+      cdpBodyCapture.observeLoadingFailed(event);
+    });
+    type TerminalResult = { failureSha256: string | null; finished: boolean };
+    const terminals = new Map<object, {
+      promise: Promise<TerminalResult>;
+      settle: (result: TerminalResult) => void;
+    }>();
+    context.on("request", (request) => {
+      let settle: (result: TerminalResult) => void = () => undefined;
+      const promise = new Promise<TerminalResult>((resolve) => { settle = resolve; });
+      terminals.set(request, { promise, settle });
+    });
+    context.on("requestfinished", (request) => {
+      terminals.get(request)?.settle({ failureSha256: null, finished: true });
+    });
+    context.on("requestfailed", (request) => {
+      terminals.get(request)?.settle({
+        failureSha256: sha256(request.failure()?.errorText ?? "unknown request failure"),
+        finished: false,
+      });
+    });
+    const captures = new Map<string, Promise<{ body: Uint8Array | null }>>();
+    context.on("response", (response) => {
+      const request = response.request();
+      const pathname = new URL(request.url()).pathname;
+      const terminal = terminals.get(request);
+      if (!terminal) throw new Error("Durable response has no matching request terminal gate.");
+      const capture = captureProviderOverlapResponseEvidence({
+        classification: Object.freeze({
+          disposition: "continue",
+          expectedStatuses: Object.freeze([200]),
+          key: pathname === "/login" ? "app-login-document" : "app-profile-document",
+          navigation: true,
+          staticAssetSha256: null,
+          staticPath: null,
+        }),
+        readBody: ({ maximumBodyBytes }: { maximumBodyBytes: number }) => (
+          cdpBodyCapture.readBody({
+            maximumBodyBytes,
+            resourceType: request.resourceType(),
+            status: response.status(),
+            url: request.url(),
+          })
+        ),
+        request,
+        response,
+        terminal: terminal.promise,
+      });
+      void capture.catch(() => undefined);
+      captures.set(pathname, capture);
+    });
+    try {
+      const loginResponse = await page.goto(`${origin}/login`, {
+        timeout: 5_000,
+        waitUntil: "load",
+      });
+      if (!loginResponse) throw new Error("Durable login navigation has no response.");
+      const loginTerminal = terminals.get(loginResponse.request());
+      if (!loginTerminal) throw new Error("Durable login navigation has no terminal gate.");
+      await expect(loginTerminal.promise).resolves.toEqual({ failureSha256: null, finished: true });
+      await expect.poll(() => loginBodyReadArmed, { timeout: 5_000 }).toBe(true);
+      // No body read or arbitrary sleep occurs before this navigation.
+      await page.goto(`${origin}/profile`, { timeout: 5_000, waitUntil: "load" });
+      releaseLoginBodyRead();
+      await expect.poll(() => captures.size, { timeout: 5_000 }).toBe(2);
+      const loginCapture = await captures.get("/login");
+      const profileCapture = await captures.get("/profile");
+      expect(loginBodyReadAfterNavigation).toBe(true);
+      expect(Buffer.from(loginCapture?.body ?? []).toString("utf8")).toBe(loginBody);
+      expect(Buffer.from(profileCapture?.body ?? []).toString("utf8")).toBe(profileBody);
+      expect(upstreamPaths).toEqual(["/login", "/profile"]);
+      expect(cdpBodyCapture.assertClean()).toEqual({
+        bodyClaimCount: 2,
+        bodySettledCount: 2,
+        bodylessClaimCount: 0,
+        observedResponseCount: 2,
+        responseClaimCount: 2,
+        responseSettledCount: 2,
+        status: "cdp-response-bodies-clean",
+      });
+    } finally {
+      releaseLoginBodyRead();
+      await context.close();
+    }
+  } finally {
+    await browser.close();
+    await new Promise<void>((resolve, reject) => {
+      server.close((error) => (error ? reject(error) : resolve()));
+    });
+  }
+});
+
+test("reproduces deferred response body eviction without the quiet checkpoint", async () => {
+  const request = {};
+  const classification = browserClassification(
+    "https://pay.ci.clean-pay.dev/login?redirect_to=%2Fprofile",
+    { resourceType: "document", isNavigation: true, isMainFrame: true },
+  );
+  let navigatedAway = false;
+  let releaseResponseCompletion: () => void = () => undefined;
+  const responseCompletion = new Promise<void>((resolve) => {
+    releaseResponseCompletion = resolve;
+  });
+  const response = {
+    body: async () => {
+      await responseCompletion;
+      if (navigatedAway) throw new Error("body was evicted by navigation");
+      return Buffer.from("<!doctype html><h1>Login</h1>");
+    },
+    finished: async () => {
+      await responseCompletion;
+      return null;
+    },
+    headers: () => ({ "content-type": "text/html; charset=utf-8" }),
+    request: () => request,
+    status: () => 200,
+  };
+
+  const capturePromise = captureProviderOverlapResponseEvidence({
+    classification,
+    request,
+    response,
+  });
+  navigatedAway = true;
+  releaseResponseCompletion();
+  await expect(capturePromise).rejects.toThrow("body was evicted by navigation");
+});
+
+test("never reads redirect bodies and rejects failed or oversized declaration capture", async () => {
+  const request = {};
+  const redirectClassification = browserClassification(
+    "https://pay.ci.clean-pay.dev/?_rsc=opaque-state_1",
+  );
+  let redirectBodyCalls = 0;
+  let redirectReaderCalls = 0;
+  await expect(captureProviderOverlapResponseEvidence({
+    classification: redirectClassification,
+    readBody: async () => {
+      redirectReaderCalls += 1;
+      return null;
+    },
+    request,
+    response: {
+      body: async () => {
+        redirectBodyCalls += 1;
+        return Buffer.alloc(0);
+      },
+      finished: async () => null,
+      headers: () => ({ "content-type": "application/octet-stream" }),
+      request: () => request,
+      status: () => 307,
+    },
+  })).resolves.toMatchObject({ body: null, responseStatus: 307 });
+  expect(redirectBodyCalls).toBe(0);
+  expect(redirectReaderCalls).toBe(0);
+
+  const bodylessClassification = browserClassification(
+    "https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit",
+    { resourceType: "script" },
+  );
+  let bodylessReaderCalls = 0;
+  await expect(captureProviderOverlapResponseEvidence({
+    classification: bodylessClassification,
+    readBody: async ({ maximumBodyBytes }: { maximumBodyBytes: number | null }) => {
+      bodylessReaderCalls += 1;
+      expect(maximumBodyBytes).toBeNull();
+      return null;
+    },
+    request,
+    response: {
+      body: async () => {
+        throw new Error("bodyless response must use its exact skip claim");
+      },
+      finished: async () => null,
+      headers: () => ({ "content-type": "application/javascript" }),
+      request: () => request,
+      status: () => 200,
+    },
+    terminal: Promise.resolve({ failureSha256: null, finished: true }),
+  })).resolves.toMatchObject({ body: null, responseStatus: 200 });
+  expect(bodylessReaderCalls).toBe(1);
+
+  const declarationClassification = browserClassification(
+    "https://pay.ci.clean-pay.dev/profile",
+    { resourceType: "document", isNavigation: true, isMainFrame: true },
+  );
+  const declarationResponse = (body: () => Promise<Buffer>) => ({
+    body,
+    finished: async () => null,
+    headers: () => ({ "content-type": "text/x-component" }),
+    request: () => request,
+    status: () => 200,
+  });
+  await expect(captureProviderOverlapResponseEvidence({
+    classification: declarationClassification,
+    request,
+    response: declarationResponse(async () => Buffer.alloc(2 * 1024 * 1024 + 1)),
+  })).rejects.toThrow(/bounded contract/);
+  await expect(captureProviderOverlapResponseEvidence({
+    classification: declarationClassification,
+    request,
+    response: declarationResponse(async () => {
+      throw new Error("synthetic body failure");
+    }),
+  })).rejects.toThrow(/synthetic body failure/);
+});
+
+test("binds every completed static response to independent attested bytes and MIME", async () => {
+  for (const [servedPath, resourceType, responseContentType] of [
+    [staticJavascriptPath, "script", "application/javascript"],
+    [staticStylesheetPath, "stylesheet", "text/css"],
+    [staticFontPath, "font", "font/woff2"],
+    [staticImagePath, "image", "image/svg+xml"],
+  ] as const) {
+    const classification = browserClassification(
+      `https://pay.ci.clean-pay.dev${servedPath}`,
+      { resourceType },
+    );
+    const body = Buffer.from(staticBodyByPath[servedPath], "utf8");
+    expect(attestProviderOverlapStaticResponse({
+      body,
+      classification,
+      responseContentType,
+      responseStatus: 200,
+    }, staticAssetContract)).toEqual({
+      staticResponseBytes: body.byteLength,
+      staticResponseSha256: staticInventoryByPath[servedPath],
+    });
+    const lifecycle: string[] = [];
+    await expect(readProviderOverlapStaticResponseEvidence({
+      classification,
+      response: {
+        body: async () => {
+          lifecycle.push("body");
+          return body;
+        },
+        finished: async () => {
+          lifecycle.push("finished");
+          return null;
+        },
+        status: () => 200,
+      },
+      responseContentType,
+    }, staticAssetContract)).resolves.toMatchObject({
+      observation: { staticResponseSha256: staticInventoryByPath[servedPath] },
+    });
+    expect(lifecycle).toEqual(["finished", "body"]);
+
+    const tampered = Buffer.from(body);
+    tampered[0] ^= 1;
+    expect(() => attestProviderOverlapStaticResponse({
+      body: tampered,
+      classification,
+      responseContentType,
+      responseStatus: 200,
+    }, staticAssetContract)).toThrow(/response bytes/);
+  }
+
+  const scriptClassification = browserClassification(
+    `https://pay.ci.clean-pay.dev${staticJavascriptPath}`,
+    { resourceType: "script" },
+  );
+  expect(() => attestProviderOverlapStaticResponse({
+    body: undefined as unknown as Uint8Array,
+    classification: scriptClassification,
+    responseContentType: "application/javascript",
+    responseStatus: 200,
+  }, staticAssetContract)).toThrow(/incomplete/);
+  await expect(readProviderOverlapStaticResponseEvidence({
+    classification: scriptClassification,
+    response: null,
+    responseContentType: "application/javascript",
+  }, staticAssetContract)).rejects.toThrow(/no readable response/);
+  const oversized = Object.create(Uint8Array.prototype) as Uint8Array;
+  Object.defineProperty(oversized, "byteLength", { value: 128 * 1024 * 1024 + 1 });
+  expect(() => attestProviderOverlapStaticResponse({
+    body: oversized,
+    classification: scriptClassification,
+    responseContentType: "application/javascript",
+    responseStatus: 200,
+  }, staticAssetContract)).toThrow(/byte length/);
+});
+
+test("keeps rejected history bindings sticky across early and close-adjacent drains", async () => {
+  type InstrumentationGlobal = typeof globalThis & {
+    __cleanPayProviderHistory: (record: unknown) => Promise<void>;
+    __cleanPayProviderHistoryDrain?: () => Promise<void>;
+    addEventListener: (name: string, listener: () => void) => void;
+    history: {
+      length: number;
+      pushState: (state: unknown, unused: string, url?: string | URL | null) => void;
+      replaceState: (state: unknown, unused: string, url?: string | URL | null) => void;
+      state: unknown;
+    };
+    location: { href: string };
+  };
+  const runScenario = async (rejectBeforeDrain: boolean) => {
+    const target = globalThis as InstrumentationGlobal;
+    const names = [
+      "__cleanPayProviderHistory", "__cleanPayProviderHistoryDrain",
+      "addEventListener", "history", "location",
+    ] as const;
+    const descriptors = Object.fromEntries(names.map((name) => [
+      name,
+      Object.getOwnPropertyDescriptor(target, name),
+    ]));
+    let rejectBinding: ((reason?: unknown) => void) | undefined;
+    const location = { href: "https://pay.ci.clean-pay.dev/cabinet" };
+    const history = {
+      length: 5,
+      state: null as unknown,
+      pushState(state: unknown, _unused: string, url?: string | URL | null) {
+        this.state = state;
+        this.length += 1;
+        if (url !== undefined && url !== null) location.href = new URL(url, location.href).href;
+      },
+      replaceState(state: unknown, _unused: string, url?: string | URL | null) {
+        this.state = state;
+        if (url !== undefined && url !== null) location.href = new URL(url, location.href).href;
+      },
+    };
+    try {
+      Object.defineProperties(target, {
+        __cleanPayProviderHistory: {
+          configurable: true,
+          value: () => new Promise<void>((_resolve, reject) => { rejectBinding = reject; }),
+        },
+        addEventListener: { configurable: true, value: () => undefined },
+        history: { configurable: true, value: history },
+        location: { configurable: true, value: location },
+      });
+      installProviderOverlapHistoryInstrumentation();
+      history.replaceState({
+        __NA: true,
+        __PRIVATE_NEXTJS_INTERNALS_TREE: {},
+      }, "", location.href);
+      if (!rejectBinding || !target.__cleanPayProviderHistoryDrain) {
+        throw new Error("Synthetic history binding fixture was not installed.");
+      }
+      if (rejectBeforeDrain) {
+        rejectBinding(new Error("synthetic-early-binding-rejection"));
+        await Promise.resolve();
+      }
+      const draining = target.__cleanPayProviderHistoryDrain();
+      if (!rejectBeforeDrain) rejectBinding(new Error("synthetic-close-adjacent-rejection"));
+      await expect(draining).rejects.toThrow(/rejected an event/);
+    } finally {
+      for (const name of names) {
+        const descriptor = descriptors[name];
+        if (descriptor) Object.defineProperty(target, name, descriptor);
+        else delete target[name];
+      }
+    }
+  };
+
+  await runScenario(true);
+  await runScenario(false);
+});
+
+test("derives the exact bounded static response contract from attested OCI inventory bytes", () => {
+  const attestation = {
+    attestationSha256: staticAssetContract.attestationSha256,
+    source: {
+      configDigest: staticAssetContract.configDigest,
+      imageDigest: staticAssetContract.imageDigest,
+      manifestDigest: staticAssetContract.manifestDigest,
+    },
+    inventory: {
+      inventorySha256: staticAssetContract.inventorySha256,
+      staticChunks: Object.entries(staticInventoryByPath).map(([servedPath, digest]) => ({
+        imagePath: `/app/.next${servedPath.slice("/_next".length)}`,
+        servedPath,
+        sha256: digest,
+        size: staticInventoryMetadataByPath[servedPath].assetBytes,
+      })),
+      clientReferences: ["/cabinet/page", "/login/page", "/profile/page"].map((route) => ({
+        route,
+        declaredStaticChunks: [...staticRouteDeclaredPaths],
+      })),
+    },
+  };
+  expect(createProviderOverlapStaticAssetContract(attestation)).toMatchObject({
+    inventoryByPath: staticInventoryByPath,
+    inventoryMetadataByPath: staticInventoryMetadataByPath,
+    routeDeclaredPaths: staticRouteDeclaredPaths,
+    documentRouteContracts: staticDocumentRouteContracts,
+  });
+  const missingSize = structuredClone(attestation);
+  delete (missingSize.inventory.staticChunks[0] as Partial<{
+    size: number;
+  }>).size;
+  expect(() => createProviderOverlapStaticAssetContract(missingSize))
+    .toThrow(/static asset inventory/);
+});
+
+test("extracts every exact HTML and RSC static declaration without partial suffixes", async () => {
+  const extraPaths = [
+    "/_next/static/media/favicon.current.ico",
+    "/_next/static/media/brand.current.png",
+  ];
+  const inventoryByPath: Record<string, string> = {
+    ...staticAssetContract.inventoryByPath,
+  };
+  const inventoryMetadataByPath: Record<string, { assetBytes: number; extension: string }> = {
+    ...staticAssetContract.inventoryMetadataByPath,
+  };
+  for (const servedPath of extraPaths) {
+    const extension = servedPath.slice(servedPath.lastIndexOf(".") + 1);
+    inventoryByPath[servedPath] = sha256(`synthetic:${servedPath}`);
+    inventoryMetadataByPath[servedPath] = { assetBytes: servedPath.length, extension };
+  }
+  const contract = {
+    ...staticAssetContract,
+    inventoryByPath,
+    inventoryMetadataByPath,
+    inventoryLedgerContractSha256: sha256(JSON.stringify(staticInventoryLedgerFor(
+      inventoryByPath,
+      inventoryMetadataByPath,
+    ))),
+  };
+  const declarations = [
+    staticJavascriptPath,
+    staticStylesheetPath,
+    staticEotPath,
+    extraPaths[0],
+    extraPaths[1],
+    staticImagePath,
+    staticTtfPath,
+    staticFontPath,
+    staticWoffPath,
+  ];
+  const body = Buffer.from(declarations.map((servedPath) => `"${servedPath}"`).join(","), "utf8");
+  expect(extractProviderOverlapResponseStaticDeclarations(body, contract)).toEqual(declarations);
+  expect(declarations[7]).toMatch(/\.woff2$/);
+  expect(declarations[8]).toMatch(/\.woff$/);
+  const directHtml = Buffer.from(`<script src="${staticJavascriptPath}"></script>`, "utf8");
+  const rawRsc = Buffer.from(`1:I["${staticJavascriptPath}","default"]\n`, "utf8");
+  const flightChunk = `1:I["${staticJavascriptPath}","default"]\n`;
+  const inlineFlight = Buffer.from(
+    `<script>self.__next_f.push(${JSON.stringify([1, flightChunk])})</script>`,
+    "utf8",
+  );
+  for (const [label, nextBody] of [
+    ["direct HTML attribute", directHtml],
+    ["raw text/x-component import", rawRsc],
+    ["JSON-escaped inline Flight import", inlineFlight],
+  ] as const) {
+    expect(
+      extractProviderOverlapResponseStaticDeclarations(nextBody, contract),
+      label,
+    ).toEqual([staticJavascriptPath]);
+  }
+  const exactNonModule = Buffer.from(
+    `<script src="${staticJavascriptPath}" noModule=""></script>`,
+    "utf8",
+  );
+  expect(extractProviderOverlapResponseStaticDeclarations(exactNonModule, contract)).toEqual([]);
+  const exactNonModuleWithNonce = Buffer.from(
+    `<script src="${staticJavascriptPath}" noModule="" nonce="${"a".repeat(32)}"></script>`,
+    "utf8",
+  );
+  expect(extractProviderOverlapResponseStaticDeclarations(exactNonModuleWithNonce, contract))
+    .toEqual([]);
+  const escapedNonModuleWithNonce = Buffer.from(
+    `<script src=\\"${staticJavascriptPath}\\" noModule=\\"\\" nonce=\\"${"b".repeat(32)}\\"></script>`,
+    "utf8",
+  );
+  expect(extractProviderOverlapResponseStaticDeclarations(escapedNonModuleWithNonce, contract))
+    .toEqual([]);
+  expect(extractProviderOverlapResponseStaticDeclarations(Buffer.from(
+    `<script src="${staticJavascriptPath}" async=""></script>`,
+    "utf8",
+  ), contract)).toEqual([staticJavascriptPath]);
+  for (const unsafeNonModule of [
+    `<script src="${staticJavascriptPath}" noModule="" nonce="${"a".repeat(31)}"></script>`,
+    `<script src="${staticJavascriptPath}" noModule="" nonce="${"A".repeat(32)}"></script>`,
+    `<script src="${staticJavascriptPath}" nonce="${"a".repeat(32)}" noModule=""></script>`,
+    `<script src="${staticJavascriptPath}" noModule="" nonce="${"a".repeat(32)}" async=""></script>`,
+  ]) {
+    expect(extractProviderOverlapResponseStaticDeclarations(
+      Buffer.from(unsafeNonModule, "utf8"),
+      contract,
+    )).toEqual([staticJavascriptPath]);
+  }
+  expect(() => extractProviderOverlapResponseStaticDeclarations(Buffer.from(
+    `<script src="${staticJavascriptPath}" noModule=""></script>`
+      + `<script src="${staticJavascriptPath}" noModule=""></script>`,
+    "utf8",
+  ), contract)).toThrow(/incoherent exact nomodule/);
+  expect(extractProviderOverlapResponseStaticDeclarations(Buffer.from(
+    `<script src="${staticJavascriptPath}" noModule=""></script>`
+      + `<script src=\\"${staticJavascriptPath}\\" noModule=\\"\\"></script>`,
+    "utf8",
+  ), contract)).toEqual([]);
+
+  for (const [label, declaration] of [
+    ["woff2 alphanumeric suffix", `${staticFontPath}evil`],
+    ["woff2 dotted suffix", `${staticFontPath}.cache`],
+    ["woff2 path suffix", `${staticFontPath}/evil`],
+    ["query suffix", `${staticFontPath}?v=1`],
+    ["external absolute prefix", `https://evil.example${staticJavascriptPath}`],
+    ["local path prefix", `/prefix${staticJavascriptPath}`],
+    ["semicolon pchar suffix", `${staticJavascriptPath};evil`],
+    ["colon pchar suffix", `${staticJavascriptPath}:evil`],
+    ["at pchar suffix", `${staticJavascriptPath}@evil`],
+    ["bang pchar suffix", `${staticJavascriptPath}!evil`],
+    ["tilde pchar suffix", `${staticJavascriptPath}~evil`],
+    ["plus pchar suffix", `${staticJavascriptPath}+evil`],
+    ["dollar pchar suffix", `${staticJavascriptPath}$evil`],
+    ["comma pchar suffix", `${staticJavascriptPath},evil`],
+    ["equals pchar suffix", `${staticJavascriptPath}=evil`],
+    ["HTML entity suffix", `${staticJavascriptPath}&amp;evil`],
+    ["unsafe traversal", "/_next/static/media/../inter-123.woff2"],
+    ["unknown extension", "/_next/static/media/inter-123.webp"],
+    ["unknown chunk extension", "/_next/static/chunks/app-123.mjs"],
+  ] as const) {
+    expect(() => extractProviderOverlapResponseStaticDeclarations(
+      Buffer.from(`"${declaration}"`, "utf8"),
+      contract,
+    ), label).toThrow(/unknown, partial, or unsafe|paired.*inventory|paired opening/);
+  }
+  for (const [label, unsafeBody] of [
+    ["entity quote pair", `&quot;${staticJavascriptPath}&quot;`],
+    ["single quote pair", `'${staticJavascriptPath}'`],
+    ["raw-open escaped-close", `"${staticJavascriptPath}\\"`],
+    ["escaped-open raw-close", `\\"${staticJavascriptPath}"`],
+  ] as const) {
+    expect(() => extractProviderOverlapResponseStaticDeclarations(
+      Buffer.from(unsafeBody, "utf8"),
+      contract,
+    ), label).toThrow(/paired/);
+  }
+  expect(() => extractProviderOverlapResponseStaticDeclarations(
+    Buffer.from('"/_next/static/media/not-attested.woff2"', "utf8"),
+    contract,
+  )).toThrow(/attested inventory/);
+  expect(() => extractProviderOverlapResponseStaticDeclarations(
+    Buffer.from([0xc3, 0x28]),
+    contract,
+  )).toThrow(/valid UTF-8/);
+  expect(() => extractProviderOverlapResponseStaticDeclarations(Buffer.alloc(0), contract))
+    .toThrow(/bounded byte contract/);
+  expect(() => extractProviderOverlapResponseStaticDeclarations(
+    Buffer.alloc(2 * 1024 * 1024 + 1, 0x20),
+    contract,
+  )).toThrow(/bounded byte contract/);
+  expect(() => extractProviderOverlapResponseStaticDeclarations(
+    Buffer.from(Array.from({ length: 257 }, () => `"${staticFontPath}"`).join(","), "utf8"),
+    contract,
+  )).toThrow(/count exceeds/);
+
+  const runnerSource = await readFile(path.resolve(__dirname, "prove-provider-overlap.mjs"), "utf8");
+  expect(runnerSource).toContain("extractProviderOverlapResponseStaticDeclarations(");
+  expect(runnerSource).not.toContain("source.matchAll(");
+  expect(runnerSource).not.toContain("(?:eot|ico|png|svg|ttf|woff|woff2)");
+});
+
+test("canonicalizes all current relative CSS media references without broadening URLs", () => {
+  const sourcePath = "/_next/static/chunks/current-media.css";
+  const references = [
+    "primeicons.current.eot",
+    "primeicons.current.eot",
+    "primeicons.current.woff2",
+    "primeicons.current.woff",
+    "primeicons.current.ttf",
+    "primeicons.current.svg",
+    "Inter-roman.current.woff2",
+    "Inter-italic.current.woff2",
+  ];
+  const cssBody = Buffer.from(references.map((filename) => (
+    `url(../media/${filename})`
+  )).join(","), "utf8");
+  const inventoryByPath: Record<string, string> = {
+    ...staticAssetContract.inventoryByPath,
+    [sourcePath]: sha256(cssBody.toString("utf8")),
+  };
+  const inventoryMetadataByPath: Record<string, { assetBytes: number; extension: string }> = {
+    ...staticAssetContract.inventoryMetadataByPath,
+    [sourcePath]: { assetBytes: cssBody.byteLength, extension: "css" },
+  };
+  for (const filename of new Set(references)) {
+    const servedPath = `/_next/static/media/${filename}`;
+    inventoryByPath[servedPath] = sha256(`synthetic:${filename}`);
+    inventoryMetadataByPath[servedPath] = {
+      assetBytes: Buffer.byteLength(`synthetic:${filename}`),
+      extension: filename.slice(filename.lastIndexOf(".") + 1),
+    };
+  }
+  const contract = {
+    ...staticAssetContract,
+    inventoryByPath,
+    inventoryMetadataByPath,
+    inventoryLedgerContractSha256: sha256(JSON.stringify(staticInventoryLedgerFor(
+      inventoryByPath,
+      inventoryMetadataByPath,
+    ))),
+  };
+  const observed = extractProviderOverlapCssMediaReferences(cssBody, sourcePath, contract);
+  expect(observed).toHaveLength(8);
+  expect(observed.map(({ targetPath }) => targetPath)).toEqual(
+    references.map((filename) => `/_next/static/media/${filename}`),
+  );
+  for (const unsafe of [
+    "url(data:font/woff2;base64,AAAA)",
+    "url(https://example.invalid/font.woff2)",
+    "url(../../../../media/primeicons.current.woff2)",
+    "url(/_next/static/media/primeicons.current.woff2)",
+  ]) {
+    expect(() => extractProviderOverlapCssMediaReferences(
+      Buffer.from(unsafe, "utf8"),
+      sourcePath,
+      contract,
+    ), unsafe).toThrow(/noncanonical|escaped/);
+  }
+  const missing = structuredClone(contract);
+  delete missing.inventoryByPath["/_next/static/media/primeicons.current.ttf"];
+  delete missing.inventoryMetadataByPath["/_next/static/media/primeicons.current.ttf"];
+  missing.inventoryLedgerContractSha256 = sha256(JSON.stringify(staticInventoryLedgerFor(
+    missing.inventoryByPath,
+    missing.inventoryMetadataByPath,
+  )));
+  expect(() => extractProviderOverlapCssMediaReferences(cssBody, sourcePath, missing))
+    .toThrow(/escaped its attested image inventory/);
+});
+
+test("seals pending request identities through a separate bounded quiet barrier", async () => {
+  const seal = createProviderOverlapPendingRequestSeal(2);
+  const request = {};
+  seal.observe(request);
+  const draining = seal.drainAndSeal({ pollMs: 1, quietMs: 3, timeoutMs: 100 });
+  setTimeout(() => seal.complete(request), 2);
+  await expect(draining).resolves.toEqual({
+    completedRequestCount: 1,
+    observedRequestCount: 1,
+    status: "drained-and-sealed",
+  });
+  expect(seal.pendingCount()).toBe(0);
+  expect(seal.assertClean()).toEqual({
+    completedRequestCount: 1,
+    lateRequestEventCount: 0,
+    observedRequestCount: 1,
+    status: "sealed-clean",
+  });
+
+  seal.observe({});
+  expect(() => seal.assertClean()).toThrow(/changed after/);
+
+  const stuck = createProviderOverlapPendingRequestSeal(1);
+  stuck.observe({});
+  await expect(stuck.drainAndSeal({
+    pollMs: 1,
+    quietMs: 2,
+    timeoutMs: 5,
+  })).rejects.toThrow(/did not drain/);
+
+  const duplicateTerminal = createProviderOverlapPendingRequestSeal(1);
+  const duplicateRequest = {};
+  duplicateTerminal.observe(duplicateRequest);
+  duplicateTerminal.complete(duplicateRequest);
+  duplicateTerminal.complete(duplicateRequest);
+  await expect(duplicateTerminal.drainAndSeal({
+    pollMs: 1,
+    quietMs: 2,
+    timeoutMs: 20,
+  })).rejects.toThrow(/became invalid/);
+});
+
+test("supports reusable fail-closed pending request quiet checkpoints", async () => {
+  const seal = createProviderOverlapPendingRequestSeal(2);
+  const firstRequest = {};
+  seal.observe(firstRequest);
+  const firstCheckpoint = seal.waitForQuiet({ pollMs: 1, quietMs: 3, timeoutMs: 100 });
+  setTimeout(() => seal.complete(firstRequest), 2);
+  await expect(firstCheckpoint).resolves.toEqual({
+    completedRequestCount: 1,
+    observedRequestCount: 1,
+    status: "quiet-checkpoint",
+  });
+
+  const secondRequest = {};
+  seal.observe(secondRequest);
+  setTimeout(() => seal.complete(secondRequest), 2);
+  await expect(seal.waitForQuiet({ pollMs: 1, quietMs: 3, timeoutMs: 100 }))
+    .resolves.toEqual({
+      completedRequestCount: 2,
+      observedRequestCount: 2,
+      status: "quiet-checkpoint",
+    });
+
+  await expect(seal.drainAndSeal({ pollMs: 1, quietMs: 3, timeoutMs: 100 }))
+    .resolves.toEqual({
+      completedRequestCount: 2,
+      observedRequestCount: 2,
+      status: "drained-and-sealed",
+    });
+  expect(seal.assertClean()).toEqual({
+    completedRequestCount: 2,
+    lateRequestEventCount: 0,
+    observedRequestCount: 2,
+    status: "sealed-clean",
+  });
+
+  const stuck = createProviderOverlapPendingRequestSeal(1);
+  stuck.observe({});
+  await expect(stuck.waitForQuiet({
+    pollMs: 1,
+    quietMs: 2,
+    timeoutMs: 5,
+  })).rejects.toThrow(/quiet checkpoint/);
+  await expect(stuck.drainAndSeal({
+    pollMs: 1,
+    quietMs: 2,
+    timeoutMs: 5,
+  })).rejects.toThrow(/did not drain/);
+
+  const late = createProviderOverlapPendingRequestSeal(1);
+  const lateRequest = {};
+  late.observe(lateRequest);
+  late.complete(lateRequest);
+  late.observe(lateRequest);
+  await expect(late.waitForQuiet({
+    pollMs: 1,
+    quietMs: 2,
+    timeoutMs: 20,
+  })).rejects.toThrow(/became invalid/);
+});
+
+test("holds a navigation identity across later event-loop request generations", async () => {
+  const seal = createProviderOverlapPendingRequestSeal(3);
+  const navigationRequest = {};
+  const priorRequest = {};
+  seal.observe(navigationRequest);
+  let priorCompleted = false;
+  setTimeout(() => {
+    seal.observe(priorRequest);
+    setTimeout(() => {
+      priorCompleted = true;
+      seal.complete(priorRequest);
+    }, 3);
+  }, 0);
+
+  await expect(seal.waitForPriorRequests(navigationRequest, {
+    pollMs: 1,
+    quietMs: 30,
+    timeoutMs: 100,
+  })).resolves.toEqual({
+    completedRequestCount: 1,
+    observedRequestCount: 2,
+    status: "prior-requests-quiet",
+  });
+  expect(priorCompleted).toBe(true);
+  expect(seal.pendingCount()).toBe(1);
+
+  seal.complete(navigationRequest);
+  await expect(seal.drainAndSeal({ pollMs: 1, quietMs: 3, timeoutMs: 100 }))
+    .resolves.toEqual({
+      completedRequestCount: 2,
+      observedRequestCount: 2,
+      status: "drained-and-sealed",
+    });
+
+  const cancelled = createProviderOverlapPendingRequestSeal(1);
+  const cancelledNavigation = {};
+  cancelled.observe(cancelledNavigation);
+  const cancelledBarrier = cancelled.waitForPriorRequests(cancelledNavigation, {
+    pollMs: 1,
+    quietMs: 30,
+    timeoutMs: 100,
+  });
+  cancelled.complete(cancelledNavigation);
+  await expect(cancelledBarrier).rejects.toThrow(/navigation request changed/);
+
+  await expect(createProviderOverlapPendingRequestSeal(1).waitForPriorRequests({}, {
+    pollMs: 1,
+    quietMs: 2,
+    timeoutMs: 20,
+  })).rejects.toThrow(/navigation checkpoint contract is invalid/);
+});
+
+test("seals browser events only after a bounded quiet drain and rejects late events", async () => {
+  const fullContractSeal = createProviderOverlapEventSeal();
+  for (let index = 0; index < 772; index += 1) fullContractSeal.record();
+  await expect(fullContractSeal.drainAndSeal(() => true, {
+    pollMs: 1,
+    quietMs: 1,
+    timeoutMs: 100,
+  })).resolves.toEqual({ eventCount: 772, status: "drained-and-sealed" });
+  expect(fullContractSeal.assertClean()).toEqual({
+    eventCount: 772,
+    lateEventCount: 0,
+    status: "sealed-clean",
+  });
+
+  const seal = createProviderOverlapEventSeal(32);
+  const finish = seal.begin();
+  let settled = false;
+  const draining = seal.drainAndSeal(() => settled, {
+    pollMs: 1,
+    quietMs: 3,
+    timeoutMs: 100,
+  });
+  finish();
+  settled = true;
+  await expect(draining).resolves.toMatchObject({ status: "drained-and-sealed" });
+  expect(seal.assertClean()).toMatchObject({ lateEventCount: 0, status: "sealed-clean" });
+  seal.record();
+  expect(() => seal.assertClean()).toThrow(/changed after/);
+
+  for (const source of [
+    "console", "history", "request", "response", "pageerror", "provider", "load",
+  ]) {
+    const sourceSeal = createProviderOverlapEventSeal(32);
+    const observed: string[] = [];
+    await expect(finalizeProviderOverlapEventLifecycle({
+      assertUnchanged: () => undefined,
+      close: async () => undefined,
+      detach: async () => undefined,
+      eventSeal: sourceSeal,
+      finish: async () => {
+        sourceSeal.record();
+        observed.push(source);
+        return "finished";
+      },
+      isIdle: () => true,
+      snapshot: () => {
+        if (observed.length !== 0) throw new Error(`unexpected ${source} event`);
+        return { source };
+      },
+    }), source).rejects.toThrow(source);
+  }
+
+  const closeSeal = createProviderOverlapEventSeal(32);
+  await expect(finalizeProviderOverlapEventLifecycle({
+    assertUnchanged: () => undefined,
+    close: async () => { closeSeal.record(); },
+    detach: async () => undefined,
+    eventSeal: closeSeal,
+    finish: async () => "finished",
+    isIdle: () => true,
+    snapshot: () => ({ status: "stable" }),
+  })).rejects.toThrow(/changed after|close barrier/);
+
+  const revalidatedCapture = createProviderOverlapCdpResponseBodyCapture({
+    send: async () => ({ base64Encoded: false, body: "unused" }),
+  });
+  const revalidatedBodyless = revalidatedCapture.skipResponseBody({
+    resourceType: "manifest",
+    status: 200,
+    url: "https://pay.ci.clean-pay.dev/manifest.webmanifest",
+  });
+  revalidatedCapture.observeResponseReceived({
+    requestId: "revalidation.1",
+    response: { status: 200, url: "https://pay.ci.clean-pay.dev/manifest.webmanifest" },
+    type: "Manifest",
+  });
+  revalidatedCapture.observeLoadingFinished({
+    encodedDataLength: 16,
+    requestId: "revalidation.1",
+  });
+  await expect(revalidatedBodyless).resolves.toBeNull();
+  expect(revalidatedCapture.assertClean()).toMatchObject({
+    status: "cdp-response-bodies-clean",
+  });
+  const revalidationSeal = createProviderOverlapEventSeal(32);
+  let closeCaptureFailure: unknown = null;
+  let detachedAfterCaptureFailure = false;
+  await expect(finalizeProviderOverlapEventLifecycle({
+    assertUnchanged: () => {
+      if (closeCaptureFailure) throw closeCaptureFailure;
+      revalidatedCapture.assertClean();
+    },
+    close: async () => {
+      try {
+        revalidatedCapture.observeResponseReceived({
+          requestId: "revalidation.invalid",
+          response: null,
+          type: "Document",
+        });
+      } catch (error) {
+        closeCaptureFailure = error;
+      }
+    },
+    detach: async () => {
+      detachedAfterCaptureFailure = true;
+    },
+    eventSeal: revalidationSeal,
+    finish: async () => "finished",
+    isIdle: () => true,
+    snapshot: () => revalidatedCapture.snapshot(),
+  })).rejects.toThrow(/response event is invalid/);
+  expect(detachedAfterCaptureFailure).toBe(false);
+
+  const allowedSeal = createProviderOverlapEventSeal(32);
+  const allowedRawLedger: string[] = [];
+  setTimeout(() => {
+    allowedSeal.record();
+    allowedRawLedger.push("allowed-late-request");
+  }, 10);
+  await expect(finalizeProviderOverlapEventLifecycle({
+    assertUnchanged: (snapshot: { rawCount: number }) => {
+      expect(allowedRawLedger.length).toBe(snapshot.rawCount);
+    },
+    close: async () => undefined,
+    detach: async () => undefined,
+    eventSeal: allowedSeal,
+    finish: async () => ({ requestCount: allowedRawLedger.length }),
+    isIdle: () => true,
+    snapshot: () => ({ rawCount: allowedRawLedger.length }),
+  })).resolves.toMatchObject({
+    snapshot: { rawCount: 1 },
+    value: { requestCount: 1 },
+  });
+});
+
+test("does not classify the already-owned primary page as a popup lifecycle event", async () => {
+  const source = await readFile(
+    path.resolve(__dirname, "prove-provider-overlap.mjs"),
+    "utf8",
+  );
+  expect(source).toMatch(
+    /context\.on\("page", \(candidate\) => \{\s*if \(candidate === page\) return;\s*recordBrowserEvent\("page"\);\s*if \(unexpectedPages\.length/,
+  );
+});
+
+test("rejects a relative evidence output before normalization", () => {
+  expect(() => resolveProviderOverlapOutputPath("relative/proof.json")).toThrow(/absolute/);
+  expect(resolveProviderOverlapOutputPath(path.resolve("C:/proof/provider-overlap.json")))
+    .toBe(path.resolve("C:/proof/provider-overlap.json"));
+});
+
+test("keeps the schema write-once sidecar-only and free of comparison projection", async () => {
+  const directory = path.resolve(__dirname);
+  const [
+    schemaSource,
+    scriptSource,
+    documentation,
+    connectProxyController,
+    browserPolicy,
+    renderPolicy,
+    runtimeAttestation,
+    stackOrchestrator,
+  ] = await Promise.all([
+    readFile(path.join(directory, "provider-overlap-proof.schema.json"), "utf8"),
+    readFile(path.join(directory, "prove-provider-overlap.mjs"), "utf8"),
+    readFile(path.join(directory, "PROVIDER_OVERLAP_PROOF.md"), "utf8"),
+    readFile(path.join(directory, "journey-connect-proxy-controller.mjs"), "utf8"),
+    readFile(path.join(directory, "journey-browser-policy.mjs"), "utf8"),
+    readFile(path.join(directory, "..", "render-policy.mjs"), "utf8"),
+    readFile(path.join(directory, "journey-compose-runtime-attestation.mjs"), "utf8"),
+    readFile(path.join(directory, "journey-owned-stack-orchestrator.mjs"), "utf8"),
+  ]);
+  const schema = JSON.parse(schemaSource);
+  expect(schema).toMatchObject({
+    $schema: "https://json-schema.org/draft/2020-12/schema",
+    properties: {
+      schemaVersion: { const: 1 },
+      kind: { const: "clean-pay-dual-image-provider-overlap-proof" },
+      lifecycle: { $ref: "#/$defs/lifecycle" },
+      stacks: {
+        properties: {
+          baseline: { $ref: "#/$defs/baselineStack" },
+          candidate: { $ref: "#/$defs/candidateStack" },
+        },
+      },
+    },
+  });
+  expect(schema.additionalProperties).toBe(false);
+  expect(schema.required).toEqual(["schemaVersion", "kind", "stacks", "comparison", "lifecycle"]);
+  expect(schema.$defs.stack.required).toEqual(expect.arrayContaining([
+    "journeyContractSha256",
+    "runtimeBinding",
+    "connectProxyCounters",
+  ]));
+  expect(schema.$defs.stack.properties.applicationImage)
+    .toEqual({ $ref: "#/$defs/applicationImage" });
+  expect(schema.$defs.applicationImage.oneOf).toEqual([
+    { $ref: "#/$defs/applicationImageClassic" },
+    { $ref: "#/$defs/applicationImageContainerd" },
+  ]);
+  expect(schema.$defs.applicationImageClassic.required).toEqual([
+    "assetImageDigest",
+    "configDigest",
+    "manifestDigest",
+    "publicBuildContract",
+    "referenceSha256",
+    "repoDigestContractSha256",
+    "revision",
+    "role",
+    "runtimeImageDigest",
+  ]);
+  expect(Object.hasOwn(
+    schema.$defs.applicationImageClassic.properties,
+    "imageSelectionMode",
+  )).toBe(false);
+  expect(schema.$defs.applicationImageContainerd.required)
+    .toEqual(expect.arrayContaining(["imageSelectionMode"]));
+  expect(schema.$defs.applicationImageContainerd.properties.imageSelectionMode)
+    .toEqual({ const: "containerd-root-manifest" });
+  expect(schema.properties.stacks.allOf[0].oneOf).toHaveLength(2);
+
+  const imageSelectionSchema = {
+    type: "object",
+    additionalProperties: false,
+    required: ["baseline", "candidate"],
+    properties: {
+      baseline: {
+        type: "object",
+        required: ["applicationImage"],
+        properties: {
+          applicationImage: { $ref: "#/$defs/applicationImage" },
+        },
+      },
+      candidate: {
+        type: "object",
+        required: ["applicationImage"],
+        properties: {
+          applicationImage: { $ref: "#/$defs/applicationImage" },
+        },
+      },
+    },
+    allOf: structuredClone(schema.properties.stacks.allOf),
+    $defs: {
+      sha256: structuredClone(schema.$defs.sha256),
+      imageDigest: structuredClone(schema.$defs.imageDigest),
+      applicationImage: structuredClone(schema.$defs.applicationImage),
+      applicationImageClassic: structuredClone(schema.$defs.applicationImageClassic),
+      applicationImageContainerd: structuredClone(schema.$defs.applicationImageContainerd),
+    },
+  };
+  const validate = new Ajv({
+    allErrors: true,
+    schemaId: "auto",
+    validateSchema: false,
+  }).compile(imageSelectionSchema);
+  const classicSchemaProof = dualProof(
+    stackReport("baseline", extractedOverlap("offers-first")),
+    stackReport("candidate", extractedOverlap("devices-first")),
+  );
+  const containerdSchemaProof = dualProof(
+    useContainerdApplicationImage(
+      stackReport("baseline", extractedOverlap("offers-first")),
+    ),
+    useContainerdApplicationImage(
+      stackReport("candidate", extractedOverlap("devices-first")),
+    ),
+  );
+  expect(validate(classicSchemaProof.stacks), JSON.stringify(validate.errors)).toBe(true);
+  expect(validate(containerdSchemaProof.stacks), JSON.stringify(validate.errors)).toBe(true);
+
+  const mixedSchemaProof = structuredClone(classicSchemaProof);
+  mixedSchemaProof.stacks.candidate.applicationImage = structuredClone(
+    containerdSchemaProof.stacks.candidate.applicationImage,
+  );
+  expect(validate(mixedSchemaProof.stacks)).toBe(false);
+
+  const malformedModeProof = structuredClone(classicSchemaProof);
+  Object.assign(malformedModeProof.stacks.candidate.applicationImage, {
+    imageSelectionMode: "classic-config",
+  });
+  expect(validate(malformedModeProof.stacks)).toBe(false);
+  expect(schema.$defs.navigation.properties).toMatchObject({
+    finalUrl: { const: "https://pay.ci.clean-pay.dev/cabinet" },
+    requestCount: { type: "integer", minimum: 18, maximum: 256 },
+    requestContractSha256: { $ref: "#/$defs/sha256" },
+    requestOrderContractSha256: { $ref: "#/$defs/sha256" },
+    historyContractSha256: { $ref: "#/$defs/sha256" },
+    staticLoadGraph: { $ref: "#/$defs/staticLoadGraph" },
+    staticRequestContractSha256: { $ref: "#/$defs/sha256" },
+    staticRequestCount: { type: "integer", minimum: 9, maximum: 256 },
+    staticRequestLedger: {
+      type: "array",
+      items: { $ref: "#/$defs/staticRequestEntry" },
+      minItems: 9,
+      maxItems: 256,
+    },
+    unexpectedConsoleCount: { const: 0 },
+    unexpectedPageErrorCount: { const: 0 },
+  });
+  expect(schema.$defs.navigation.required).toEqual(expect.arrayContaining([
+    "historyLedger",
+    "requestOrderContractSha256",
+    "requestOrderLedger",
+    "staticLoadGraph",
+    "staticRequestLedger",
+  ]));
+  expect(schema.$defs.navigation.properties.historyLedger).toMatchObject({
+    minItems: 4,
+    maxItems: 4,
+  });
+  expect(schema.$defs.navigation.properties.historyLedger.prefixItems).toHaveLength(4);
+  expect(schema.$defs.navigation.properties.requestOrderLedger.items).toMatchObject({
+    additionalProperties: false,
+    required: ["kind", "occurrence"],
+  });
+  expect(schema.$defs.semanticRequestEntry.properties.key.enum)
+    .toContain("app-login-root-rsc");
+  expect(schema.$defs.semanticRequestEntry.properties.key.enum)
+    .not.toContain("app-login-cabinet-rsc");
+  expect(schema.$defs.semanticRequestEntry.required).toContain("responseFailureSha256");
+  expect(schema.$defs.semanticRequestEntry.properties.responseFailureSha256).toEqual({
+    anyOf: [{ $ref: "#/$defs/sha256" }, { type: "null" }],
+  });
+  expect(schema.$defs.navigation.additionalProperties).toBe(false);
+  expect(schema.$defs.eventLifecycle.properties.drainedEventCount).toEqual({
+    type: "integer",
+    minimum: 59,
+    maximum: 773,
+  });
+  expect(schema.$defs.eventLifecycle.required).toEqual([
+    "drainedEventCount", "lateEventCount", "sourceCounts", "status",
+  ]);
+  expect(schema.$defs.eventLifecycle.properties.sourceCounts).toMatchObject({
+    additionalProperties: false,
+    required: [
+      "console",
+      "history",
+      "page",
+      "pageerror",
+      "request",
+      "responseFallback",
+      "route",
+      "routeFallback",
+      "terminal",
+    ],
+  });
+  expect(schema.$defs.staticRequestEntry.additionalProperties).toBe(false);
+  expect(schema.$defs.staticRequestEntry.required).toEqual([
+    "assetBytes", "assetSha256", "class", "contentType", "documentKey", "pathSha256",
+  ]);
+  expect(schema.$defs.staticRequestEntry.properties.assetBytes)
+    .toEqual({ type: "integer", minimum: 1, maximum: 128 * 1024 * 1024 });
+  expect(schema.$defs.navigation.properties.staticRequestLedger.uniqueItems).toBeUndefined();
+  expect(schema.$defs.staticLoadGraph.additionalProperties).toBe(false);
+  expect(schema.$defs.staticLoadGraph.properties.cssMediaReferenceLedger).toMatchObject({
+    type: "array",
+    minItems: 8,
+    maxItems: 8,
+    uniqueItems: true,
+  });
+  expect(schema.$defs.staticLoadGraph.properties.inventoryLedger.items.properties.extension.enum)
+    .toEqual(["css", "eot", "ico", "js", "png", "svg", "ttf", "woff", "woff2"]);
+  expect(schema.$defs.staticLoadGraph.properties.declaredPathLedger).toMatchObject({
+    type: "array",
+    minItems: 1,
+    maxItems: 256,
+    uniqueItems: true,
+  });
+  expect(schema.$defs.staticLoadGraph.properties.documentLoadLedger)
+    .toMatchObject({ type: "array", minItems: 3, maxItems: 3 });
+  expect(schema.$defs.staticLoadGraph.properties.routeExpectedChunkRequestLedger)
+    .toBeUndefined();
+  expect(schema.$defs.runtimeBinding.properties.composeRuntimeContractSha256)
+    .toEqual({ $ref: "#/$defs/sha256" });
+  expect(schema.$defs.runtimeBinding.properties.ownedInputReceiptSha256)
+    .toEqual({ $ref: "#/$defs/sha256" });
+  expect(schema.$defs.lifecycle.properties).toMatchObject({
+    automaticCleanup: { const: true },
+    cleanupMode: { const: "exact-verifier-owned-stack-pair-v1" },
+    cleanup: { $ref: "#/$defs/cleanupReceipt" },
+  });
+  expect(schema.$defs.cleanupReceipt.additionalProperties).toBe(false);
+  expect(schema.$defs.cleanupStackReceipt.additionalProperties).toBe(false);
+  expect(schema.$defs.pairCoexistenceObservation.properties.services.prefixItems).toHaveLength(13);
+  expect(schema.$defs.coexistApp.allOf[1].properties).toEqual({
+    service: { const: "app" },
+    state: { const: "running-healthy" },
+  });
+  expect(schema.$defs.coexistBrowserProxy.allOf[1].properties).toEqual({
+    service: { const: "browser-proxy" },
+    state: { const: "running" },
+  });
+  expect(schema.$defs.baselineStack.allOf[1].properties).toMatchObject({
+    role: { const: "baseline" },
+    composeProject: {
+      pattern: "^clean-pay-browser-journey-provider-proof-baseline-[a-f0-9]{12}$",
+    },
+  });
+  expect(schema.$defs.candidateStack.allOf[1].properties).toMatchObject({
+    role: { const: "candidate" },
+    composeProject: {
+      pattern: "^clean-pay-browser-journey-provider-proof-candidate-[a-f0-9]{12}$",
+    },
+  });
+  expect(schema.$defs.stack.properties.scenario.properties.label)
+    .toEqual({ const: "provider-overlap-v1" });
+  expect(schema.$defs.databaseReset.properties.resetSequence).toEqual({ const: 1 });
+  expect(schema.$defs.baselineLifecycleProject.allOf[1].properties.composeProject)
+    .toEqual({
+      pattern: "^clean-pay-browser-journey-provider-proof-baseline-[a-f0-9]{12}$",
+    });
+  expect(schema.$defs.candidateLifecycleProject.allOf[1].properties.composeProject)
+    .toEqual({
+      pattern: "^clean-pay-browser-journey-provider-proof-candidate-[a-f0-9]{12}$",
+    });
+  expect(scriptSource).toContain("await writeJourneySanitizedOutput(outputPath, bytes)");
+  expect(stackOrchestrator).toContain('fileSystem.open(target, "wx", 0o600)');
+  expect(stackOrchestrator).toContain("await enforceJourneySyntheticPrivateMode(target, 0o600");
+  expect(scriptSource).toContain('redirect: "error"');
+  expect(scriptSource).toContain('"container", "inspect"');
+  expect(scriptSource).toContain('"image", "inspect"');
+  expect(scriptSource).toContain("Dual provider proof application image selection modes differ.");
+  expect(scriptSource).toContain("expectedImagePlatform: input.expectedPlatform");
+  expect(scriptSource).not.toContain('value.platform.architecture !== "amd64"');
+  expect(scriptSource.indexOf("try {")).toBeLessThan(scriptSource.indexOf("parseArguments(process.argv.slice(2))"));
+  const dualPreflight = scriptSource.indexOf("assertDualPreflight(baselinePreflight, candidatePreflight);");
+  const proxyReadiness = scriptSource.indexOf("await startBothConnectProxies");
+  const parallelProof = scriptSource.indexOf("runSettlements = await Promise.all([");
+  const firstControlPost = scriptSource.indexOf('await controlJson(input.controlUrl, "/__reset"');
+  const browserLaunch = scriptSource.indexOf("await chromium.launch");
+  expect(dualPreflight).toBeGreaterThanOrEqual(0);
+  expect(proxyReadiness).toBeGreaterThan(dualPreflight);
+  expect(parallelProof).toBeGreaterThan(proxyReadiness);
+  expect(firstControlPost).toBeGreaterThan(parallelProof);
+  expect(browserLaunch).toBeGreaterThan(firstControlPost);
+  for (const service of [
+    "app",
+    "browser-provider-mock",
+    "browser-proxy",
+    "browser-oidc-mock",
+    "browser-db-observer",
+  ]) {
+    expect(scriptSource).toContain(`"${service}"`);
+  }
+  expect(scriptSource).toContain('path.join(path.dirname(contractPath), ".env.app")');
+  expect(scriptSource).toContain("containers.app.Config.Env");
+  expect(runtimeAttestation).toContain("normalizeHostPath(mount.Source)");
+  expect(runtimeAttestation).toContain('"container", "exec", container.Id, "sha256sum"');
+  expect(runtimeAttestation).toContain('"compose",');
+  expect(runtimeAttestation).toContain('"config",');
+  expect(stackOrchestrator).toContain("Buffer.byteLength(chunk, \"utf8\")");
+  expect(scriptSource).toContain("maximumUnexpectedEvents = 32");
+  expect(scriptSource).toContain('await context.route("**/*"');
+  expect(scriptSource).toContain('context.on("page"');
+  const exactProfileNavigation = scriptSource.indexOf(
+    'url.href === "https://pay.ci.clean-pay.dev/profile"',
+  );
+  expect(exactProfileNavigation).toBeGreaterThanOrEqual(0);
+  expect(exactProfileNavigation).toBeLessThan(scriptSource.indexOf("await armOverlap();"));
+  expect(scriptSource.indexOf("await armOverlap();"))
+    .toBeLessThan(scriptSource.indexOf('page.goto("https://pay.ci.clean-pay.dev/cabinet"'));
+  expect(scriptSource).toContain("cabinetDocumentConsumed");
+  expect(connectProxyController).toContain("maximumOutputBytes = 8_192");
+  expect(connectProxyController).toContain("counters.accepted !== expected.accepted");
+  expect(connectProxyController).toContain('targetPort !== "443"');
+  expect(browserPolicy).toContain("DETERMINISTIC_CHROMIUM_LAUNCH_ARGS");
+  expect(browserPolicy).toContain("!url.username");
+  expect(browserPolicy).toContain("!url.password");
+  expect(renderPolicy).toContain('"--disable-gpu"');
+  expect(scriptSource).not.toContain("tests/browser/baselines/");
+  expect(scriptSource).not.toContain("comparison-projection");
+  const normalizedDocumentation = documentation.replace(/\s+/g, " ");
+  expect(normalizedDocumentation).toContain("does not make a provider-ledger order difference acceptable");
+  expect(normalizedDocumentation).toContain("does not prove every scheduler interleaving");
+});
+
+function extractedOverlap(order: "offers-first" | "devices-first") {
+  const value = rawOverlap(order);
+  return extractProviderOverlapProof(value.concurrency, value.ledger, order);
+}
+
+function rawOverlap(order: "offers-first" | "devices-first") {
+  const offersSequence = order === "offers-first" ? 2 : 3;
+  const devicesSequence = order === "devices-first" ? 2 : 3;
+  const entries = [
+    fillerRecord(1),
+    order === "offers-first"
+      ? readRecord("read_offers", offersSequence)
+      : readRecord("read_devices", devicesSequence),
+    order === "offers-first"
+      ? readRecord("read_devices", devicesSequence)
+      : readRecord("read_offers", offersSequence),
+  ];
+  return {
+    concurrency: {
+      contractVersion: 1,
+      active: null as Record<string, never> | null,
+      windows: [{
+        probe: "cabinet-offers-devices-overlap",
+        occurrence: 1,
+        timeoutMs: 5_000,
+        participants: [
+          {
+            service: "remnashop",
+            method: "GET",
+            pathname: "/api/v1/public/subscription/devices",
+            entered: true,
+            ledgerSequence: devicesSequence,
+          },
+          {
+            service: "remnashop",
+            method: "GET",
+            pathname: "/api/v1/public/subscription/offers",
+            entered: true,
+            ledgerSequence: offersSequence,
+          },
+        ],
+        duplicates: [] as Array<Record<string, unknown>>,
+        enteredCount: 2,
+        maxInFlight: 2,
+        release: "all-entered",
+        outcome: "proven",
+      }],
+    },
+    ledger: { entries, database: {} },
+  };
+}
+
+function readRecord(effect: "read_offers" | "read_devices", sequence: number) {
+  const devices = effect === "read_devices";
+  return {
+    sequence,
+    service: "remnashop",
+    method: "GET",
+    pathname: `/api/v1/public/subscription/${devices ? "devices" : "offers"}`,
+    query_keys: [],
+    body_bytes: 0,
+    body_sha256: sha256(""),
+    body_contract: null,
+    idempotency_key_present: false,
+    idempotency_key_sha256: null,
+    idempotency_key_contract: null,
+    credential_contract: {
+      header_names: [],
+      authorization_scheme: null,
+      cookie_names: ["access_token"],
+    },
+    effect,
+  };
+}
+
+function fillerRecord(sequence: number) {
+  return {
+    sequence,
+    service: "remnashop",
+    method: "GET",
+    pathname: "/api/v1/public/subscription/current",
+    query_keys: [],
+    body_bytes: 0,
+    body_sha256: sha256(""),
+    body_contract: null,
+    idempotency_key_present: false,
+    idempotency_key_sha256: null,
+    idempotency_key_contract: null,
+    credential_contract: {
+      header_names: [],
+      authorization_scheme: null,
+      cookie_names: ["access_token", "refresh_token"],
+    },
+    effect: "read_subscription",
+  };
+}
+
+function stackReport(role: "baseline" | "candidate", providerOverlap: ReturnType<typeof extractedOverlap>) {
+  const baseline = role === "baseline";
+  const revision = baseline ? baselineRevision : candidateRevision;
+  const composeProject = `clean-pay-browser-journey-provider-proof-${role}-${(baseline ? "1" : "2").repeat(12)}`;
+  const journeyContractSha256 = baseline ? "8".repeat(64) : "9".repeat(64);
+  const historyLedger = [
+    { kind: "checkpoint", location: "app-profile" },
+    {
+      frameRelation: "same-main-frame",
+      kind: "document-navigation",
+      loaderRelation: "changed",
+      location: "app-cabinet",
+      navigationType: "Navigation",
+    },
+    {
+      historyLengthRelation: "unchanged",
+      kind: "replaceState",
+      location: "app-cabinet",
+      operationSequence: 1,
+      stateTransition: "unmarked-to-next-app-router",
+      urlRelation: "unchanged",
+    },
+    {
+      frameRelation: "same-main-frame",
+      kind: "same-document-navigation",
+      location: "app-cabinet",
+      navigationType: "historyApi",
+      pairedOperationSequence: 1,
+    },
+  ];
+  const staticDocuments = [
+    "app-login-document", "app-profile-document", "app-cabinet-document",
+  ] as const;
+  const staticLedger = staticDocuments.flatMap((documentKey) => ([
+    { assetBytes: 101, assetSha256: "1".repeat(64), class: "next-static-js", contentType: "application/javascript", documentKey, pathSha256: sha256(staticJavascriptPath) },
+    { assetBytes: 102, assetSha256: "2".repeat(64), class: "next-static-css", contentType: "text/css", documentKey, pathSha256: sha256(staticStylesheetPath) },
+    { assetBytes: 103, assetSha256: "3".repeat(64), class: "next-static-font", contentType: "font/woff2", documentKey, pathSha256: sha256(staticFontPath) },
+    { assetBytes: 108, assetSha256: "8".repeat(64), class: "next-static-font", contentType: "font/woff2", documentKey, pathSha256: sha256(staticSecondFontPath) },
+  ]));
+  const staticAssetAttestationSha256 = baseline ? "b".repeat(64) : "c".repeat(64);
+  const inventoryLedger = [
+    { assetBytes: 101, assetSha256: "1".repeat(64), extension: "js", pathSha256: sha256(staticJavascriptPath) },
+    { assetBytes: 102, assetSha256: "2".repeat(64), extension: "css", pathSha256: sha256(staticStylesheetPath) },
+    { assetBytes: 103, assetSha256: "3".repeat(64), extension: "woff2", pathSha256: sha256(staticFontPath) },
+    { assetBytes: 108, assetSha256: "8".repeat(64), extension: "woff2", pathSha256: sha256(staticSecondFontPath) },
+    { assetBytes: 104, assetSha256: "4".repeat(64), extension: "svg", pathSha256: sha256(staticImagePath) },
+    { assetBytes: 105, assetSha256: "5".repeat(64), extension: "eot", pathSha256: sha256(staticEotPath) },
+    { assetBytes: 106, assetSha256: "6".repeat(64), extension: "ttf", pathSha256: sha256(staticTtfPath) },
+    { assetBytes: 107, assetSha256: "a".repeat(64), extension: "woff", pathSha256: sha256(staticWoffPath) },
+  ].sort((left, right) => left.pathSha256.localeCompare(right.pathSha256));
+  const routeDeclaredPathSha256s = [
+    sha256(staticJavascriptPath), sha256(staticStylesheetPath),
+  ].sort();
+  const documentLoadLedger = staticDocuments.map((documentKey) => ({
+    documentKey,
+    expectedChunkPathSha256s: [...routeDeclaredPathSha256s].sort(),
+    expectedMediaPathSha256s: [
+      sha256(staticFontPath), sha256(staticSecondFontPath),
+    ].sort(),
+    routeDeclaredPathSha256s: [...routeDeclaredPathSha256s].sort(),
+  }));
+  const staticLoadGraph = {
+    assetAttestationSha256: staticAssetAttestationSha256,
+    assetInventorySha256: "7".repeat(64),
+    cssMediaReferenceLedger: [
+      { occurrence: 1, sourcePathSha256: sha256(staticStylesheetPath), targetPathSha256: sha256(staticEotPath) },
+      { occurrence: 2, sourcePathSha256: sha256(staticStylesheetPath), targetPathSha256: sha256(staticEotPath) },
+      { occurrence: 3, sourcePathSha256: sha256(staticStylesheetPath), targetPathSha256: sha256(staticFontPath) },
+      { occurrence: 4, sourcePathSha256: sha256(staticStylesheetPath), targetPathSha256: sha256(staticFontPath) },
+      { occurrence: 5, sourcePathSha256: sha256(staticStylesheetPath), targetPathSha256: sha256(staticSecondFontPath) },
+      { occurrence: 6, sourcePathSha256: sha256(staticStylesheetPath), targetPathSha256: sha256(staticTtfPath) },
+      { occurrence: 7, sourcePathSha256: sha256(staticStylesheetPath), targetPathSha256: sha256(staticWoffPath) },
+      { occurrence: 8, sourcePathSha256: sha256(staticStylesheetPath), targetPathSha256: sha256(staticImagePath) },
+    ],
+    declaredPathLedger: [
+      { class: "media", pathSha256: sha256(staticEotPath) },
+      { class: "media", pathSha256: sha256(staticFontPath) },
+      { class: "media", pathSha256: sha256(staticSecondFontPath) },
+      { class: "media", pathSha256: sha256(staticImagePath) },
+      { class: "media", pathSha256: sha256(staticTtfPath) },
+      { class: "media", pathSha256: sha256(staticWoffPath) },
+      { class: "chunk", pathSha256: sha256(staticJavascriptPath) },
+      { class: "chunk", pathSha256: sha256(staticStylesheetPath) },
+    ].sort((left, right) => left.pathSha256.localeCompare(right.pathSha256)),
+    declaredPathSha256s: [
+      sha256(staticEotPath), sha256(staticFontPath), sha256(staticSecondFontPath), sha256(staticImagePath),
+      sha256(staticTtfPath), sha256(staticWoffPath),
+      sha256(staticJavascriptPath), sha256(staticStylesheetPath),
+    ].sort(),
+    documentLoadLedger,
+    expectedChunkPathSha256s: [sha256(staticJavascriptPath), sha256(staticStylesheetPath)],
+    inventoryLedger,
+    inventoryLedgerContractSha256: sha256(JSON.stringify(inventoryLedger)),
+    routeDeclaredPathContractSha256: sha256(JSON.stringify(documentLoadLedger.map((entry) => ({
+      documentKey: entry.documentKey,
+      routeDeclaredPathSha256s: entry.routeDeclaredPathSha256s,
+    })))),
+    routeDeclaredPathSha256s,
+  };
+  const semanticRequestLedger = [
+    semantic("app-login-document", 200, "text/html"),
+    semantic("turnstile-widget-script", 200, "application/javascript"),
+    semantic("chatwoot-sdk-script", 200, "application/javascript"),
+    semantic("chatwoot-widget-frame", 200, "text/html"),
+    semantic("app-telegram-start", 307, "application/octet-stream"),
+    semantic(
+      "telegram-oidc-authorize",
+      302,
+      null,
+      "app-telegram-start:307->telegram-oidc-authorize",
+    ),
+    semantic(
+      "app-telegram-callback",
+      307,
+      "application/octet-stream",
+      "telegram-oidc-authorize:302->app-telegram-callback",
+    ),
+    semantic(
+      "app-profile-document",
+      200,
+      "text/html",
+      "app-telegram-callback:307->app-profile-document",
+    ),
+    semantic("app-cabinet-document", 200, "text/html"),
+  ];
+  const requestOrderLedger = [
+    { kind: "semantic", occurrence: 1 },
+    ...[1, 2, 3, 4].map((occurrence) => ({ kind: "static", occurrence })),
+    ...[2, 3, 4, 5, 6, 7, 8].map((occurrence) => ({ kind: "semantic", occurrence })),
+    ...[5, 6, 7, 8].map((occurrence) => ({ kind: "static", occurrence })),
+    { kind: "semantic", occurrence: 9 },
+    ...[9, 10, 11, 12].map((occurrence) => ({ kind: "static", occurrence })),
+  ];
+  const requestContractSha256 = sha256(JSON.stringify({
+    version: 1,
+    semanticLedger: semanticRequestLedger,
+    staticClasses: [
+      "next-static-css", "next-static-font", "next-static-js",
+    ],
+  }));
+  const fixtureMountContractSha256 = "e".repeat(64);
+  const fixtureBindingContractSha256 = sha256(JSON.stringify({
+    globalFixtureContractSha256: fixtureContractSha256,
+    mountSubsetContractSha256: fixtureMountContractSha256,
+  }));
+  const connectProxyTarget = baseline ? "127.0.0.2:443" : "127.0.0.3:443";
+  const assetImageDigest = `sha256:${(baseline ? "1" : "2").repeat(64)}`;
+  const configDigest = `sha256:${(baseline ? "3" : "4").repeat(64)}`;
+  const manifestDigest = `sha256:${(baseline ? "5" : "6").repeat(64)}`;
+  const referenceSha256 = sha256(stackContract(role).images.application);
+  const applicationImageBindingContractSha256 = sha256(JSON.stringify({
+    assetImageDigest,
+    configDigest,
+    referenceSha256,
+    repoDigests: [assetImageDigest, manifestDigest].sort(),
+    role: "application",
+  }));
+  return {
+    role,
+    composeProject,
+    connectProxyTarget,
+    journeyContractSha256,
+    fixtureContract: {
+      domain: "clean-pay-browser-journey-fixture-v5",
+      sha256: fixtureContractSha256,
+    },
+    scenario: {
+      label: "provider-overlap-v1",
+      scenarioSha256: sha256("provider-overlap-v1"),
+      seedSha256: sha256("clean-pay-browser-journey-v1:provider-overlap-v1"),
+    },
+    browser: {
+      project: PROVIDER_OVERLAP_BROWSER_PROJECT,
+      playwrightVersion: "1.62.1",
+      chromiumVersion: "151.0.7922.34",
+      userAgentSha256: "d".repeat(64),
+      viewport: { width: 1440, height: 900 },
+      locale: "ru-RU",
+      timezoneId: "Europe/Moscow",
+      colorScheme: "light",
+    },
+    applicationImage: {
+      assetImageDigest,
+      configDigest,
+      manifestDigest,
+      referenceSha256,
+      repoDigestContractSha256: baseline ? "5".repeat(64) : "6".repeat(64),
+      revision,
+      role: "app",
+      runtimeImageDigest: configDigest,
+      publicBuildContract: { version: "1", sha256: publicBuildContractSha256 },
+    },
+    runtimeBinding: {
+      status: "preflight-proven",
+      applicationImageBindingContractSha256,
+      applicationRepoDigestContractSha256: baseline ? "5".repeat(64) : "6".repeat(64),
+      projectSha256: sha256(composeProject),
+      journeyContractSha256,
+      networkSha256: sha256(`${composeProject}_default`),
+      connectProxyTargetSha256: sha256(connectProxyTarget),
+      publicationsSha256: baseline ? "a".repeat(64) : "b".repeat(64),
+      serviceIdentitySha256: baseline ? "c".repeat(64) : "d".repeat(64),
+      composeRuntimeContractSha256: baseline ? "1".repeat(64) : "2".repeat(64),
+      fixtureExecutionContractSha256: baseline ? "1".repeat(64) : "2".repeat(64),
+      migrationImageBindingContractSha256: baseline ? "3".repeat(64) : "4".repeat(64),
+      oneShotLifecycleContractSha256: baseline ? "5".repeat(64) : "6".repeat(64),
+      pairCoexistenceContractSha256: "0".repeat(64),
+      pairLaunchContractSha256: "0".repeat(64),
+      staticAssetAttestationSha256,
+      staticAssetInventoryProjectionSha256: staticLoadGraph.inventoryLedgerContractSha256,
+      staticAssetInventorySha256: "7".repeat(64),
+      staticAssetRouteGraphSha256: staticLoadGraph.routeDeclaredPathContractSha256,
+      fixtureMountContractSha256,
+      fixtureBindingContractSha256,
+      globalFixtureContractSha256: fixtureContractSha256,
+      generatedEnvironmentDirectorySha256: baseline ? "c".repeat(64) : "d".repeat(64),
+      ownedInputReceiptSha256: baseline ? "e".repeat(64) : "f".repeat(64),
+      syntheticEnvironmentContractSha256: "f".repeat(64),
+      syntheticRoleEnvironmentContractSha256: baseline ? "9".repeat(64) : "a".repeat(64),
+      syntheticRoleEnvironmentPolicySha256: "b".repeat(64),
+    },
+    connectProxyAuthorityLedger: [
+      "challenges.cloudflare.com:443",
+      "chatwoot.browser.clean-pay.dev:443",
+      "oauth.telegram.org:443",
+      "pay.ci.clean-pay.dev:443",
+    ].sort(),
+    connectProxyCounters: {
+      accepted: 4,
+      rejected: 0,
+      upstreamAttempts: 4,
+      upstreamConnected: 4,
+      upstreamFailures: 0,
+    },
+    reset: {
+      database: {
+        scopeSha256: sha256(composeProject),
+        schemaSha256: "7".repeat(64),
+        tableCount: 12,
+        sequenceCount: 0,
+        resetSequence: 1,
+        transaction: "truncate-public-application-tables-cascade-no-sequences",
+        redis: "flush-owned-db-0",
+      },
+    },
+    navigation: {
+      eventLifecycle: {
+        drainedEventCount: 68,
+        lateEventCount: 0,
+        sourceCounts: {
+          console: 1,
+          history: historyLedger.length,
+          page: 0,
+          pageerror: 0,
+          request: semanticRequestLedger.length + staticLedger.length,
+          responseFallback: 0,
+          route: semanticRequestLedger.length + staticLedger.length,
+          routeFallback: 0,
+          terminal: semanticRequestLedger.length + staticLedger.length,
+        },
+        status: "sealed-clean",
+      },
+      finalUrl: "https://pay.ci.clean-pay.dev/cabinet",
+      headingVisible: true,
+      requestCount: semanticRequestLedger.length + staticLedger.length,
+      requestContractSha256,
+      requestOrderContractSha256: sha256(JSON.stringify(requestOrderLedger)),
+      requestOrderLedger,
+      semanticRequestLedger,
+      historyContractSha256: sha256(JSON.stringify(historyLedger)),
+      historyCount: historyLedger.length,
+      historyLedger,
+      staticLoadGraph,
+      staticLoadGraphContractSha256: sha256(JSON.stringify(staticLoadGraph)),
+      staticRequestContractSha256: sha256(JSON.stringify(staticLedger)),
+      staticRequestCount: staticLedger.length,
+      staticRequestLedger: staticLedger,
+      unexpectedRequestCount: 0,
+      unexpectedConsoleCount: 0,
+      unexpectedPageErrorCount: 0,
+    },
+    providerOverlap,
+  };
+}
+
+function useContainerdApplicationImage(report: ReturnType<typeof stackReport>) {
+  const image = report.applicationImage as typeof report.applicationImage & {
+    imageSelectionMode?: "containerd-root-manifest";
+  };
+  image.imageSelectionMode = "containerd-root-manifest";
+  image.runtimeImageDigest = image.assetImageDigest;
+  report.runtimeBinding.applicationImageBindingContractSha256 = sha256(JSON.stringify({
+    assetImageDigest: image.assetImageDigest,
+    configDigest: image.configDigest,
+    imageSelectionMode: "containerd-root-manifest",
+    manifestDigest: image.manifestDigest,
+    referenceSha256: image.referenceSha256,
+    repoDigests: [image.assetImageDigest, image.manifestDigest].sort(),
+    role: "application",
+    runtimeImageDigest: image.runtimeImageDigest,
+  }));
+  return report;
+}
+
+function createStackReportThroughFactory(
+  role: "baseline" | "candidate",
+  expected: ReturnType<typeof stackReport>,
+  contract = stackContract(role),
+) {
+  return createProviderOverlapStackReport({
+    role,
+    browser: expected.browser,
+    connectProxyAuthorityLedger: expected.connectProxyAuthorityLedger,
+    connectProxyCounters: expected.connectProxyCounters,
+    contract,
+    fixtureContractSha256: expected.fixtureContract.sha256,
+    imageIdentity: {
+      assetImageDigest: expected.applicationImage.assetImageDigest,
+      configDigest: expected.applicationImage.configDigest,
+      manifestDigest: expected.applicationImage.manifestDigest,
+      publicBuildContract: expected.applicationImage.publicBuildContract,
+      reference: contract.images.application,
+      repoDigestContractSha256: expected.applicationImage.repoDigestContractSha256,
+      revision: expected.applicationImage.revision,
+      role: expected.applicationImage.role,
+      runtimeImageDigest: expected.applicationImage.runtimeImageDigest,
+    },
+    journeyContractSha256: expected.journeyContractSha256,
+    navigation: expected.navigation,
+    providerOverlap: expected.providerOverlap,
+    reset: {
+      database: expected.reset.database,
+      scenarioSha256: expected.scenario.scenarioSha256,
+      seedSha256: expected.scenario.seedSha256,
+    },
+    runtimeBinding: expected.runtimeBinding,
+    scenario: expected.scenario.label,
+  });
+}
+
+function semantic(
+  key: string,
+  responseStatus: number,
+  responseContentType: string | null,
+  redirectEdge: string | null = null,
+) {
+  return {
+    disposition: "continue",
+    key,
+    redirectEdge,
+    responseContentType,
+    responseFailureSha256: null,
+    responseStatus,
+  };
+}
+
+function staticInventoryLedgerFor(
+  inventoryByPath: Record<string, string>,
+  metadataByPath: Record<string, { assetBytes: number; extension: string }>,
+) {
+  return Object.entries(inventoryByPath).map(([servedPath, assetSha256]) => ({
+    assetBytes: metadataByPath[servedPath].assetBytes,
+    assetSha256,
+    extension: metadataByPath[servedPath].extension,
+    pathSha256: sha256(servedPath),
+  })).sort((left, right) => left.pathSha256.localeCompare(right.pathSha256));
+}
+
+function dualProof(
+  baseline: ReturnType<typeof stackReport>,
+  candidate: ReturnType<typeof stackReport>,
+) {
+  const launch = launchReceipt(baseline, candidate);
+  const launchSha256 = sha256(JSON.stringify(launch));
+  const coexistenceSha256 = sha256(JSON.stringify(launch.coexistence));
+  for (const report of [baseline, candidate]) {
+    report.runtimeBinding.pairLaunchContractSha256 = launchSha256;
+    report.runtimeBinding.pairCoexistenceContractSha256 = coexistenceSha256;
+  }
+  return createDualProviderOverlapProof(
+    baseline,
+    candidate,
+    cleanupReceipt(baseline, candidate),
+    launch,
+  );
+}
+
+function launchReceipt(
+  baseline: ReturnType<typeof stackReport>,
+  candidate: ReturnType<typeof stackReport>,
+) {
+  const reports = [baseline, candidate];
+  const inputReceiptContractSha256s = reports.map((report) => (
+    report.runtimeBinding.ownedInputReceiptSha256
+  ));
+  const projects = reports.map((report) => report.runtimeBinding.projectSha256);
+  const barrierSha256 = sha256(JSON.stringify({
+    inputReceiptContractSha256s,
+    projects,
+    version: 1,
+  }));
+  return {
+    barrierSha256,
+    coexistence: {
+      observations: reports.map((report, stackIndex) => {
+        const services = [...JOURNEY_COMPOSE_SERVICE_NAMES].sort().map((service, index) => ({
+          containerIdSha256: sha256(`${stackIndex}:${index}:${service}`),
+          service,
+          state: JOURNEY_COMPOSE_EXPECTED_SERVICE_STATES[
+            service as keyof typeof JOURNEY_COMPOSE_EXPECTED_SERVICE_STATES
+          ],
+        }));
+        return {
+          containerSetSha256: sha256(JSON.stringify(services)),
+          projectSha256: report.runtimeBinding.projectSha256,
+          serviceCount: services.length,
+          services,
+        };
+      }),
+      status: "both-project-container-sets-coexisted",
+    },
+    dispatches: reports.map((report, ordinal) => ({
+      barrierSha256,
+      ordinal,
+      projectSha256: report.runtimeBinding.projectSha256,
+    })),
+    inputReceiptContractSha256s,
+    lifecycleNotBefore: "2026-01-01T00:00:00.000Z",
+    status: "dual-compose-up-dispatched-after-shared-barrier",
+  };
+}
+
+function cleanupReceipt(
+  baseline: ReturnType<typeof stackReport>,
+  candidate: ReturnType<typeof stackReport>,
+) {
+  return {
+    status: "verifier-owned-stack-pair-cleaned",
+    stacks: [baseline, candidate].map((report) => ({
+      role: report.role,
+      generatedEnvironmentDirectorySha256:
+        report.runtimeBinding.generatedEnvironmentDirectorySha256,
+      projectSha256: report.runtimeBinding.projectSha256,
+      status: "verifier-owned-stack-cleaned",
+    })),
+  };
+}
+
+function stackContract(role: "baseline" | "candidate") {
+  const baseline = role === "baseline";
+  return {
+    schemaVersion: 1,
+    kind: "self-contained-synthetic-browser-journey",
+    project: `clean-pay-browser-journey-provider-proof-${role}-${(baseline ? "1" : "2").repeat(12)}`,
+    revision: baseline ? baselineRevision : candidateRevision,
+    images: {
+      application: `clean-pay:${role}`,
+      migration: `clean-pay-migration:${role}`,
+    },
+    publicBuildContract: { version: "1", sha256: publicBuildContractSha256 },
+    fixtureContract: {
+      domain: "clean-pay-browser-journey-fixture-v5",
+      sha256: fixtureContractSha256,
+    },
+    publications: {
+      app: baseline ? "127.0.0.1:4100" : "127.0.0.1:4200",
+      providerControl: baseline ? "127.0.0.1:13100" : "127.0.0.1:13200",
+      browserTls: baseline ? "127.0.0.2:443" : "127.0.0.3:443",
+      connectProxy: baseline ? "127.0.0.1:14444" : "127.0.0.1:14544",
+    },
+    secretSource: "deterministic synthetic fixture labels; no external env or credential file",
+    ownedStateReset: {
+      postgres: "transactional truncate of public application tables; migrations retained; schema has no sequences",
+      redis: "flush DB 0 on the project-local redis service",
+      scope: "exact COMPOSE_PROJECT_NAME label and internal service DNS only",
+    },
+  };
+}
+
+function resetEvidence(scenario: string, project: string) {
+  return {
+    status: "reset",
+    seed_sha256: sha256(`clean-pay-browser-journey-v1:${scenario}`),
+    scenario_sha256: sha256(scenario),
+    state: {
+      ledger: 0,
+      payments: 0,
+      payment_idempotency: 0,
+      profiles: 0,
+      owner_profiles: 0,
+      access_owners: 0,
+      refresh_owners: 0,
+      registered_emails: 0,
+      subscriptionless_owners: 0,
+      telegram_owner_aliases: 0,
+      remnawave_users: 1,
+      consumed_turnstile_tokens: 0,
+      payment_disconnect_injection_armed: false,
+      payment_rate_limit_injection_armed: false,
+      sequence: 0,
+      payment_sequence: 0,
+      scenario_telegram_id_format: "9-digit-synthetic",
+    },
+    oidc: {
+      status: "reset",
+      codes: 0,
+      authorize_sequence: 0,
+      event_count: 0,
+      key_id: "clean-pay-browser-journey-oidc-key",
+      seed_sha256: sha256("clean-pay-browser-journey-v1"),
+      scenario_sha256: sha256(scenario),
+      subject_format: "9-digit-synthetic",
+    },
+    database: {
+      status: "reset",
+      scopeContract: "exact-compose-project-label",
+      scopeSha256: sha256(project),
+      schemaSha256: "8".repeat(64),
+      sequenceCount: 0,
+      tableCount: 12,
+      transaction: "truncate-public-application-tables-cascade-no-sequences",
+      redis: "flush-owned-db-0",
+      resetSequence: 1,
+    },
+  };
+}
+
+function browserClassification(
+  url: string,
+  overrides: Partial<{
+    method: string;
+    resourceType: string;
+    isNavigation: boolean;
+    isMainFrame: boolean;
+  }> = {},
+  cabinetDocumentAllowed = false,
+  assetContract = staticAssetContract,
+): ProviderBrowserClassification {
+  const classification: unknown = classifyProviderOverlapBrowserRequest({
+    url,
+    method: overrides.method ?? "GET",
+    resourceType: overrides.resourceType ?? "fetch",
+    isNavigation: overrides.isNavigation ?? false,
+    isMainFrame: overrides.isMainFrame ?? false,
+  }, { cabinetDocumentAllowed, staticAssetContract: assetContract });
+  return classification as ProviderBrowserClassification;
+}
+
+type ProviderBrowserClassification = Readonly<{
+  disposition: string;
+  expectedStatuses: readonly number[];
+  key: string;
+  navigation: boolean;
+  staticAssetSha256: string | null;
+  staticPath: string | null;
+}>;
+
+type MockProviderRole = "baseline" | "candidate";
+
+type MockPairLaunchGate = ReturnType<typeof createMockPairLaunchGate>;
+
+type MockOwnedCallbackStack = Readonly<{
+  inputReceipt: Readonly<Record<string, string>>;
+  runtime: Readonly<Record<string, string>>;
+  status: string;
+}>;
+
+function createMockPairLaunchGate() {
+  let dispatchCount = 0;
+  let release: () => void = () => undefined;
+  const barrier = new Promise<void>((resolve) => { release = resolve; });
+  const timeline: string[] = [];
+  return {
+    get dispatchCount() { return dispatchCount; },
+    timeline,
+    async arrive(role: MockProviderRole) {
+      timeline.push(`dispatch:${role}`);
+      dispatchCount += 1;
+      if (dispatchCount > 2) throw new Error("Mock pair launch dispatched more than twice.");
+      if (dispatchCount === 2) release();
+      await barrier;
+      timeline.push(`resolved:${role}`);
+    },
+  };
+}
+
+async function createMockOwnedStackInput(
+  role: MockProviderRole,
+  repositoryRoot: string,
+  launchGate: MockPairLaunchGate,
+) {
+  const contract = structuredClone(stackContract(role));
+  const directory = await mkdtemp(path.join(tmpdir(), `clean-pay-provider-combined-${role}-`));
+  const generated = buildJourneySyntheticEnvironment({
+    appImage: contract.images.application,
+    appPort: contract.publications.app.split(":")[1],
+    connectProxyPort: contract.publications.connectProxy.split(":")[1],
+    directory,
+    migrationImage: contract.images.migration,
+    project: contract.project,
+    providerPort: contract.publications.providerControl.split(":")[1],
+    proxyBind: contract.publications.browserTls.split(":")[0],
+    revision: contract.revision,
+    turnstileSiteKey: `custom-provider-overlap-${"x".repeat(24)}`,
+  });
+  contract.publicBuildContract.sha256 = generated.publicBuildContractSha256;
+  const generatedFiles = generated.files as Readonly<Record<string, string>>;
+  for (const filename of JOURNEY_SYNTHETIC_ENVIRONMENT_FILENAMES) {
+    await writeFile(
+      path.join(directory, filename),
+      generatedFiles[filename],
+      { flag: "wx", mode: 0o600 },
+    );
+  }
+  const contractBytes = Buffer.from(`${JSON.stringify(contract)}\n`, "utf8");
+  const contractPath = path.join(directory, "browser-journey-contract.json");
+  await writeFile(contractPath, contractBytes, { flag: "wx", mode: 0o600 });
+  const baseline = role === "baseline";
+  const identities = Object.freeze({
+    application: Object.freeze({
+      asset: `sha256:${(baseline ? "1" : "2").repeat(64)}`,
+      config: `sha256:${(baseline ? "3" : "4").repeat(64)}`,
+      manifest: `sha256:${(baseline ? "5" : "6").repeat(64)}`,
+      reference: contract.images.application,
+    }),
+    migration: Object.freeze({
+      asset: `sha256:${(baseline ? "7" : "9").repeat(64)}`,
+      config: `sha256:${(baseline ? "8" : "a").repeat(64)}`,
+      reference: contract.images.migration,
+    }),
+  });
+  const applicationAssignments = parseMockEnvironment(generatedFiles[".env.app"]);
+  const sharedApplicationAssignments = Object.fromEntries(
+    Object.entries(applicationAssignments).filter(([name]) => ![
+      "CLEAN_PAY_IMAGE",
+      "CLEAN_PAY_MIGRATION_IMAGE",
+      "CLEAN_PAY_RELEASE",
+      "CLEAN_PAY_REVISION",
+    ].includes(name)),
+  );
+  const docker = createFullJourneyDockerMock(role, contract, identities, launchGate);
+  return {
+    contract,
+    directory,
+    docker,
+    input: {
+      repositoryRoot,
+      contractPath,
+      contract,
+      expectedApplicationAssetImageDigest: identities.application.asset,
+      expectedApplicationImageConfigDigest: identities.application.config,
+      expectedApplicationRepoDigests: [
+        identities.application.asset,
+        identities.application.manifest,
+      ].sort(),
+      expectedMigrationAssetImageDigest: identities.migration.asset,
+      runDocker: docker.run,
+      startDockerEventCapture: docker.startEventCapture,
+    },
+    journeyContractSha256: sha256(contractBytes),
+    sharedSyntheticEnvironmentContractSha256:
+      sha256(JSON.stringify(sharedApplicationAssignments)),
+  };
+}
+
+function bindMockOwnedRuntimeReport(
+  report: ReturnType<typeof stackReport>,
+  fixture: Awaited<ReturnType<typeof createMockOwnedStackInput>>,
+  owned: MockOwnedCallbackStack,
+  launch: Readonly<Record<string, unknown>>,
+) {
+  const runtime = owned.runtime;
+  const receipt = owned.inputReceipt;
+  if (report.applicationImage.assetImageDigest
+      !== fixture.input.expectedApplicationAssetImageDigest
+    || report.applicationImage.configDigest
+      !== fixture.input.expectedApplicationImageConfigDigest) {
+    throw new Error("Mock report image identity differs from its owned stack input.");
+  }
+  report.journeyContractSha256 = fixture.journeyContractSha256;
+  report.applicationImage.publicBuildContract.sha256
+    = fixture.contract.publicBuildContract.sha256;
+  report.applicationImage.repoDigestContractSha256
+    = runtime.applicationRepoDigestContractSha256;
+  Object.assign(report.runtimeBinding, {
+    applicationImageBindingContractSha256:
+      runtime.applicationImageBindingContractSha256,
+    applicationRepoDigestContractSha256:
+      runtime.applicationRepoDigestContractSha256,
+    composeRuntimeContractSha256: runtime.composeRuntimeContractSha256,
+    connectProxyTargetSha256: sha256(report.connectProxyTarget),
+    fixtureBindingContractSha256: receipt.fixtureBindingContractSha256,
+    fixtureExecutionContractSha256: runtime.fixtureExecutionContractSha256,
+    fixtureMountContractSha256: runtime.fixtureMountContractSha256,
+    generatedEnvironmentDirectorySha256:
+      receipt.generatedEnvironmentDirectorySha256,
+    globalFixtureContractSha256: receipt.globalFixtureContractSha256,
+    journeyContractSha256: fixture.journeyContractSha256,
+    migrationImageBindingContractSha256:
+      runtime.migrationImageBindingContractSha256,
+    networkSha256: runtime.networkSha256,
+    oneShotLifecycleContractSha256: runtime.oneShotLifecycleContractSha256,
+    ownedInputReceiptSha256: sha256(JSON.stringify(receipt)),
+    pairCoexistenceContractSha256: sha256(JSON.stringify(launch.coexistence)),
+    pairLaunchContractSha256: sha256(JSON.stringify(launch)),
+    projectSha256: sha256(fixture.contract.project),
+    publicationsSha256: sha256(JSON.stringify(fixture.contract.publications)),
+    serviceIdentitySha256: runtime.serviceIdentitySha256,
+    syntheticEnvironmentContractSha256:
+      fixture.sharedSyntheticEnvironmentContractSha256,
+    syntheticRoleEnvironmentContractSha256:
+      runtime.syntheticRoleEnvironmentContractSha256,
+    syntheticRoleEnvironmentPolicySha256:
+      runtime.syntheticRoleEnvironmentPolicySha256,
+  });
+  return report;
+}
+
+function parseMockEnvironment(source: string) {
+  return Object.fromEntries(source.trimEnd().split("\n").map((line) => {
+    const separator = line.indexOf("=");
+    return [line.slice(0, separator), line.slice(separator + 1)];
+  }));
+}
+
+async function removeMockOwnedInput(directory: string) {
+  for (const filename of [
+    ...JOURNEY_SYNTHETIC_ENVIRONMENT_FILENAMES,
+    "browser-journey-contract.json",
+  ]) {
+    await unlink(path.join(directory, filename));
+  }
+  await rmdir(directory);
+}
+
+type MockImageIdentities = Readonly<{
+  application: Readonly<{
+    asset: string;
+    config: string;
+    manifest: string;
+    reference: string;
+  }>;
+  migration: Readonly<{
+    asset: string;
+    config: string;
+    reference: string;
+  }>;
+}>;
+
+function createFullJourneyDockerMock(
+  role: MockProviderRole,
+  contract: ReturnType<typeof stackContract>,
+  identities: MockImageIdentities,
+  launchGate: MockPairLaunchGate,
+) {
+  const calls: string[][] = [];
+  const probes = new Map<string, {
+    name: string;
+    owner: string;
+    role: "application" | "migration";
+  }>();
+  const barriers = new Map<string, {
+    image: string;
+    name: string;
+    nonce: string;
+  }>();
+  let activeEventCapture: ReturnType<typeof startEventCapture> | undefined;
+  let eventNano = BigInt(Date.now()) * 1_000_000n;
+  let downCalls = 0;
+  let probeOrdinal = 0;
+  let resourcesActive = false;
+  let runtime: ReturnType<typeof createFullMockRuntime> | undefined;
+
+  const run = async (
+    args: string[],
+    _maximumBytes?: number,
+    environment: Record<string, string> = {},
+  ): Promise<string> => {
+    calls.push([...args]);
+    if (args[0] === "compose" && args.includes("config")) {
+      const envFile = args[args.indexOf("--env-file") + 1];
+      const assignments = parseMockEnvironment(await readFile(envFile, "utf8"));
+      return JSON.stringify(createFullMockComposeModel(contract, {
+        application: assignments.CLEAN_PAY_IMAGE,
+        migration: assignments.CLEAN_PAY_MIGRATION_IMAGE,
+      }, environment));
+    }
+    if (args[0] === "compose" && args.includes("up")) {
+      const envFile = args[args.indexOf("--env-file") + 1];
+      const assignments = parseMockEnvironment(await readFile(envFile, "utf8"));
+      const compose = createFullMockComposeModel(contract, {
+        application: assignments.CLEAN_PAY_IMAGE,
+        migration: assignments.CLEAN_PAY_MIGRATION_IMAGE,
+      }, environment);
+      runtime = createFullMockRuntime(contract, identities, compose);
+      resourcesActive = true;
+      activeEventCapture?.observeRuntime(runtime);
+      await launchGate.arrive(role);
+      return "";
+    }
+    if (args[0] === "compose" && args.includes("down")) {
+      if (!resourcesActive || !runtime) {
+        throw new Error("Mock stack cleanup ran without exact live resources.");
+      }
+      downCalls += 1;
+      launchGate.timeline.push(`down:${role}`);
+      resourcesActive = false;
+      return "";
+    }
+    if (args[0] === "image" && args[1] === "inspect") {
+      const identity = Object.values(identities).find((candidate) => (
+        args[2] === candidate.reference || args[2] === candidate.config
+      ));
+      if (!identity) throw new Error(`Unexpected mock image inspection: ${args[2]}`);
+      const imageRole = identity === identities.application ? "app" : "migration";
+      return JSON.stringify([mockImageInspection(identity, imageRole, contract)]);
+    }
+    if (args[0] === "container" && args[1] === "create") {
+      const name = args[args.indexOf("--name") + 1];
+      const ownerLabel = args[args.indexOf("--label") + 1];
+      if (ownerLabel.startsWith("io.clean-pay.event-barrier=")) {
+        const nonce = ownerLabel.slice("io.clean-pay.event-barrier=".length);
+        probeOrdinal += 1;
+        const barrierId = sha256(`${contract.project}:barrier:${probeOrdinal}:${name}`);
+        barriers.set(barrierId, { image: args.at(-1)!, name, nonce });
+        activeEventCapture?.observeBarrier(barrierId, nonce);
+        return barrierId;
+      }
+      const imageRole = name.includes("-application-") ? "application" : "migration";
+      probeOrdinal += 1;
+      const probeId = sha256(`${contract.project}:probe:${probeOrdinal}:${name}`);
+      probes.set(probeId, {
+        name,
+        owner: ownerLabel.slice("io.clean-pay.verifier-probe=".length),
+        role: imageRole,
+      });
+      return probeId;
+    }
+    if (args[0] === "container" && args[1] === "inspect") {
+      const barrier = barriers.get(args[2]);
+      if (barrier) {
+        return JSON.stringify([{
+          Id: args[2],
+          Image: barrier.image,
+          Name: `/${barrier.name}`,
+          RestartCount: 0,
+          Config: {
+            Entrypoint: ["/bin/true"],
+            Image: barrier.image,
+            Labels: {
+              "com.docker.compose.project": contract.project,
+              "com.docker.compose.service": "journey-event-barrier",
+              "io.clean-pay.event-barrier": barrier.nonce,
+            },
+          },
+          HostConfig: { NetworkMode: "none" },
+          State: { Running: false, Status: "created" },
+        }]);
+      }
+      const probe = probes.get(args[2]);
+      if (probe) {
+        const identity = identities[probe.role];
+        return JSON.stringify([{
+          Id: args[2],
+          Image: identity.config,
+          Name: `/${probe.name}`,
+          RestartCount: 0,
+          Config: {
+            Entrypoint: ["/bin/true"],
+            Image: identity.reference,
+            Labels: { "io.clean-pay.verifier-probe": probe.owner },
+          },
+          State: { Running: false, Status: "created" },
+        }]);
+      }
+      const container = runtime?.containersById[args[2]];
+      if (!resourcesActive || !container) {
+        throw new Error(`Unexpected mock container inspection: ${args[2]}`);
+      }
+      return JSON.stringify([container]);
+    }
+    if (args[0] === "container" && args[1] === "rm") {
+      if (barriers.delete(args[2])) return args[2];
+      if (!probes.delete(args[2])) throw new Error("Mock probe cleanup identity differs.");
+      return args[2];
+    }
+    if (args[0] === "container" && args[1] === "exec") {
+      const container = runtime?.containersById[args[2]];
+      const destination = args[4];
+      const mount = container?.Mounts.find((entry) => entry.Destination === destination);
+      if (!resourcesActive || !container || !mount || mount.Type !== "bind") {
+        throw new Error("Mock live fixture execution escaped its exact bind.");
+      }
+      return `${sha256(await readFile(mount.Source))}  ${destination}\n`;
+    }
+    if (args[0] === "ps") {
+      if (args.some((entry) => entry.startsWith("label=io.clean-pay.event-barrier="))) {
+        const label = args.find((entry) => entry.startsWith(
+          "label=io.clean-pay.event-barrier=",
+        ));
+        const name = args.find((entry) => entry.startsWith("name=^/"));
+        const expectedNonce = label?.slice("label=io.clean-pay.event-barrier=".length);
+        const expectedName = name?.slice("name=^/".length, -1);
+        return [...barriers.entries()]
+          .filter(([, barrier]) => barrier.nonce === expectedNonce && barrier.name === expectedName)
+          .map(([identity]) => identity)
+          .join("\n");
+      }
+      if (args.some((entry) => entry.startsWith("label=io.clean-pay.verifier-probe="))) {
+        const label = args.find((entry) => entry.startsWith(
+          "label=io.clean-pay.verifier-probe=",
+        ));
+        const name = args.find((entry) => entry.startsWith("name=^/"));
+        const expectedOwner = label?.slice("label=io.clean-pay.verifier-probe=".length);
+        const expectedName = name?.slice("name=^/".length, -1);
+        return [...probes.entries()]
+          .filter(([, probe]) => probe.owner === expectedOwner && probe.name === expectedName)
+          .map(([identity]) => identity)
+          .join("\n");
+      }
+      if (!resourcesActive || !runtime) return "";
+      const serviceFilter = args.find((entry) => entry.startsWith(
+        "label=com.docker.compose.service=",
+      ));
+      if (serviceFilter) {
+        const service = serviceFilter.slice("label=com.docker.compose.service=".length);
+        return runtime.containerIdsByService[service] ?? "";
+      }
+      return Object.values(runtime.containerIdsByService).join("\n");
+    }
+    if (args[0] === "network" && args[1] === "ls") {
+      return resourcesActive && runtime ? runtime.network.Id : "";
+    }
+    if (args[0] === "volume" && args[1] === "ls") {
+      return resourcesActive && runtime
+        ? runtime.volumes.map(({ Name }) => Name).join("\n")
+        : "";
+    }
+    if (args[0] === "network" && args[1] === "inspect") {
+      if (!resourcesActive || !runtime || args[2] !== runtime.network.Id) {
+        throw new Error("Unexpected mock network inspection.");
+      }
+      return JSON.stringify([runtime.network]);
+    }
+    if (args[0] === "volume" && args[1] === "inspect") {
+      const volume = runtime?.volumes.find(({ Name }) => Name === args[2]);
+      if (!resourcesActive || !volume) throw new Error("Unexpected mock volume inspection.");
+      return JSON.stringify([volume]);
+    }
+    if (args[0] === "events") throw new Error("Retrospective mock event query is forbidden.");
+    if (args[0] === "info") return "json-file";
+    throw new Error(`Unexpected full-runtime mock Docker command: ${args.join(" ")}`);
+  };
+
+  function startEventCapture() {
+    type BarrierReceipt = Readonly<{ containerId: string; timeNano: string }>;
+    const observed = new Map<string, BarrierReceipt>();
+    const waiters = new Map<string, Array<(receipt: BarrierReceipt) => void>>();
+    const lines: string[] = [];
+    let stopped = false;
+    const nextTimeNano = () => {
+      const wallClock = BigInt(Date.now()) * 1_000_000n;
+      eventNano = (wallClock > eventNano ? wallClock : eventNano) + 1n;
+      return eventNano.toString();
+    };
+    const capture = {
+      observeBarrier(id: string, nonce: string) {
+        const receipt = Object.freeze({ containerId: id, timeNano: nextTimeNano() });
+        observed.set(nonce, receipt);
+        lines.push(`${receipt.timeNano}|create|${id}|journey-event-barrier|${nonce}`);
+        for (const resolve of waiters.get(nonce) ?? []) resolve(receipt);
+        waiters.delete(nonce);
+      },
+      observeRuntime(value: ReturnType<typeof createFullMockRuntime>) {
+        for (const service of JOURNEY_COMPOSE_SERVICE_NAMES) {
+          const id = value.containerIdsByService[service];
+          const actions = JOURNEY_COMPOSE_ONE_SHOT_SERVICE_NAMES.includes(service)
+            ? ["create", "start", "die"] : ["create", "start"];
+          for (const action of actions) {
+            lines.push(`${nextTimeNano()}|${action}|${id}|${service}|-`);
+          }
+        }
+      },
+      async stop() {
+        if (stopped) throw new Error("Mock event capture stopped twice.");
+        stopped = true;
+        if (activeEventCapture === capture) activeEventCapture = undefined;
+        return lines.join("\n");
+      },
+      terminationProven: () => stopped,
+      waitForBarrier(nonce: string) {
+        if (observed.has(nonce)) return Promise.resolve(observed.get(nonce)!);
+        return new Promise<BarrierReceipt>((resolve) => {
+          const current = waiters.get(nonce) ?? [];
+          current.push(resolve);
+          waiters.set(nonce, current);
+        });
+      },
+    };
+    activeEventCapture = capture;
+    return capture;
+  }
+
+  return {
+    calls,
+    get activeProbeCount() { return probes.size; },
+    get activeResourceCount() {
+      return resourcesActive ? JOURNEY_COMPOSE_SERVICE_NAMES.length
+        + JOURNEY_COMPOSE_VOLUME_NAMES.length + 1 : 0;
+    },
+    get downCalls() { return downCalls; },
+    run,
+    startEventCapture,
+  };
+}
+
+function mockImageInspection(
+  identity: MockImageIdentities["application"] | MockImageIdentities["migration"],
+  role: "app" | "migration",
+  contract: ReturnType<typeof stackContract>,
+) {
+  return {
+    Id: identity.config,
+    Descriptor: { digest: identity.asset },
+    RepoDigests: [`registry.example/clean-pay-${role}@${identity.asset}`],
+    Config: {
+      Cmd: null,
+      Entrypoint: null,
+      Env: ["PATH=/usr/local/bin"],
+      Labels: {
+        "io.clean-pay.role": role,
+        "org.opencontainers.image.revision": contract.revision,
+        "io.clean-pay.public-build-contract-version": contract.publicBuildContract.version,
+        "io.clean-pay.public-build-contract-sha256": contract.publicBuildContract.sha256,
+      },
+      User: "",
+      WorkingDir: "",
+    },
+  };
+}
+
+function createFullMockComposeModel(
+  contract: ReturnType<typeof stackContract>,
+  images: { application: string; migration: string },
+  environment: Record<string, string>,
+) {
+  const fixtureMounts: Record<string, { destination: string; source: string }> = {
+    "browser-db-observer": {
+      destination: "/app/browser-db-observer.mjs",
+      source: environment.CLEAN_PAY_BROWSER_DB_OBSERVER_FILE,
+    },
+    "browser-db-observer-provision": {
+      destination: "/fixture/db-observer-provision.sh",
+      source: environment.CLEAN_PAY_BROWSER_DB_OBSERVER_PROVISION_FILE,
+    },
+    "browser-oidc-mock": {
+      destination: "/mock/oidc-mock.mjs",
+      source: environment.CLEAN_PAY_BROWSER_OIDC_MOCK_FILE,
+    },
+    "browser-provider-mock": {
+      destination: "/mock/provider-mock.mjs",
+      source: environment.CLEAN_PAY_BROWSER_PROVIDER_MOCK_FILE,
+    },
+    "browser-proxy": {
+      destination: "/etc/caddy/Caddyfile",
+      source: environment.CLEAN_PAY_BROWSER_CADDYFILE,
+    },
+  };
+  if (Object.values(fixtureMounts).some(({ source }) => typeof source !== "string")) {
+    throw new Error("Full-runtime mock Compose fixture source is missing.");
+  }
+  const migrationServices = new Set([
+    "browser-db-observer", "db-grant-sync", "db-role-provision", "migration",
+  ]);
+  const services = Object.fromEntries(JOURNEY_COMPOSE_SERVICE_NAMES.map((serviceName) => {
+    const fixture = fixtureMounts[serviceName];
+    const volumes: Array<{
+      read_only?: boolean;
+      source: string;
+      target: string;
+      type: "bind" | "volume";
+    }> = [];
+    if (fixture) {
+      volumes.push({
+        read_only: true,
+        source: fixture.source,
+        target: fixture.destination,
+        type: "bind",
+      });
+    }
+    if (serviceName === "postgres") {
+      volumes.push({
+        source: "postgres-data",
+        target: "/var/lib/postgresql/data",
+        type: "volume",
+      });
+    }
+    if (serviceName === "redis") {
+      volumes.push({ source: "redis-data", target: "/data", type: "volume" });
+    }
+    const ports: Array<{
+      host_ip: string;
+      protocol: string;
+      published: number;
+      target: number;
+    }> = [];
+    const publication = serviceName === "app" ? contract.publications.app
+      : serviceName === "browser-provider-mock" ? contract.publications.providerControl
+        : serviceName === "browser-proxy" ? contract.publications.browserTls
+          : undefined;
+    if (publication) {
+      const [hostIp, published] = publication.split(":");
+      ports.push({
+        host_ip: hostIp,
+        protocol: "tcp",
+        published: Number(published),
+        target: serviceName === "app" ? 4000
+          : serviceName === "browser-provider-mock" ? 3100 : 443,
+      });
+    }
+    return [serviceName, {
+      cap_drop: ["ALL"],
+      command: fixture ? ["fixture", fixture.destination] : ["fixture", serviceName],
+      image: migrationServices.has(serviceName) ? images.migration : images.application,
+      networks: { default: null },
+      ports,
+      read_only: true,
+      security_opt: ["no-new-privileges:true"],
+      volumes,
+    }];
+  }));
+  return {
+    name: contract.project,
+    networks: { default: { name: `${contract.project}_default` } },
+    services,
+    volumes: Object.fromEntries(JOURNEY_COMPOSE_VOLUME_NAMES.map((name) => [
+      name,
+      { name: `${contract.project}_${name}` },
+    ])),
+  };
+}
+
+function createFullMockRuntime(
+  contract: ReturnType<typeof stackContract>,
+  identities: MockImageIdentities,
+  compose: ReturnType<typeof createFullMockComposeModel>,
+) {
+  const createdAt = new Date().toISOString();
+  const containerIdsByService: Record<string, string> = {};
+  const containersById: Record<string, ReturnType<typeof createFullMockContainer>> = {};
+  const eventLinesByContainerId: Record<string, string> = {};
+  const networkContainers: Record<string, { Name: string }> = {};
+  for (const [index, serviceName] of JOURNEY_COMPOSE_SERVICE_NAMES.entries()) {
+    const service = compose.services[serviceName] as Record<string, unknown> & {
+      command: string[];
+      image: string;
+      ports: Array<{ host_ip: string; protocol: string; published: number; target: number }>;
+      volumes: Array<{
+        read_only?: boolean;
+        source: string;
+        target: string;
+        type: "bind" | "volume";
+      }>;
+    };
+    const identity = service.image === identities.migration.config
+      ? identities.migration : identities.application;
+    const imageRole = identity === identities.migration ? "migration" : "app";
+    const containerId = sha256(`${contract.project}:container:${serviceName}`);
+    containerIdsByService[serviceName] = containerId;
+    const oneShot = JOURNEY_COMPOSE_ONE_SHOT_SERVICE_NAMES.includes(serviceName);
+    const container = createFullMockContainer({
+      containerId,
+      contract,
+      createdAt,
+      identity,
+      imageRole,
+      oneShot,
+      service,
+      serviceName,
+    });
+    containersById[containerId] = container;
+    if (oneShot) {
+      const timeNano = BigInt(Date.now()) * 1_000_000n + BigInt(index * 10);
+      eventLinesByContainerId[containerId] = [
+        `${timeNano} create ${containerId}`,
+        `${timeNano + 1n} start ${containerId}`,
+        `${timeNano + 2n} die ${containerId}`,
+      ].join("\n");
+    } else {
+      networkContainers[containerId] = { Name: `${contract.project}-${serviceName}-1` };
+    }
+  }
+  const network = {
+    Id: sha256(`${contract.project}:network:default`),
+    Name: `${contract.project}_default`,
+    Driver: "bridge",
+    Internal: false,
+    Attachable: false,
+    Ingress: false,
+    Containers: networkContainers,
+    Labels: {
+      "com.docker.compose.network": "default",
+      "com.docker.compose.project": contract.project,
+    },
+  };
+  const volumes = JOURNEY_COMPOSE_VOLUME_NAMES.map((name) => ({
+    Name: `${contract.project}_${name}`,
+    Driver: "local",
+    Options: null,
+    Labels: {
+      "com.docker.compose.project": contract.project,
+      "com.docker.compose.volume": name,
+    },
+  }));
+  return {
+    containerIdsByService,
+    containersById,
+    eventLinesByContainerId,
+    network,
+    volumes,
+  };
+}
+
+function createFullMockContainer({
+  containerId,
+  contract,
+  createdAt,
+  identity,
+  imageRole,
+  oneShot,
+  service,
+  serviceName,
+}: {
+  containerId: string;
+  contract: ReturnType<typeof stackContract>;
+  createdAt: string;
+  identity: MockImageIdentities["application"] | MockImageIdentities["migration"];
+  imageRole: "app" | "migration";
+  oneShot: boolean;
+  service: {
+    command: string[];
+    image: string;
+    ports: Array<{ host_ip: string; protocol: string; published: number; target: number }>;
+    volumes: Array<{
+      read_only?: boolean;
+      source: string;
+      target: string;
+      type: "bind" | "volume";
+    }>;
+  };
+  serviceName: string;
+}) {
+  const expectedState = JOURNEY_COMPOSE_EXPECTED_SERVICE_STATES[
+    serviceName as keyof typeof JOURNEY_COMPOSE_EXPECTED_SERVICE_STATES
+  ];
+  const ports = Object.fromEntries(service.ports.map((entry) => [
+    `${entry.target}/${entry.protocol}`,
+    [{ HostIp: entry.host_ip, HostPort: String(entry.published) }],
+  ]));
+  const state = oneShot ? {
+    Dead: false,
+    Error: "",
+    ExitCode: 0,
+    FinishedAt: createdAt,
+    OOMKilled: false,
+    Paused: false,
+    Pid: 0,
+    Restarting: false,
+    Running: false,
+    StartedAt: createdAt,
+    Status: "exited",
+  } : {
+    ExitCode: 0,
+    Health: expectedState === "running-healthy" ? { Status: "healthy" } : undefined,
+    Running: true,
+    Status: "running",
+  };
+  return {
+    Id: containerId,
+    Created: createdAt,
+    Image: identity.config,
+    Name: `/${contract.project}-${serviceName}-1`,
+    RestartCount: 0,
+    Config: {
+      Cmd: service.command,
+      Entrypoint: null,
+      Env: ["PATH=/usr/local/bin"],
+      Image: service.image,
+      Labels: {
+        "com.docker.compose.project": contract.project,
+        "com.docker.compose.service": serviceName,
+        "io.clean-pay.public-build-contract-sha256": contract.publicBuildContract.sha256,
+        "io.clean-pay.public-build-contract-version": contract.publicBuildContract.version,
+        "io.clean-pay.role": imageRole,
+        "org.opencontainers.image.revision": contract.revision,
+      },
+      User: "",
+      WorkingDir: "",
+    },
+    HostConfig: {
+      AutoRemove: false,
+      CapAdd: null,
+      CapDrop: ["ALL"],
+      DeviceRequests: [],
+      Devices: [],
+      Dns: [],
+      DnsOptions: [],
+      DnsSearch: [],
+      ExtraHosts: [],
+      GroupAdd: [],
+      Init: null,
+      Links: [],
+      LogConfig: { Config: {}, Type: "json-file" },
+      Memory: 0,
+      NanoCpus: 0,
+      NetworkMode: `${contract.project}_default`,
+      OomKillDisable: false,
+      PidMode: "",
+      PidsLimit: 0,
+      Privileged: false,
+      ReadonlyRootfs: true,
+      RestartPolicy: { MaximumRetryCount: 0, Name: "no" },
+      SecurityOpt: ["no-new-privileges:true"],
+      Sysctls: {},
+      Tmpfs: {},
+      UTSMode: "",
+      UsernsMode: "",
+    },
+    Mounts: service.volumes.map((mount) => ({
+      Destination: mount.target,
+      Name: mount.type === "volume" ? `${contract.project}_${mount.source}` : undefined,
+      RW: !mount.read_only,
+      Source: mount.type === "bind" ? mount.source : `/mock-volume/${mount.source}`,
+      Type: mount.type,
+    })),
+    NetworkSettings: {
+      Networks: {
+        [`${contract.project}_default`]: {
+          Aliases: [`${contract.project}-${serviceName}-1`, serviceName],
+        },
+      },
+      Ports: ports,
+    },
+    State: state,
+  };
+}

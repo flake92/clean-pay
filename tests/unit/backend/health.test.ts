@@ -75,7 +75,8 @@ describe("health checks", () => {
       .mockResolvedValueOnce(new Response("{}", { status: 200 }))
       .mockResolvedValueOnce(new Response("{}", { status: 422 }))
       .mockResolvedValueOnce(new Response("{}", { status: 422 }))
-      .mockResolvedValueOnce(new Response("{}", { status: 422 }));
+      .mockResolvedValueOnce(new Response("{}", { status: 422 }))
+      .mockResolvedValueOnce(new Response("{}", { status: 405 }));
 
     await expect(measuredCheck("Remnashop", createProductionReadinessGateway().checkRemnashop)).resolves.toMatchObject({ status: "ok" });
     expect(fetch).toHaveBeenNthCalledWith(1, "http://remnashop:5000/api/v1/public/plans/public", expect.objectContaining({
@@ -100,6 +101,10 @@ describe("health checks", () => {
       method: "POST",
       body: "{}",
     }));
+    expect(fetch).toHaveBeenNthCalledWith(5, "http://remnashop:5000/api/v1/public/auth/notification-preferences", expect.objectContaining({
+      method: "POST",
+      body: "{}",
+    }));
 
     vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(new Response("{}", { status: 503 }));
     await expect(measuredCheck("Remnashop", createProductionReadinessGateway().checkRemnashop)).resolves.toMatchObject({ status: "down", message: "Remnashop returned 503" });
@@ -121,6 +126,7 @@ describe("health checks", () => {
       new Response("email", { status: 422 }),
       new Response("identify", { status: 422 }),
       new Response("service", { status: 422 }),
+      new Response("notification-preferences", { status: 405 }),
       new Response("mailpit", { status: 200 }),
       new Response("remnawave", { status: 200 }),
     ];
@@ -193,6 +199,28 @@ describe("health checks", () => {
       status: "down",
       message: "Remnashop is incompatible: /auth/service-session is missing",
     });
+
+    fetch
+      .mockResolvedValueOnce(new Response("{}", { status: 200 }))
+      .mockResolvedValueOnce(new Response("{}", { status: 422 }))
+      .mockResolvedValueOnce(new Response("{}", { status: 422 }))
+      .mockResolvedValueOnce(new Response("{}", { status: 422 }))
+      .mockResolvedValueOnce(new Response("{}", { status: 404 }));
+    await expect(measuredCheck("Remnashop", createProductionReadinessGateway().checkRemnashop)).resolves.toMatchObject({
+      status: "down",
+      message: "Remnashop is incompatible: /auth/notification-preferences is missing",
+    });
+
+    fetch
+      .mockResolvedValueOnce(new Response("{}", { status: 200 }))
+      .mockResolvedValueOnce(new Response("{}", { status: 422 }))
+      .mockResolvedValueOnce(new Response("{}", { status: 422 }))
+      .mockResolvedValueOnce(new Response("{}", { status: 422 }))
+      .mockResolvedValueOnce(new Response("{}", { status: 200 }));
+    await expect(measuredCheck("Remnashop", createProductionReadinessGateway().checkRemnashop)).resolves.toMatchObject({
+      status: "down",
+      message: "Remnashop /auth/notification-preferences contract returned 200, expected 405",
+    });
   });
 
   it("reports a missing Remnashop service key before probing auth contracts", async () => {
@@ -259,6 +287,28 @@ describe("health checks", () => {
       cache: "no-store",
       signal: expect.any(Object),
     }));
+  });
+
+  it("uses the isolated canary JWKS only for Telegram readiness", async () => {
+    const origin = "http://zdt-readiness-0123456789abcdef:4190";
+    vi.stubEnv("REMNASHOP_API_BASE_URL", `${origin}/api/v1/public`);
+    vi.stubEnv(
+      "CLEAN_PAY_READINESS_TELEGRAM_OIDC_JWKS_URL",
+      `${origin}/.well-known/jwks.json`,
+    );
+    const fetch = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
+      new Response(JSON.stringify({ keys: [{ kid: "synthetic-readiness" }] }), {
+        status: 200,
+      }),
+    );
+
+    const gateway = createProductionReadinessGateway();
+    await expect(measuredCheck("Telegram OIDC", gateway.checkTelegramOidc))
+      .resolves.toMatchObject({ status: "ok" });
+    expect(fetch).toHaveBeenCalledWith(
+      `${origin}/.well-known/jwks.json`,
+      expect.objectContaining({ cache: "no-store", signal: expect.any(Object) }),
+    );
   });
 
   it("reports a missing Remnawave readiness token without making a request", async () => {

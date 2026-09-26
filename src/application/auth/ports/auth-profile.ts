@@ -33,6 +33,8 @@ export type ProviderAuthProfile = {
 };
 
 export interface AuthProfileGateway {
+  /** Render-only adapters set this to false so reconciliation stays in a Server Action. */
+  readonly canReconcileVerifiedEmail?: boolean;
   loadCurrentSession(): Promise<AuthProfileSession | null>;
   authorizeCurrentSession(): Promise<AuthorizedAuthProfile>;
   loadProviderProfile(authorized: AuthorizedAuthProfile): Promise<ProviderAuthProfile>;

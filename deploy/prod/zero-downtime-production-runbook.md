@@ -1,0 +1,490 @@
+# Zero-downtime rollout приложения Clean Pay
+
+Этот runbook предназначен только для обновления runtime Clean Pay без schema
+change. Обычные `./deploy.sh install` и `./deploy.sh up`
+намеренно останавливают app/workers перед миграцией и создают maintenance
+window — их нельзя выдавать за zero-downtime.
+
+Guarded flow оставляет старый app доступным до полной readiness canary,
+переключает HTTP graceful reload'ом Caddy и автоматически возвращает exact
+previous app/workers и image-настройки при ошибке promotion. Он не применяет
+миграции и не откатывает данные.
+
+## Обязательная топология и ограничения
+
+Перед каждым rollout независимо подтвердите:
+
+- один healthy Compose app и healthy workers на одной exact image;
+- отдельные private и external edge networks из authoritative env;
+- выбранный Caddy container под управлением Compose;
+- выбранный absolute host Caddyfile, bind-mounted read-only как
+  `/etc/caddy/Caddyfile`;
+- Clean Pay upstream `reverse_proxy clean-pay:4000`;
+- отдельным `/partners` upstream
+  `reverse_proxy clean-pay-advertiser-cabinet:4100`.
+
+Скрипт приложения не hardcode'ит project/network: он сверяет точные Docker
+labels, имена контейнеров, image IDs и уникальный canary alias. Runbook требует
+явно подставить host-local absolute paths и проверяет фактический Caddy mount;
+tracked файл не содержит production identifiers.
+
+Любая pending, failed или divergent Prisma migration блокирует flow.
+`migrate deploy`, `db push` и down migration здесь отсутствуют. Новая схема
+требует отдельного expand/contract review, backup/restore rehearsal и
+доказательства совместимости обоих runtime.
+
+## 1. Immutable staging и release gates
+
+Не запускайте release из существующего mutable/dirty checkout. Создайте новый
+checkout внутри выбранного absolute release root, названный полным Git SHA:
+
+```bash
+release_sha='REPLACE_WITH_40_HEX_REVIEWED_GIT_SHA'
+release_root='REPLACE_WITH_ABSOLUTE_RELEASE_ROOT'
+release_dir="$release_root/$release_sha"
+repository_url='REPLACE_WITH_CANONICAL_REPOSITORY_URL'
+
+printf '%s' "$release_sha" | grep -Eq '^[a-f0-9]{40}$'
+test "$release_sha" != 'REPLACE_WITH_40_HEX_REVIEWED_GIT_SHA'
+test "$release_root" != 'REPLACE_WITH_ABSOLUTE_RELEASE_ROOT'
+case "$release_root" in /*) ;; *) exit 1 ;; esac
+test "$release_root" != '/'
+test -d "$release_root"
+test "$repository_url" != 'REPLACE_WITH_CANONICAL_REPOSITORY_URL'
+test ! -e "$release_dir"
+git clone --no-checkout "$repository_url" "$release_dir"
+git -C "$release_dir" fetch --depth=1 origin "$release_sha"
+git -C "$release_dir" checkout --detach "$release_sha"
+test "$(git -C "$release_dir" rev-parse HEAD)" = "$release_sha"
+test -z "$(git -C "$release_dir" status --porcelain --untracked-files=all)"
+```
+
+До rollout:
+
+1. Подтвердите успешный CI exact commit и совместимость Remnashop
+   API/worker/scheduler.
+2. Зафиксируйте digest/ID target images и image IDs текущих app/workers.
+3. Проверьте порог свободного места из authoritative env. Разрешена только
+   точечная очистка доказанно неиспользуемых objects с повторной проверкой
+   current/previous rollback images. `docker system prune --volumes` запрещён.
+4. Сохраните и проверьте чтением Clean Pay/Remnashop DB dumps и Caddyfile.
+   Не удаляйте current и previous application/migration images.
+
+Создайте приватный rollback snapshot текущего authoritative env, затем target
+env в release checkout:
+
+```bash
+old_env='REPLACE_WITH_ABSOLUTE_CURRENT_ENV_FILE'
+target_env="$release_dir/deploy/prod/.env"
+rollback_env="$release_dir/deploy/prod/.env.rollback-before-$release_sha"
+node_tooling="$release_dir/deploy/prod/node-tooling.sh"
+
+test "$old_env" != 'REPLACE_WITH_ABSOLUTE_CURRENT_ENV_FILE'
+case "$old_env" in /*) ;; *) exit 1 ;; esac
+test -f "$old_env"
+test ! -L "$old_env"
+install -m 600 "$old_env" "$rollback_env"
+install -m 600 "$old_env" "$target_env"
+```
+
+Для точного перехода с единственной явно разрешённой production revision из
+`rollback-env-compat.mjs` добавьте в обе копии отсутствующую обязательную
+настройку в безопасном для target runtime состоянии. В новом target runtime
+значение `false` продолжает non-payment cleanup, но не удаляет исторические
+платёжные URL и snapshots до отдельной проверки backup и retention policy:
+
+```bash
+printf '%s' false | sh "$node_tooling" credential-env-set \
+  "$rollback_env" PAYMENT_DATA_RETENTION_ENABLED
+printf '%s' false | sh "$node_tooling" credential-env-set \
+  "$target_env" PAYMENT_DATA_RETENTION_ENABLED
+```
+
+В rollback env это значение также необходимо текущим validator и role-env
+materializer. Exact legacy rollback image был собран до появления флага и
+игнорирует `false`: автоматический rollback поэтому восстанавливает прежнее
+production-поведение retention worker, включая legacy payment cleanup. Это не
+новая операция rollback, но проверенный DB backup обязателен до stage.
+
+Stage сначала валидирует полные target и rollback env текущими правилами. Затем
+только для immutable rollback images с этим exact revision создаёт в приватном
+temporary directory проекцию без трёх более новых параметров
+(`CLEAN_PAY_CONFIG_VERSION`, `CLEAN_PAY_UPGRADE_SOURCE_VERSION`,
+`PAYMENT_DATA_RETENTION_ENABLED`) и передаёт её старому image validator.
+Исходные env-файлы не изменяются. Для любого другого revision такая проекция
+запрещена и preflight остаётся строгим.
+
+В `$target_env` измените только эти пять строк:
+
+- `CLEAN_PAY_DEPLOY_SOURCE`;
+- `CLEAN_PAY_IMAGE`;
+- `CLEAN_PAY_MIGRATION_IMAGE`;
+- `CLEAN_PAY_RELEASE`;
+- `CLEAN_PAY_REVISION`.
+
+Все secrets и runtime-настройки должны остаться byte-equivalent по parsed
+value. Guard отклонит любую другую разницу, stale rollback image или
+group/world-readable env.
+
+```bash
+cd "$release_dir"
+export CLEAN_PAY_ZDT_ENV_FILE="$target_env"
+export CLEAN_PAY_ZDT_ROLLBACK_ENV_FILE="$rollback_env"
+
+sh "$node_tooling" zero-downtime-env verify "$target_env" "$rollback_env"
+./deploy.sh build
+```
+
+`./deploy.sh build` выполняет prepare/build-or-pull/provenance/image/env
+preflight, но не вызывает `compose stop/down/up` и не запускает миграцию.
+
+Target-пара всегда проходит полный provenance preflight. При первом переходе
+со старого релиза, созданного до появления `io.clean-pay.role`, stage допускает
+rollback-пару только если метки отсутствуют у обоих образов, application ID
+точно совпадает с healthy Compose app/workers, а оба локальных image reference
+однократно разрешены в разные immutable IDs. Legacy migration image при этом не
+запускается; смешанные, частичные или неверные role-метки блокируют rollout.
+
+## 2. Stage canary
+
+Из immutable `$release_dir` и в том же shell:
+
+```bash
+sh deploy/prod/zero-downtime-app.sh stage --require-no-pending-migrations
+sh deploy/prod/zero-downtime-app.sh status
+sh deploy/prod/zero-downtime-app.sh verify
+```
+
+По умолчанию создаётся отдельный owned canary с dedicated loopback health port,
+private network и уникальным edge alias `clean-pay-canary`. Старый app/workers
+продолжают работать. Readiness secret
+не передаётся в arguments/logs: проверка выполняется внутри canary через
+`process.env.READINESS_INTERNAL_SECRET`.
+
+Canary создаётся с restart policy `unless-stopped`; topology guard проверяет
+его явно. Поэтому daemon/host restart не оставляет persistent Caddy candidate
+без upstream. `NODE_ENV=production` baked в runner image, а runtime-настройки,
+включая `LOG_LEVEL`, приходят из того же validated target env, что и Compose.
+
+State публикуется атомарно с mode `0600`. Existing container без точных
+ownership labels не удаляется. При ошибке stage удаляется только созданный
+owned canary; recursive delete и Docker volume operations отсутствуют.
+Все команды rollout, включая `verify` и `status`, удерживают тот же
+ownership-token operation lock, что и обычные `deploy.sh`, `start.sh` и
+`prod.mjs`: read-only команды также materialize'ят общие role-env файлы, а
+проверка должна видеть согласованное production-состояние. Поэтому эти
+entrypoint'ы нельзя запускать параллельно. Stale fail-closed lock нельзя удалять
+по возрасту — сначала независимо докажите, что ни один writer не работает.
+Ошибка owner-token release или удаления private state lock завершает даже
+успешную команду с nonzero status и сохраняет проблемный lock для расследования.
+В metadata общего lock `ownerPid`/`pid` — PID живого entrypoint shell, а
+`helperPid` относится только к краткоживущему Node helper. Проверяйте на host
+именно `ownerPid` вместе с `operation` и `startedAt`; завершение `helperPid` не
+доказывает, что rollout закончился.
+
+## 3. Подготовить persistent Caddy candidate
+
+Сначала задайте host-local значения и подтвердите exact file bind:
+
+```bash
+caddy_container='REPLACE_WITH_CADDY_CONTAINER_NAME'
+caddy_host='REPLACE_WITH_ABSOLUTE_HOST_CADDYFILE'
+caddy_state_root='REPLACE_WITH_ABSOLUTE_PRIVATE_CADDY_STATE_ROOT'
+
+test "$caddy_container" != 'REPLACE_WITH_CADDY_CONTAINER_NAME'
+test "$caddy_host" != 'REPLACE_WITH_ABSOLUTE_HOST_CADDYFILE'
+test "$caddy_state_root" != 'REPLACE_WITH_ABSOLUTE_PRIVATE_CADDY_STATE_ROOT'
+case "$caddy_host" in /*) ;; *) exit 1 ;; esac
+case "$caddy_state_root" in /*) ;; *) exit 1 ;; esac
+test "$caddy_host" != '/'
+test "$caddy_state_root" != '/'
+
+test "$(docker inspect --format '{{.Name}}' "$caddy_container")" = "/$caddy_container"
+test -n "$(docker inspect --format '{{index .Config.Labels "com.docker.compose.project"}}' "$caddy_container")"
+caddy_mount=$(docker inspect --format \
+  '{{range .Mounts}}{{if eq .Destination "/etc/caddy/Caddyfile"}}{{printf "%s|%s|%t" .Type .Source .RW}}{{end}}{{end}}' \
+  "$caddy_container")
+test "$caddy_mount" = "bind|$caddy_host|false"
+
+caddy_host_inode=$(stat -c '%d:%i' "$caddy_host")
+caddy_bound_inode=$(docker exec "$caddy_container" \
+  stat -c '%d:%i' /etc/caddy/Caddyfile)
+test "$caddy_bound_inode" = "$caddy_host_inode" || {
+  printf '%s\n' \
+    'Caddy still holds a stale deleted file-bind inode; recreate it under a separately reviewed availability plan before this rollout.' >&2
+  exit 1
+}
+caddy_host_sha=$(sha256sum "$caddy_host" | awk '{print $1}')
+caddy_bound_sha=$(docker exec "$caddy_container" \
+  sha256sum /etc/caddy/Caddyfile | awk '{print $1}')
+test "$caddy_bound_sha" = "$caddy_host_sha"
+```
+
+Это file bind, поэтому `mv`/atomic rename host-файла запрещён: running
+container продолжил бы читать старый inode. HTTP cutover будет атомарным на
+`caddy reload`, а authoritative bytes записываются durable в тот же inode.
+Проверка identity обязательна даже при совпадающих bytes: удалённый stale inode
+может содержать тот же primary Caddyfile, но перестанет видеть следующую
+same-inode запись.
+
+Подготовьте private backup и candidate, не меняя advertiser route:
+
+```bash
+caddy_state="$caddy_state_root/clean-pay-zdt-$release_sha"
+caddy_backup="$caddy_state/Caddyfile.primary"
+caddy_candidate="$caddy_state/Caddyfile.canary"
+node_tooling="$release_dir/deploy/prod/node-tooling.sh"
+
+test -f "$caddy_host"
+test ! -L "$caddy_host"
+test ! -e "$caddy_state"
+(umask 077 && mkdir "$caddy_state")
+cp --preserve=mode,ownership,timestamps "$caddy_host" "$caddy_backup"
+cp --preserve=mode,ownership,timestamps "$caddy_host" "$caddy_candidate"
+chmod 600 "$caddy_backup" "$caddy_candidate"
+
+primary_route_count=$(grep -Fc 'reverse_proxy clean-pay:4000' "$caddy_backup")
+advertiser_route_count=$(grep -Fc \
+  'reverse_proxy clean-pay-advertiser-cabinet:4100' "$caddy_backup")
+test "$primary_route_count" -ge 1
+test "$advertiser_route_count" -ge 1
+sed -i 's/reverse_proxy clean-pay:4000/reverse_proxy clean-pay-canary:4000/' \
+  "$caddy_candidate"
+test "$(grep -Fc 'reverse_proxy clean-pay:4000' "$caddy_candidate")" -eq 0
+test "$(grep -Fc 'reverse_proxy clean-pay-canary:4000' "$caddy_candidate")" \
+  -eq "$primary_route_count"
+test "$(grep -Fc 'reverse_proxy clean-pay-advertiser-cabinet:4100' "$caddy_candidate")" \
+  -eq "$advertiser_route_count"
+
+primary_sha=$(sha256sum "$caddy_backup" | awk '{print $1}')
+candidate_sha=$(sha256sum "$caddy_candidate" | awk '{print $1}')
+caddy_inode=$caddy_host_inode
+
+docker cp "$caddy_backup" "$caddy_container:/tmp/Caddyfile-clean-pay-primary"
+docker cp "$caddy_candidate" "$caddy_container:/tmp/Caddyfile-clean-pay-canary"
+docker exec "$caddy_container" chmod 0400 \
+  /tmp/Caddyfile-clean-pay-primary /tmp/Caddyfile-clean-pay-canary
+test "$(docker exec "$caddy_container" sha256sum /tmp/Caddyfile-clean-pay-primary | awk '{print $1}')" = "$primary_sha"
+test "$(docker exec "$caddy_container" sha256sum /tmp/Caddyfile-clean-pay-canary | awk '{print $1}')" = "$candidate_sha"
+docker exec "$caddy_container" caddy validate --config /tmp/Caddyfile-clean-pay-primary
+docker exec "$caddy_container" caddy validate --config /tmp/Caddyfile-clean-pay-canary
+```
+
+Оба варианта копируются в контейнер с mode `0400`; их checksums и синтаксис
+должны быть проверены до первой записи. `reload` читает только соответствующую
+prevalidated private copy, а authoritative bind повторно сверяется после reload,
+поэтому неизвестная конкурентная запись в host path не становится runtime-config.
+`node-tooling.sh` запускает reviewed `caddyfile-same-inode.mjs` через host Node.js
+или закреплённый контейнер без изменения semantics записи.
+
+## 4. Persistent switch на canary
+
+Перед первой записью возьмите один общий operation lock на весь критический
+участок Caddy → canary → Compose promotion → Caddy → primary. Все команды
+должны выполняться из одного reviewed `$release_dir`; absolute override lock
+path передаётся и `node-tooling.sh`, и `zero-downtime-app.sh`:
+
+```bash
+production_operation_lock="$release_dir/deploy/prod/.production-operation.lock"
+export CLEAN_PAY_PRODUCTION_OPERATION_LOCK_PATH="$production_operation_lock"
+rollout_lock_token=$(sh "$node_tooling" operation-lock acquire \
+  zero-downtime-rollout "$$") || exit 1
+export CLEAN_PAY_PRODUCTION_OPERATION_LOCK_TOKEN="$rollout_lock_token"
+sh "$node_tooling" operation-lock verify "$rollout_lock_token" || exit 1
+```
+
+Не печатайте token и не снимайте lock между блоками. При любой ошибке lock
+остаётся fail-closed до доказанного восстановления traffic/runtime. Выполните
+следующий блок целиком в том же privileged shell. Entry points из других
+checkout/release roots имеют другой legacy lock path и на всём критическом
+участке категорически запрещены; используйте только этот `$release_dir` и этот
+absolute override:
+
+```bash
+(
+set -eu
+candidate_committed=0
+restore_primary_on_failure() {
+  switch_status=$?
+  trap - 0 HUP INT TERM
+  if [ "$candidate_committed" -eq 0 ]; then
+    recovery_failed=0
+    if sh "$node_tooling" caddyfile restore \
+        "$caddy_host" "$caddy_backup" \
+        "$candidate_sha" "$primary_sha" && \
+      test "$(stat -c '%d:%i' "$caddy_host")" = "$caddy_inode" && \
+      test "$(sha256sum "$caddy_host" | awk '{print $1}')" = "$primary_sha" && \
+      test "$(docker exec "$caddy_container" stat -c '%d:%i' /etc/caddy/Caddyfile)" = "$caddy_inode" && \
+      test "$(docker exec "$caddy_container" sha256sum /etc/caddy/Caddyfile | awk '{print $1}')" = "$primary_sha"; then
+      test "$(docker exec "$caddy_container" sha256sum /tmp/Caddyfile-clean-pay-primary | awk '{print $1}')" = "$primary_sha" && \
+        docker exec "$caddy_container" caddy validate --config /tmp/Caddyfile-clean-pay-primary && \
+        docker exec "$caddy_container" caddy reload --config /tmp/Caddyfile-clean-pay-primary \
+        || recovery_failed=1
+    else
+      recovery_failed=1
+    fi
+    if [ "$recovery_failed" -ne 0 ]; then
+      printf '%s\n' 'CRITICAL: automatic primary Caddyfile recovery failed' >&2
+      if [ "$switch_status" -eq 0 ]; then
+        switch_status=1
+      fi
+    fi
+  fi
+  exit "$switch_status"
+}
+trap restore_primary_on_failure 0
+trap 'exit 129' HUP
+trap 'exit 130' INT
+trap 'exit 143' TERM
+
+sh "$node_tooling" caddyfile replace \
+  "$caddy_host" "$caddy_candidate" "$primary_sha" "$candidate_sha"
+test "$(stat -c '%d:%i' "$caddy_host")" = "$caddy_inode"
+test "$(sha256sum "$caddy_host" | awk '{print $1}')" = "$candidate_sha"
+test "$(docker exec "$caddy_container" stat -c '%d:%i' /etc/caddy/Caddyfile)" = "$caddy_inode"
+test "$(docker exec "$caddy_container" sha256sum /etc/caddy/Caddyfile | awk '{print $1}')" = "$candidate_sha"
+test "$(docker exec "$caddy_container" sha256sum /tmp/Caddyfile-clean-pay-canary | awk '{print $1}')" = "$candidate_sha"
+docker exec "$caddy_container" caddy validate --config /tmp/Caddyfile-clean-pay-canary
+docker exec "$caddy_container" caddy reload --config /tmp/Caddyfile-clean-pay-canary
+test "$(sha256sum "$caddy_host" | awk '{print $1}')" = "$candidate_sha"
+test "$(docker exec "$caddy_container" sha256sum /etc/caddy/Caddyfile | awk '{print $1}')" = "$candidate_sha"
+candidate_committed=1
+trap - 0 HUP INT TERM
+)
+```
+
+При write/check/validate/reload failure trap восстанавливает prevalidated
+backup в тот же inode, fsync'ит его, сверяет checksum и reload'ит primary из
+отдельной prevalidated `0400`-копии с exact checksum.
+Caddy сохраняет уже загруженную конфигурацию до успешного graceful reload.
+Restore ничего не пишет, если authoritative file уже имеет desired checksum;
+пишет только из exact candidate checksum и отказывается трогать любой третий,
+неизвестный checksum. Если guarded restore или любая проверка inode/checksum
+не прошла, trap не запускает ни validate, ни reload неизвестного файла,
+печатает CRITICAL и оставляет общий operation lock для ручного recovery.
+
+Same-inode write не является filesystem-atomic: между truncate/write/fsync
+остаётся минимальное crash/power-loss окно. Это неизбежный компромисс
+read-only file bind; helper, checksum и failure trap уменьшают риск. После
+fsync candidate переживает restart Caddy. Не допускайте параллельного
+редактирования или restart контейнера во время этого короткого блока.
+
+Сразу проверьте внешний HTTPS liveness, security headers, главную страницу,
+login и безопасный authenticated read-only scenario. Не выполняйте payment или
+другую необратимую smoke-операцию. При ошибке верните primary блоком из раздела
+6, пока старый Compose app ещё healthy.
+
+## 5. Promote app/workers за canary
+
+Пока Caddy обслуживает `clean-pay-canary:4000`:
+
+```bash
+sh deploy/prod/zero-downtime-app.sh verify
+sh deploy/prod/zero-downtime-app.sh promote --traffic-on-canary
+```
+
+Скрипт повторяет image preflight, сверяет immutable IDs и заменяет Compose app,
+затем workers через `--no-deps --no-build --pull never --wait`. При ошибке
+failure trap сохраняет canary для HTTP, восстанавливает exact previous
+app/workers и атомарно возвращает в target env прежние пять image/release
+строк. Поэтому последующий обычный Compose запуск не выкатит target повторно.
+
+## 6. Persistent switch на primary alias
+
+После healthy promotion Caddy должен вернуться на `clean-pay:4000`. При любой
+ошибке этого блока authoritative file и traffic возвращаются на canary:
+
+```bash
+(
+set -eu
+primary_committed=0
+restore_canary_on_failure() {
+  switch_status=$?
+  trap - 0 HUP INT TERM
+  if [ "$primary_committed" -eq 0 ]; then
+    recovery_failed=0
+    if sh "$node_tooling" caddyfile restore \
+        "$caddy_host" "$caddy_candidate" \
+        "$primary_sha" "$candidate_sha" && \
+      test "$(stat -c '%d:%i' "$caddy_host")" = "$caddy_inode" && \
+      test "$(sha256sum "$caddy_host" | awk '{print $1}')" = "$candidate_sha" && \
+      test "$(docker exec "$caddy_container" stat -c '%d:%i' /etc/caddy/Caddyfile)" = "$caddy_inode" && \
+      test "$(docker exec "$caddy_container" sha256sum /etc/caddy/Caddyfile | awk '{print $1}')" = "$candidate_sha"; then
+      test "$(docker exec "$caddy_container" sha256sum /tmp/Caddyfile-clean-pay-canary | awk '{print $1}')" = "$candidate_sha" && \
+        docker exec "$caddy_container" caddy validate --config /tmp/Caddyfile-clean-pay-canary && \
+        docker exec "$caddy_container" caddy reload --config /tmp/Caddyfile-clean-pay-canary \
+        || recovery_failed=1
+    else
+      recovery_failed=1
+    fi
+    if [ "$recovery_failed" -ne 0 ]; then
+      printf '%s\n' 'CRITICAL: automatic canary Caddyfile recovery failed' >&2
+      if [ "$switch_status" -eq 0 ]; then
+        switch_status=1
+      fi
+    fi
+  fi
+  exit "$switch_status"
+}
+trap restore_canary_on_failure 0
+trap 'exit 129' HUP
+trap 'exit 130' INT
+trap 'exit 143' TERM
+
+sh "$node_tooling" caddyfile replace \
+  "$caddy_host" "$caddy_backup" "$candidate_sha" "$primary_sha"
+test "$(stat -c '%d:%i' "$caddy_host")" = "$caddy_inode"
+test "$(sha256sum "$caddy_host" | awk '{print $1}')" = "$primary_sha"
+test "$(docker exec "$caddy_container" stat -c '%d:%i' /etc/caddy/Caddyfile)" = "$caddy_inode"
+test "$(docker exec "$caddy_container" sha256sum /etc/caddy/Caddyfile | awk '{print $1}')" = "$primary_sha"
+test "$(docker exec "$caddy_container" sha256sum /tmp/Caddyfile-clean-pay-primary | awk '{print $1}')" = "$primary_sha"
+docker exec "$caddy_container" caddy validate --config /tmp/Caddyfile-clean-pay-primary
+docker exec "$caddy_container" caddy reload --config /tmp/Caddyfile-clean-pay-primary
+test "$(sha256sum "$caddy_host" | awk '{print $1}')" = "$primary_sha"
+test "$(docker exec "$caddy_container" sha256sum /etc/caddy/Caddyfile | awk '{print $1}')" = "$primary_sha"
+primary_committed=1
+trap - 0 HUP INT TERM
+)
+```
+
+Повторите полный external smoke. Только после успешного smoke либо после
+доказанного recovery проверьте и снимите caller-owned lock:
+
+```bash
+sh "$node_tooling" operation-lock verify "$rollout_lock_token" && \
+  sh "$node_tooling" operation-lock release "$rollout_lock_token" && \
+  unset CLEAN_PAY_PRODUCTION_OPERATION_LOCK_TOKEN rollout_lock_token || exit 1
+```
+
+Если checksum/route/runtime после ошибки не доказаны, release запрещён. Lock
+остаётся для reviewed recovery; ни одна дочерняя ZDT-команда его не удаляет.
+
+Сохраняйте canary, private state, оба Caddyfile и previous images весь
+observation window. Только после принятого окна:
+
+```bash
+sh deploy/prod/zero-downtime-app.sh remove --traffic-off-canary
+```
+
+Удаляйте Caddy backup/candidate затем только по точным именам; не используйте
+recursive delete.
+
+## Rollback после promotion
+
+1. Тем же guarded блоком раздела 4 направьте Caddy на всё ещё healthy canary.
+2. Выполните:
+
+   ```bash
+   sh deploy/prod/zero-downtime-app.sh rollback --traffic-on-canary
+   ```
+
+3. Убедитесь, что previous app/workers healthy и target env содержит прежнюю
+   image pair/release metadata.
+4. Выполните guarded primary switch из раздела 6: alias `clean-pay` теперь
+   указывает на previous app.
+5. После external smoke и observation удалите owned canary/state.
+
+Скрипт не откатывает БД, Remnashop, SMTP или kill switch. Additive Remnashop
+revision `0059` для e-mail reminders выпускается с
+`EMAIL_SUBSCRIPTION_EXPIRATION_REMINDERS_ENABLED=false`. Любая необходимость
+отката schema/data требует отдельного migration/restore runbook.

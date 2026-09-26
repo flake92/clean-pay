@@ -3,9 +3,14 @@ import { describe, expect, it } from "vitest";
 import { readTelegramPopupRequest } from "@/backend/integrations/telegram/popup-request";
 
 function request(body: string, headers?: HeadersInit) {
+  const requestHeaders = new Headers(headers);
+  if (!requestHeaders.has("content-type")) {
+    requestHeaders.set("content-type", "application/json");
+  }
+
   return new Request("http://clean-pay.local/auth/telegram/callback", {
     method: "POST",
-    headers,
+    headers: requestHeaders,
     body,
   });
 }
@@ -65,6 +70,7 @@ describe("Telegram popup HTTP contract", () => {
     });
     const streamed = new Request("http://clean-pay.local/auth/telegram/callback", {
       method: "POST",
+      headers: { "content-type": "application/json" },
       body,
       duplex: "half",
     } as RequestInit);
@@ -76,11 +82,23 @@ describe("Telegram popup HTTP contract", () => {
   });
 
   it("rejects a request without a body", async () => {
-    const empty = new Request("http://clean-pay.local/auth/telegram/callback", { method: "POST" });
+    const empty = new Request("http://clean-pay.local/auth/telegram/callback", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+    });
 
     await expect(readTelegramPopupRequest(empty)).rejects.toMatchObject({
       code: "VALIDATION_ERROR",
       status: 400,
     });
+  });
+
+  it("rejects simple cross-site media types before parsing the body", async () => {
+    for (const contentType of ["text/plain", "application/x-www-form-urlencoded"]) {
+      await expect(readTelegramPopupRequest(request(
+        JSON.stringify({ idToken: "signed-token" }),
+        { "content-type": contentType },
+      ))).rejects.toMatchObject({ code: "VALIDATION_ERROR", status: 415 });
+    }
   });
 });

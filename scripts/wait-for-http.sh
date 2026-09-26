@@ -10,11 +10,7 @@ last_status="000"
 body_file="$(mktemp)"
 error_file="$(mktemp)"
 
-cleanup() {
-  rm -f "$body_file" "$error_file"
-}
-
-trap cleanup EXIT
+trap 'rm -f "$body_file" "$error_file"' EXIT
 
 while (( SECONDS < deadline )); do
   last_status="$(curl -fsS -X "$method" -o "$body_file" -w '%{http_code}' "$url" 2>"$error_file" || true)"

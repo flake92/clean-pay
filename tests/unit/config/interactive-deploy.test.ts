@@ -3,6 +3,8 @@ import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
 const deploy = readFileSync("deploy.sh", "utf8");
+const credentialFileGuard = readFileSync("deploy/prod/credential-file-guard.mjs", "utf8");
+const productionEnvExample = readFileSync("deploy/prod/.env.example", "utf8");
 const readme = readFileSync("README.md", "utf8");
 
 describe("interactive owner deployment", () => {
@@ -15,11 +17,41 @@ describe("interactive owner deployment", () => {
     expect(deploy).toContain("configure|config) configure");
     expect(deploy).toContain("compose|check) prepare_compose");
     expect(deploy).toContain("install) up");
+    expect(deploy).toContain("REMNASHOP_ENV_FILE 'Абсолютный путь к .env Remnashop");
+    expect(deploy).toContain("PAYMENT_REDIRECT_ORIGINS 'HTTPS origins платёжных шлюзов");
+
+    const setup = deploy.slice(deploy.indexOf("setup() {"), deploy.indexOf("usage() {"));
+    expect(setup.indexOf("Ключ синхронизирован")).toBeGreaterThan(
+      setup.indexOf("configure"),
+    );
+    expect(setup.indexOf("DNS и HTTPS reverse proxy")).toBeGreaterThan(
+      setup.indexOf("Ключ синхронизирован"),
+    );
+    expect(setup.indexOf("prepare_compose")).toBeGreaterThan(
+      setup.indexOf("DNS и HTTPS reverse proxy"),
+    );
+    expect(productionEnvExample).toContain("REMNASHOP_MINIMUM_ALEMBIC_REVISION=0059");
+    expect(deploy).toContain(
+      "required_remnashop_revision=$(env_value REMNASHOP_MINIMUM_ALEMBIC_REVISION 0059)",
+    );
   });
 
   it("creates secrets safely and does not require Docker before configuration", () => {
     expect(deploy).toContain('chmod 600 "$ENV_FILE"');
     expect(deploy).toContain("stty -echo");
+    expect(deploy).toContain("restore_secret_input_terminal");
+    expect(deploy).toContain("trap cleanup_deploy_state 0");
+    expect(deploy).toContain(
+      'node "$CREDENTIAL_FILE_GUARD_SCRIPT" env-set "$ENV_FILE" "$name"',
+    );
+    expect(credentialFileGuard).toContain("constants.O_CREAT | constants.O_EXCL");
+    expect(credentialFileGuard.indexOf("fsyncSync(temporaryDescriptor)")).toBeLessThan(
+      credentialFileGuard.indexOf("renameSync(temporaryPath, path)"),
+    );
+    expect(credentialFileGuard.indexOf("renameSync(temporaryPath, path)")).toBeLessThan(
+      credentialFileGuard.indexOf("fsyncSync(directoryDescriptor)"),
+    );
+    expect(deploy).not.toContain("sed -i");
     expect(deploy).toContain("ensure_generated_secret REMNASHOP_AUTH_SERVICE_KEY");
     expect(deploy).toMatch(/prepare_compose\(\) \{\s+init\s+need_docker/);
     expect(deploy).toContain('replace_env NEXT_PUBLIC_APP_URL "$(env_value APP_URL)"');
@@ -37,7 +69,7 @@ describe("interactive owner deployment", () => {
     const up = deploy.match(/install_services\(\) \{[\s\S]*?\n\}/)?.[0] ?? "";
     expect(up).not.toContain("logs --tail=100 -f");
     expect(up.indexOf("verify_detailed_readiness")).toBeGreaterThan(
-      up.indexOf("compose up -d --build"),
+      up.indexOf("start_verified_runtimes"),
     );
   });
 
@@ -48,5 +80,10 @@ describe("interactive owner deployment", () => {
     expect(readme).toContain("./deploy.sh configure");
     expect(readme).toContain("./deploy.sh compose");
     expect(readme).toContain("./deploy.sh install");
+    expect(readme).toContain("./deploy.sh authorize-existing-database --confirm-verified-backup");
+    expect(readme).not.toContain("REPLACE_WITH_REVIEWED_40_HEX_SHA");
+    expect(deploy).toContain(
+      'node "$CREDENTIAL_ADOPTION_SCRIPT" authorize "$ENV_FILE" "$1"',
+    );
   });
 });

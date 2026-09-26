@@ -1,15 +1,6 @@
-@import "tailwindcss";
-
 :root {
   --background: #eff3f8;
   --foreground: #111827;
-}
-
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: "Inter var", sans-serif;
-  --font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
 }
 
 body {
@@ -17,6 +8,38 @@ body {
   background: var(--background);
   color: var(--foreground);
   overflow-x: hidden;
+}
+
+.skip-link {
+  background: #ffffff;
+  border: 2px solid #6366f1;
+  border-radius: 6px;
+  color: #312e81;
+  font-weight: 700;
+  left: 1rem;
+  padding: 0.75rem 1rem;
+  position: fixed;
+  top: 1rem;
+  transform: translateY(calc(-100% - 2rem));
+  z-index: 10000;
+}
+
+.skip-link:focus-visible {
+  box-shadow: 0 0 0 0.2rem rgba(99, 102, 241, 0.22);
+  outline: 0;
+  transform: translateY(0);
+}
+
+.break-all {
+  word-break: break-all;
+}
+
+.break-words {
+  overflow-wrap: break-word;
+}
+
+.max-w-4xl {
+  max-width: 56rem;
 }
 
 .layout-topbar-logo img,
@@ -424,6 +447,39 @@ body {
   line-height: 1.35;
   margin: 0;
   overflow-wrap: anywhere;
+}
+
+.cabinet-devices-section,
+.cabinet-device-list,
+.cabinet-device-record,
+.cabinet-device-record__header {
+  min-width: 0;
+}
+
+.cabinet-device-list {
+  display: grid;
+  gap: 0.75rem;
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.cabinet-device-record__delete.p-button {
+  max-width: 100%;
+  white-space: normal;
+}
+
+.cabinet-device-record .cabinet-mobile-record__details {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.cabinet-payment-history__toggle.p-button {
+  margin-top: 0.125rem;
+  width: 100%;
+}
+
+.cabinet-payment-list__records {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
 }
 
 .clean-pay-price-dropdown {
@@ -894,6 +950,18 @@ body {
     gap: 0.75rem;
   }
 
+  .cabinet-device-record .cabinet-mobile-record__details {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .cabinet-payment-record__details {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .cabinet-payment-record__date {
+    grid-column: 1 / -1;
+  }
+
   .clean-pay-price-dropdown .p-dropdown-label {
     padding-left: 0.75rem;
     padding-right: 0.5rem;
@@ -950,6 +1018,16 @@ body {
     align-items: stretch;
     grid-template-columns: minmax(0, 1fr) auto;
     padding: 0.875rem;
+  }
+}
+
+@media (max-width: 400px) {
+  .cabinet-device-record__header {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .cabinet-device-record__delete.p-button {
+    width: 100%;
   }
 }
 

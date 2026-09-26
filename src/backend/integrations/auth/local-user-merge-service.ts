@@ -2,6 +2,7 @@ import { Prisma } from "@prisma/client";
 
 import { ServiceError } from "@/backend/errors/service-error";
 import {
+  assertPaymentOwnerChangeFenceHeld,
   lockPaymentOwnerFence,
   transferPaymentOperationsForUserMerge,
 } from "@/backend/integrations/payments/payment-user-merge-service";
@@ -63,6 +64,8 @@ export async function mergeLocalUsersIntoTarget(
   // fence used by foreground payment creation and claiming.
   if (!paymentOwnerFenceHeld) {
     await lockPaymentOwnerFence(tx, userIds);
+  } else {
+    await assertPaymentOwnerChangeFenceHeld(tx, userIds);
   }
 
   const emptyResult: LocalUserMergeResult = {
@@ -72,16 +75,6 @@ export async function mergeLocalUsersIntoTarget(
     invalidatedEmailCodeCount: 0,
     invalidatedTelegramStateCount: 0,
   };
-
-  if (sourceUserIds.length === 0) {
-    await transferPaymentOperationsForUserMerge(
-      tx,
-      targetUserId,
-      targetUpstreamAccountId,
-      [],
-    );
-    return emptyResult;
-  }
 
   const lockedUsers = await tx.$queryRaw<LocalUserOwnerExpectation[]>(
     Prisma.sql`
@@ -111,6 +104,16 @@ export async function mergeLocalUsersIntoTarget(
     ) {
       throw mergeStateChangedError();
     }
+  }
+
+  if (sourceUserIds.length === 0) {
+    await transferPaymentOperationsForUserMerge(
+      tx,
+      targetUserId,
+      targetUpstreamAccountId,
+      [],
+    );
+    return emptyResult;
   }
 
   const releasedIdentities = await tx.webUser.updateMany({
@@ -165,6 +168,16 @@ export async function mergeLocalUsersIntoTarget(
     where: { userId: { in: sourceUserIds } },
     data: { userId: targetUserId },
   });
+  // Legal-hold case ownership is part of the same payment-owner invariant.
+  // Leaving it on a soon-to-be-deleted source user would make an ACTIVE or
+  // RELEASED lifecycle permanently fail its stored-case validation.
+  await tx.paymentRetentionHold.updateMany({
+    where: {
+      caseUserId: { in: sourceUserIds },
+      status: { in: ["ACTIVE", "RELEASED"] },
+    },
+    data: { caseUserId: targetUserId },
+  });
 
   const deletedUsers = await tx.webUser.deleteMany({
     where: { id: { in: sourceUserIds } },
@@ -196,20 +209,18 @@ export async function assertUserMergeFinalOwner(
   },
 ) {
   const sourceUserIds = normalizedSourceIds(targetUserId, rawSourceUserIds);
-  const [target, remainingSourceCount] = await Promise.all([
-    tx.webUser.findUnique({
-      where: { id: targetUserId },
-      select: {
-        id: true,
-        remnashopUserId: true,
-        email: true,
-        telegramId: true,
-      },
-    }),
-    sourceUserIds.length > 0
-      ? tx.webUser.count({ where: { id: { in: sourceUserIds } } })
-      : Promise.resolve(0),
-  ]);
+  const target = await tx.webUser.findUnique({
+    where: { id: targetUserId },
+    select: {
+      id: true,
+      remnashopUserId: true,
+      email: true,
+      telegramId: true,
+    },
+  });
+  const remainingSourceCount = sourceUserIds.length > 0
+    ? await tx.webUser.count({ where: { id: { in: sourceUserIds } } })
+    : 0;
 
   if (!target || remainingSourceCount !== 0) {
     throw mergeStateChangedError();

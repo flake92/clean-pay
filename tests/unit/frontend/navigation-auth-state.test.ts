@@ -50,8 +50,6 @@ describe("navigation authentication state", () => {
     const result = await renderMenu({
       authenticated: false,
       emailVerificationRequired: false,
-      hasSubscription: false,
-      canRenewSubscription: false,
     });
 
     expect(result.flatItems.map(({ label }) => label)).toEqual(["Тарифы", "Поддержка", "Войти"]);
@@ -63,18 +61,30 @@ describe("navigation authentication state", () => {
     const result = await renderMenu({
       authenticated: true,
       emailVerificationRequired: false,
-      hasSubscription: false,
-      canRenewSubscription: false,
     });
 
     expect(result.flatItems.map(({ label }) => label)).toEqual([
       "Кабинет",
+      "Пригласить друзей",
       "Тарифы",
+      "Продлить",
       "Профиль",
       "Связать аккаунт",
       "Поддержка",
       "Выйти",
     ]);
     expect(result.flatItems.some(({ label }) => label === "Войти")).toBe(false);
+  });
+
+  it("keeps tariff and renewal routes available without blocking on provider state", async () => {
+    const result = await renderMenu({
+      authenticated: true,
+      emailVerificationRequired: false,
+    });
+
+    expect(result.flatItems).toEqual(expect.arrayContaining([
+      expect.objectContaining({ label: "Тарифы", to: "/tariffs" }),
+      expect.objectContaining({ label: "Продлить", to: "/extend" }),
+    ]));
   });
 });

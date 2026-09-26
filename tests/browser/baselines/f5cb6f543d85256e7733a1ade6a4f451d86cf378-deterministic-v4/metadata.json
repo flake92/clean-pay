@@ -1,0 +1,104 @@
+{
+  "schemaVersion": 1,
+  "baselineId": "f5cb6f543d85256e7733a1ade6a4f451d86cf378-deterministic-v4",
+  "status": "canonical",
+  "purpose": "candidate behavioral equality gate",
+  "source": {
+    "commit": "f5cb6f543d85256e7733a1ade6a4f451d86cf378",
+    "tree": "6647fc51c61018ba46aae95da21e534434028fbe",
+    "pristineArchiveSha256": "8f424f5d4839d2aa421849bb2c7f8f48420ee675",
+    "productionImage": {
+      "tag": "clean-pay:baseline-f5cb6f543d85-prod-pristine",
+      "digest": "sha256:e0640e36c6221ba8f2dc174ebbea3961fda59f6320aad56d2f071b1c51a75ffc"
+    }
+  },
+  "runtime": {
+    "engine": "chromium",
+    "browserVersion": "151.0.7922.34",
+    "playwrightVersion": "1.62.1",
+    "chromiumRevision": "1234"
+  },
+  "captureExecution": {
+    "workers": 1,
+    "fullyParallel": false,
+    "launchArgs": [
+      "--disable-gpu",
+      "--disable-gpu-compositing",
+      "--disable-gpu-rasterization",
+      "--disable-skia-runtime-opts",
+      "--disable-lcd-text",
+      "--disable-font-subpixel-positioning",
+      "--font-render-hinting=none"
+    ],
+    "rendererPolicy": "software raster plus deterministic text raster; exact PNG bytes only",
+    "screenshotAcquisition": {
+      "count": 3,
+      "acceptance": "byte-identical majority of at least two",
+      "allDifferent": "fail closed"
+    }
+  },
+  "preCaptureProbe": {
+    "independentCliRuns": 12,
+    "chromiumProcesses": 36,
+    "uniquePngHashesPerViewport": 1,
+    "hashes": {
+      "chromium-390x844": "61a60e477a248da65d9f0b6d4f01b867d9e1c63471c52b7be2c50f1b77dc7031",
+      "chromium-768x1024": "57651acfbc72c6ba6d7bd1db876e2b3f67d6a67bdb21aff43ac8a1cbcc236918",
+      "chromium-1440x900": "11ca971282d7ca9dbdae888b1b7659de3859d9208fd0b97414b2e7c9e6982d5f"
+    }
+  },
+  "supersedes": {
+    "baselineId": "f5cb6f543d85256e7733a1ade6a4f451d86cf378-deterministic-v3",
+    "status": "invalid_for_gate",
+    "artifactSet": {
+      "artifactCount": 126,
+      "aggregateSha256": "7fff96da71cbedb8f3492f727e0fa9abc0921ab964c2e249a0300a8bb608c7df",
+      "aggregateFormat": "sorted path\\0bytes\\0sha256\\n"
+    },
+    "metadataSha256": "18eb5c0f86973987689af327721f1deb90da17ff0ef4286c7315847346efeb66",
+    "artifactInventorySha256": "d314eb8d3133176d9415bfac9b962f0532fd89106e7a5910bfe793c599960e87"
+  },
+  "deterministicDependencies": {
+    "turnstile": {
+      "contract": {
+        "version": 1,
+        "interceptedUrl": "https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit",
+        "request": "GET script only; every near-miss continues to the network",
+        "api": [
+          "render",
+          "reset",
+          "remove"
+        ],
+        "state": "challenge-pending",
+        "callbacks": "never invoked",
+        "token": "never created"
+      },
+      "sourceSha256": "7c4ff13d9675cf2333a106408e532459a99bf18dbee4581fc896b77d0dad88a0"
+    }
+  },
+  "comparison": {
+    "rawArtifactsPreserved": true,
+    "policyVersion": 5,
+    "carriedForwardFrom": [
+      "f5cb6f543d85256e7733a1ade6a4f451d86cf378-deterministic-v2/comparison-policy-v4.json",
+      "f5cb6f543d85256e7733a1ade6a4f451d86cf378-deterministic-v2/comparison-policy-v5.json"
+    ],
+    "pngEquality": "byte-exact normal-state PNG",
+    "semanticAllowlist": "only the exact candidate accessibility contracts recorded in policy v4",
+    "screenshotStability": "only the byte-identical majority contract recorded in policy v5"
+  },
+  "expectedCapture": {
+    "projects": [
+      "chromium-390x844",
+      "chromium-768x1024",
+      "chromium-1440x900"
+    ],
+    "routesPerProject": 14,
+    "rawArtifactsPerRoute": [
+      "characterization.json",
+      "console.json",
+      "viewport.png"
+    ],
+    "expectedRawArtifactCount": 126
+  }
+}

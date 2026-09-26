@@ -24,6 +24,8 @@ import { loadSupportViewModel } from "@/application/support/load-support";
 
 function authCommands(overrides: Partial<AuthCommands> = {}): AuthCommands {
   return {
+    preflightCapacity: vi.fn(async () => undefined),
+    withUpstreamConcurrency: vi.fn(async (_action, work) => work()),
     verifyHuman: vi.fn(async () => undefined),
     rateLimit: vi.fn(async () => undefined),
     identifyEmail: vi.fn(async () => ({ exists: true })),
@@ -90,8 +92,14 @@ describe("server application flows", () => {
       claimHistory: vi.fn(async () => ({ context: {}, cursor: null })),
       authorizeHistory: vi.fn(async () => ({ context: {} })),
       historyPageSize: vi.fn(async () => 100),
+      findPendingHistoryPaymentIds: vi.fn(async () => []),
+      loadExactHistoryPayment: vi.fn(async () => null),
+      persistExactHistoryPayment: vi.fn(async () => undefined),
+      loadLegacyHistory: vi.fn(async () => ({ context: {} })),
       loadHistoryPage: vi.fn(async () => ({ context: {} })),
-      completeHistoryPage: vi.fn(async () => ({ applied: 20, hasMore: true })),
+      completeHistoryPage: vi.fn(async () => ({ applied: 20, hasMore: false })),
+      classifyHistoryError: vi.fn(() => ({ kind: "unexpected" as const })),
+      deferHistory: vi.fn(async () => undefined),
       failHistory: vi.fn(async () => undefined),
       now: vi.fn(() => now++),
     };
@@ -105,7 +113,7 @@ describe("server application flows", () => {
       history: { attempted: 1, applied: 20 },
     });
     expect(runner.completeRecoveredPayment).toHaveBeenCalledOnce();
-    expect(runner.listHistoryCandidates).toHaveBeenCalledWith(1);
+    expect(runner.listHistoryCandidates).toHaveBeenCalledWith(20);
   });
 
   it("owns Telegram callback outcome policy in the application use case", async () => {
@@ -188,7 +196,13 @@ describe("server application flows", () => {
   });
 
   it("loads support through its application port", () => {
-    const support = { enabled: true, email: "help@example.com", telegramUsername: null, faqUrl: null };
+    const support = {
+      enabled: true,
+      email: "help@example.com",
+      telegramUsername: null,
+      faqUrl: null,
+      liveChatEnabled: false,
+    };
 
     expect(loadSupportViewModel({ load: () => support })).toEqual(support);
   });
@@ -201,11 +215,114 @@ describe("server application flows", () => {
     expect(commands.identifyEmail).toHaveBeenCalledWith("user@example.com");
   });
 
+  it("orders cheap capacity, bounded proof, target limit and provider lookup", async () => {
+    const order: string[] = [];
+    const commands = authCommands({
+      preflightCapacity: vi.fn(async () => { order.push("capacity"); }),
+      withUpstreamConcurrency: vi.fn(async (action, work) => {
+        order.push(`semaphore:${action}`);
+        return work();
+      }),
+      verifyHuman: vi.fn(async () => { order.push("human"); }),
+      rateLimit: vi.fn(async () => { order.push("target"); }),
+      identifyEmail: vi.fn(async () => { order.push("provider"); return { exists: true }; }),
+      hasPasskey: vi.fn(async () => false),
+    });
+
+    await expect(executeAuthCommand(commands, {
+      kind: "identify",
+      email: "user@example.com",
+      turnstileToken: "proof",
+    })).resolves.toMatchObject({ ok: true, kind: "identified" });
+
+    expect(order).toEqual([
+      "capacity",
+      "semaphore:turnstile_verify",
+      "human",
+      "target",
+      "semaphore:remnashop_auth",
+      "provider",
+    ]);
+  });
+
+  it("rejects oversized auth input before Redis or external services", async () => {
+    const commands = authCommands();
+
+    await expect(executeAuthCommand(commands, {
+      kind: "login",
+      email: `${"a".repeat(255)}@example.com`,
+      password: "secret123",
+      turnstileToken: "proof",
+    })).resolves.toMatchObject({ ok: false, code: "VALIDATION_ERROR" });
+
+    expect(commands.preflightCapacity).not.toHaveBeenCalled();
+    expect(commands.verifyHuman).not.toHaveBeenCalled();
+    expect(commands.rateLimit).not.toHaveBeenCalled();
+    expect(commands.authenticate).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["non-object", null],
+    ["unknown kind", { kind: "destroy", email: "user@example.com" }],
+    ["non-string email", { kind: "identify", email: 123 }],
+    ["non-string password", { kind: "login", email: "user@example.com", password: 123 }],
+    ["invalid referral code", { kind: "register", email: "user@example.com", password: "secret123", referralCode: "../friend" }],
+    ["non-string referral code", { kind: "register", email: "user@example.com", password: "secret123", referralCode: 42 }],
+    ["non-string reset code", { kind: "confirm-password-reset", email: "user@example.com", code: 123456, newPassword: "new-password" }],
+    ["non-string Turnstile token", { kind: "identify", email: "user@example.com", turnstileToken: 123 }],
+  ])("rejects malformed runtime command %s before gateway work", async (_name, malformed) => {
+    const commands = authCommands();
+
+    await expect(executeAuthCommand(commands, malformed))
+      .resolves.toMatchObject({ ok: false, code: "VALIDATION_ERROR" });
+    expect(commands.preflightCapacity).not.toHaveBeenCalled();
+    expect(commands.withUpstreamConcurrency).not.toHaveBeenCalled();
+    expect(commands.rateLimit).not.toHaveBeenCalled();
+    expect(commands.authenticate).not.toHaveBeenCalled();
+  });
+
   it("maps provider auth failures before they reach React", async () => {
     const commands = authCommands({ authenticate: vi.fn(async () => { throw new AuthGatewayError("AUTH_FAILED"); }) });
     await expect(executeAuthCommand(commands, { kind: "login", email: "u@example.com", password: "wrong" })).resolves.toEqual({
       ok: false, code: "AUTH_FAILED", message: "Неверный e-mail или пароль.",
     });
+  });
+
+  it("distinguishes Turnstile rejection from a general forbidden auth result", async () => {
+    const securityFailure = authCommands({
+      verifyHuman: vi.fn(async () => {
+        throw new AuthGatewayError("SECURITY_CHECK_FAILED");
+      }),
+    });
+    await expect(executeAuthCommand(securityFailure, {
+      kind: "login",
+      email: "u@example.com",
+      password: "secret123",
+      turnstileToken: "rejected-token",
+    })).resolves.toEqual({
+      ok: false,
+      code: "SECURITY_CHECK_FAILED",
+      message: "Cloudflare Turnstile не подтвердил проверку. Выполните её ещё раз и повторите действие.",
+    });
+    expect(securityFailure.authenticate).not.toHaveBeenCalled();
+
+    const providerForbidden = authCommands({
+      authenticate: vi.fn(async () => {
+        throw new AuthGatewayError("FORBIDDEN");
+      }),
+    });
+    const result = await executeAuthCommand(providerForbidden, {
+      kind: "login",
+      email: "blocked@example.com",
+      password: "secret123",
+      turnstileToken: "valid-token",
+    });
+    expect(result).toEqual({
+      ok: false,
+      code: "FORBIDDEN",
+      message: "Действие недоступно.",
+    });
+    expect(JSON.stringify(result)).not.toContain("Turnstile");
   });
 
   it("owns registration fallback, session establishment, verification and audit", async () => {
@@ -221,16 +338,20 @@ describe("server application flows", () => {
       kind: "register",
       email: "User@Example.com",
       password: "secret123",
+      referralCode: "Friend42",
     })).resolves.toEqual({
       ok: true,
       kind: "authenticated",
       emailVerified: false,
+      registrationFlow: "existing_email_login",
       verificationRequired: true,
+      verificationDeliveryFailed: false,
     });
     expect(commands.authenticate).toHaveBeenNthCalledWith(1, {
       operation: "register",
       email: "user@example.com",
       password: "secret123",
+      referralCode: "Friend42",
     });
     expect(commands.authenticate).toHaveBeenNthCalledWith(2, {
       operation: "login",
@@ -241,7 +362,7 @@ describe("server application flows", () => {
     expect(commands.audit).toHaveBeenCalledWith({
       action: "auth_register_success",
       userId: "user-1",
-      metadata: { flow: "existing_email_login" },
+      metadata: { flow: "existing_email_login", verificationDelivery: "sent" },
     });
   });
 
@@ -262,6 +383,44 @@ describe("server application flows", () => {
     expect(commands.requestEmailVerification).not.toHaveBeenCalled();
   });
 
+  it("keeps the established registration session when verification delivery fails", async () => {
+    const commands = authCommands({
+      establishSession: vi.fn(async () => ({ userId: "user-1", emailVerified: false })),
+      requestEmailVerification: vi.fn(async () => { throw new AuthGatewayError("UPSTREAM_UNAVAILABLE"); }),
+    });
+
+    await expect(executeAuthCommand(commands, {
+      kind: "register",
+      email: "user@example.com",
+      password: "secret123",
+    })).resolves.toEqual({
+      ok: true,
+      kind: "authenticated",
+      emailVerified: false,
+      registrationFlow: "created",
+      verificationRequired: true,
+      verificationDeliveryFailed: true,
+    });
+    expect(commands.audit).toHaveBeenCalledWith({
+      action: "auth_register_success",
+      userId: "user-1",
+      metadata: { flow: "created", verificationDelivery: "failed" },
+    });
+  });
+
+  it("does not mask a registration session-establishment failure", async () => {
+    const commands = authCommands({
+      establishSession: vi.fn(async () => { throw new AuthGatewayError("UPSTREAM_UNAVAILABLE"); }),
+    });
+
+    await expect(executeAuthCommand(commands, {
+      kind: "register",
+      email: "user@example.com",
+      password: "secret123",
+    })).resolves.toMatchObject({ ok: false, code: "UPSTREAM_UNAVAILABLE" });
+    expect(commands.requestEmailVerification).not.toHaveBeenCalled();
+  });
+
   it("owns login session establishment and success audit", async () => {
     const providerSession = { context: { token: "login-session" } };
     const commands = authCommands({ authenticate: vi.fn(async () => providerSession) });
@@ -273,6 +432,56 @@ describe("server application flows", () => {
     })).resolves.toMatchObject({ ok: true, kind: "authenticated", emailVerified: true });
     expect(commands.establishSession).toHaveBeenCalledWith(providerSession);
     expect(commands.audit).toHaveBeenCalledWith({ action: "auth_login_success", userId: "user-1" });
+  });
+
+  it("marks an established unverified e-mail login as verification-required", async () => {
+    const providerSession = { context: { token: "unverified-login-session" } };
+    const commands = authCommands({
+      authenticate: vi.fn(async () => providerSession),
+      establishSession: vi.fn(async () => ({
+        userId: "user-1",
+        emailVerified: false,
+      })),
+    });
+
+    await expect(executeAuthCommand(commands, {
+      kind: "login",
+      email: "unverified@example.com",
+      password: "secret123",
+    })).resolves.toEqual({
+      ok: true,
+      kind: "authenticated",
+      emailVerified: false,
+      verificationRequired: true,
+      verificationDeliveryFailed: false,
+    });
+    expect(commands.requestEmailVerification).not.toHaveBeenCalled();
+    expect(commands.audit).toHaveBeenCalledWith({
+      action: "auth_login_success",
+      userId: "user-1",
+    });
+  });
+
+  it("keeps an unverified password-reset session in verification-required state", async () => {
+    const commands = authCommands({
+      establishSession: vi.fn(async () => ({
+        userId: "user-1",
+        emailVerified: false,
+      })),
+    });
+
+    await expect(executeAuthCommand(commands, {
+      kind: "confirm-password-reset",
+      email: "unverified@example.com",
+      code: "123456",
+      newPassword: "new-password",
+    })).resolves.toMatchObject({
+      ok: true,
+      kind: "authenticated",
+      emailVerified: false,
+      verificationRequired: true,
+      verificationDeliveryFailed: false,
+    });
   });
 
   it("owns indistinguishable password-reset request policy", async () => {
@@ -318,7 +527,7 @@ describe("server application flows", () => {
       loadActor: vi.fn(async () => ({
         context: {}, userId: "user-1", email: "u@example.com", emailVerified: false,
         telegramId: null, pendingUpstreamAccountId: null, pendingEmail: null,
-        authorizedUpstreamAccountId: "upstream-1", telegramUsername: null,
+        authorizedUpstreamAccountId: "upstream-1", localUpstreamAccountId: "upstream-1", telegramUsername: null,
       })),
       assertRequestLimits: vi.fn(async () => undefined),
       requestProviderCode: vi.fn(async () => ({ targetEmail: "u@example.com" })),

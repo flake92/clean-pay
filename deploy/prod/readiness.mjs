@@ -7,7 +7,7 @@ export function assessReadinessResponse(response) {
     return { ready: false, body: null, reason: "readiness response is not valid JSON" };
   }
 
-  const checks = body?.checks && typeof body.checks === "object"
+  const checks = body?.checks && typeof body.checks === "object" && !Array.isArray(body.checks)
     ? Object.values(body.checks)
     : [];
   const failedChecks = checks.filter((check) => check?.status !== "ok");
@@ -20,7 +20,7 @@ export function assessReadinessResponse(response) {
     return { ready: true, body, reason: null };
   }
 
-  const failedNames = body?.checks && typeof body.checks === "object"
+  const failedNames = body?.checks && typeof body.checks === "object" && !Array.isArray(body.checks)
     ? Object.entries(body.checks)
       .filter(([, check]) => check?.status !== "ok")
       .map(([name]) => name)

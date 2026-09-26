@@ -1,1 +1,3 @@
-export { productionPasskeyCommands } from "@/backend/integrations/auth/passkey-gateway";
+export {
+  createProductionPasskeyCommands,
+} from "@/backend/integrations/auth/passkey-gateway";

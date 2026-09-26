@@ -28,6 +28,10 @@ vi.mock("@/backend/integrations/remnashop/client", () => ({
   getAuthorizedRemnashopTokens: mocks.getAuthorizedRemnashopTokens,
   getRemnashopUserIdFromAccessToken: mocks.getRemnashopUserIdFromAccessToken,
   remnashopRequest: mocks.remnashopRequest,
+  remnashopValidatedRequest: mocks.remnashopRequest,
+}));
+vi.mock("@/backend/integrations/remnashop/api-client-runtime", () => ({
+  remnashopValidatedRequest: mocks.remnashopRequest,
 }));
 vi.mock("@/backend/integrations/remnashop/payment-recovery", () => ({ parsePaymentInit: mocks.parsePaymentInit }));
 vi.mock("@/backend/limits/rate-limit", () => ({ assertRateLimit: mocks.assertRateLimit }));
@@ -51,7 +55,9 @@ vi.mock("@/backend/payments/return-url", () => ({
 }));
 
 import { ServiceError } from "@/backend/errors/service-error";
-import { productionPaymentWorkflowGateway as gateway } from "@/backend/integrations/payments/payment-workflow-gateway";
+import { createProductionPaymentWorkflowGateway } from "@/backend/integrations/payments/payment-workflow-gateway";
+
+const gateway = createProductionPaymentWorkflowGateway();
 
 const authorization = {
   context: { accessToken: "access-token", localUserId: "user-1", upstreamAccountId: "upstream-1" },

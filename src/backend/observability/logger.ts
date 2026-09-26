@@ -21,11 +21,11 @@ const levelWeight: Record<LogLevel, number> = {
 const redactedKeyPattern = /(password|token|secret|cookie|authorization|verifier|nonce|state|key)/i;
 const emailPattern = /(?<![\w.+-])[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}(?![\w.-])/g;
 const bearerPattern = /\b(bearer\s+)[A-Za-z0-9._~+/=-]+/gi;
-const secretValuePattern = /(["']?(?:password|passwd|secret|token|authorization|api[_-]?key|signature|sign)["']?\s*[:=]\s*)(["']?)[^\s,;&}\]]+/gi;
+const secretValuePattern = /(["']?(?:password|passwd|secret|token|authorization|api[_-]?key|signature|sign)["']?\s*[:=]\s*)(?:"[^"]*"|'[^']*'|[^\s,;&}\]]+)/gi;
 const exactRedactedKeys = new Set([
   "cf-turnstile-response",
   "response",
-  "turnstileToken",
+  "turnstiletoken",
 ]);
 const identityRedactedKeys = new Set([
   "email",
@@ -47,7 +47,23 @@ const identityRedactedKeys = new Set([
   "upstreamaccountid",
   "hwid",
 ]);
+const safeCorrelationKeys = new Set(["requestid", "traceid"]);
 const subscribers = new Set<LogSubscriber>();
+
+function isIdentityKey(normalizedKey: string) {
+  if (safeCorrelationKeys.has(normalizedKey)) return false;
+
+  return identityRedactedKeys.has(normalizedKey)
+    || normalizedKey === "id"
+    || normalizedKey === "ip"
+    || normalizedKey.includes("email")
+    || normalizedKey.includes("username")
+    || normalizedKey.includes("fullname")
+    || normalizedKey.includes("displayname")
+    || normalizedKey.includes("photourl")
+    || /(?:user|session|account|credential|operation|payment|record|telegram|tg|hw|hold|actor|owner|authstate|device)ids?$/.test(normalizedKey)
+    || /(?:identity|owner|actor|clientip|ipaddress)$/.test(normalizedKey);
+}
 
 function configuredLevel(): LogLevel {
   const value = process.env.LOG_LEVEL?.toLowerCase();
@@ -63,13 +79,18 @@ function shouldLog(level: LogLevel) {
   return levelWeight[level] >= levelWeight[configuredLevel()];
 }
 
-export function sanitizeLogValue(value: unknown): unknown {
+function sanitizeLogValueInternal(
+  value: unknown,
+  ancestors: WeakSet<object>,
+): unknown {
   if (value === undefined || typeof value === "function" || typeof value === "symbol") {
     return undefined;
   }
 
   if (value instanceof Date) {
-    return value.toISOString();
+    return Number.isNaN(value.getTime())
+      ? "[invalid-date]"
+      : value.toISOString();
   }
 
   if (typeof value === "bigint") {
@@ -88,20 +109,26 @@ export function sanitizeLogValue(value: unknown): unknown {
   }
 
   if (Array.isArray(value)) {
-    return value
-      .map((item) => sanitizeLogValue(item))
+    if (ancestors.has(value)) return "[circular]";
+    ancestors.add(value);
+    const output = value
+      .map((item) => sanitizeLogValueInternal(item, ancestors))
       .filter((item) => item !== undefined);
+    ancestors.delete(value);
+    return output;
   }
 
   if (typeof value === "object") {
+    if (ancestors.has(value)) return "[circular]";
+    ancestors.add(value);
     const output: Record<string, unknown> = {};
 
     for (const [key, item] of Object.entries(value)) {
       const normalizedKey = key.toLowerCase();
 
       if (
-        (exactRedactedKeys.has(key) ||
-          identityRedactedKeys.has(normalizedKey) ||
+        (exactRedactedKeys.has(normalizedKey) ||
+          isIdentityKey(normalizedKey) ||
           redactedKeyPattern.test(key)) &&
         typeof item !== "boolean"
       ) {
@@ -109,17 +136,22 @@ export function sanitizeLogValue(value: unknown): unknown {
         continue;
       }
 
-      const sanitized = sanitizeLogValue(item);
+      const sanitized = sanitizeLogValueInternal(item, ancestors);
 
       if (sanitized !== undefined) {
         output[key] = sanitized;
       }
     }
 
+    ancestors.delete(value);
     return output;
   }
 
   return String(value);
+}
+
+export function sanitizeLogValue(value: unknown): unknown {
+  return sanitizeLogValueInternal(value, new WeakSet());
 }
 
 function writeConsoleLog(event: LogEvent) {
@@ -206,13 +238,18 @@ function logEvent(level: LogLevel, event: string, metadata: Record<string, unkno
   source?: string;
   message?: string;
 } = {}) {
+  const sanitizedMetadata = sanitizeLogValue(metadata) as Record<string, unknown>;
+  const sanitizedMessage = options.message === undefined
+    ? undefined
+    : sanitizeLogValue(options.message) as string;
+
   logEventBus.publish({
     level,
     event,
     category: options.category,
     source: options.source,
-    message: options.message,
-    metadata,
+    message: sanitizedMessage,
+    metadata: sanitizedMetadata,
   });
 }
 

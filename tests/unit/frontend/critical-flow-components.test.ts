@@ -10,12 +10,14 @@ const mocks = vi.hoisted(() => ({
   beginPasskeyLoginAction: vi.fn(),
   browserSupportsWebAuthn: vi.fn(),
   cancelLinkedTelegramAction: vi.fn(),
+  checkAccountReadinessAction: vi.fn(),
   confirmEmailVerificationCodeAction: vi.fn(),
   confirmLinkedTelegramAction: vi.fn(),
   clearPaymentIdempotencyKey: vi.fn(),
   clearSessionAction: vi.fn(),
   executePaymentAction: vi.fn(),
   getOrCreatePaymentIdempotencyKey: vi.fn(() => "payment-key"),
+  linkAccountEmailAction: vi.fn(),
   navigateTo: vi.fn(),
   replaceWith: vi.fn(),
   requestEmailVerificationCodeAction: vi.fn(),
@@ -40,13 +42,14 @@ vi.mock("@/app/actions/passkeys", () => ({
   verifyPasskeyRegistrationAction: mocks.verifyPasskeyRegistrationAction,
 }));
 vi.mock("@/app/actions/email-verification", () => ({
+  checkAccountReadinessAction: mocks.checkAccountReadinessAction,
   confirmEmailVerificationCodeAction: mocks.confirmEmailVerificationCodeAction,
   requestEmailVerificationCodeAction: mocks.requestEmailVerificationCodeAction,
 }));
 vi.mock("@/app/actions/link-account", () => ({
   cancelLinkedTelegramAction: mocks.cancelLinkedTelegramAction,
   confirmLinkedTelegramAction: mocks.confirmLinkedTelegramAction,
-  linkAccountEmailAction: vi.fn(),
+  linkAccountEmailAction: mocks.linkAccountEmailAction,
   removeLinkedPasskeyAction: vi.fn(),
 }));
 vi.mock("@/app/actions/session", () => ({
@@ -110,6 +113,7 @@ import { LinkAccountPanel } from "@/frontend/components/link-account-panel";
 import { PasskeyLoginButton, PasskeySetupPanel } from "@/frontend/components/passkey-actions";
 import { PaymentConfirmation } from "@/frontend/components/payment-confirmation";
 import { RegisterEmailConfirmForm } from "@/frontend/components/register-email-confirm-form";
+import { VerifyEmailPanel } from "@/frontend/components/verify-email-panel";
 
 const checkoutModel = {
   status: "ready" as const,
@@ -283,6 +287,14 @@ describe("critical user-flow components", () => {
     );
   });
 
+  it("shows a resend warning when initial verification delivery failed", () => {
+    render(createElement(RegisterEmailConfirmForm, {
+      verificationDeliveryFailed: true,
+    }));
+
+    expect(screen.getByText(/Аккаунт создан, но письмо с кодом не удалось отправить/i)).toBeTruthy();
+  });
+
   it("handles resend and back-to-registration outcomes", async () => {
     mocks.requestEmailVerificationCodeAction.mockResolvedValue({
       ok: true,
@@ -366,6 +378,31 @@ describe("critical user-flow components", () => {
     expect(mocks.navigateTo).toHaveBeenCalledWith("/cabinet");
   });
 
+  it("does not bypass required password re-auth for an already verified e-mail", async () => {
+    render(createElement(LinkAccountPanel, {
+      guided: true,
+      passwordRequired: true,
+      model: {
+        status: "ready",
+        profile: {
+          email: "target@example.com",
+          emailVerified: true,
+          telegramId: null,
+        },
+        passkeys: [],
+        callbackError: null,
+        mergeConfirmation: null,
+      },
+    }));
+
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Подтвердить паролем" })).toBeTruthy();
+    });
+    expect(mocks.navigateTo).not.toHaveBeenCalled();
+    expect(screen.getByText("Подтвердите вход паролем личного кабинета.")).toBeTruthy();
+    expect(screen.queryByText(/затем подтвердите адрес шестизначным кодом/)).toBeNull();
+  });
+
   it("creates a named Passkey and proceeds only after server verification", async () => {
     mocks.beginPasskeyRegistrationAction.mockResolvedValue({
       ok: true,
@@ -396,6 +433,45 @@ describe("critical user-flow components", () => {
     await waitFor(() => expect(screen.getByRole("button", { name: /Продолжить без быстрого входа/i })).toBeTruthy());
     await user.click(screen.getByRole("button", { name: /Продолжить без быстрого входа/i }));
     expect(mocks.navigateTo).toHaveBeenCalledWith("/cabinet");
+  });
+
+  it("does not offer an impossible Passkey skip to a bootstrap session", async () => {
+    mocks.browserSupportsWebAuthn.mockReturnValue(false);
+    render(createElement(PasskeySetupPanel, {
+      redirectTo: "/cabinet",
+      required: true,
+    }));
+
+    await waitFor(() => {
+      expect(
+        screen.getByText(/Для завершения этого входа нужен Passkey/),
+      ).toBeTruthy();
+    });
+    expect(screen.queryByRole("button", { name: /Продолжить без/i })).toBeNull();
+    expect(screen.getByRole("button", { name: "Начать вход заново" })).toBeTruthy();
+  });
+
+  it("recovers from a failed account-readiness transport check", async () => {
+    mocks.checkAccountReadinessAction.mockRejectedValueOnce(
+      new Error("private transport detail"),
+    );
+    const user = userEvent.setup();
+    render(createElement(VerifyEmailPanel, {
+      autoContinue: true,
+      initialReadiness: { status: "pending", emailVerified: true },
+      redirectTo: "/tariffs",
+    }));
+
+    const continueButton = await screen.findByRole("button", {
+      name: "Проверить и продолжить",
+    });
+    await user.click(continueButton);
+
+    await waitFor(() => {
+      expect(screen.getByText(/Проверьте соединение и повторите позже/)).toBeTruthy();
+      expect((continueButton as HTMLButtonElement).disabled).toBe(false);
+    });
+    expect(screen.queryByText(/private transport detail/)).toBeNull();
   });
 
   it("shows Passkey registration provider and browser failures", async () => {
@@ -437,5 +513,29 @@ describe("critical user-flow components", () => {
     await user.click(screen.getByRole("button", { name: /Войти быстро/i }));
     await waitFor(() => expect(screen.getByRole("alert").textContent).toContain("login unavailable"));
     expect(resetTurnstile).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    "/\u0441abinet",
+    "/missing",
+  ])("falls back to the real cabinet after Passkey login for invalid redirect %s", async (invalidRedirect) => {
+    mocks.beginPasskeyLoginAction.mockResolvedValue({
+      ok: true,
+      options: { challenge: "passkey-login" },
+    });
+    mocks.startAuthentication.mockResolvedValue({ id: "credential-1" });
+    mocks.verifyPasskeyLoginAction.mockResolvedValue({ ok: true });
+    const user = userEvent.setup();
+
+    render(createElement(PasskeyLoginButton, {
+      email: "user@example.com",
+      redirectTo: invalidRedirect,
+    }));
+
+    await waitFor(() => expect(screen.getByRole("button", { name: /Войти быстро/i })).toBeTruthy());
+    await user.click(screen.getByRole("button", { name: /Войти быстро/i }));
+
+    await waitFor(() => expect(mocks.navigateTo).toHaveBeenCalledWith("/cabinet"));
+    expect(mocks.navigateTo).not.toHaveBeenCalledWith(invalidRedirect);
   });
 });

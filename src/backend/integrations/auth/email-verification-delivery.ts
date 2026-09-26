@@ -1,5 +1,5 @@
 import { ServiceError } from "@/backend/errors/service-error";
-import { remnashopRequest } from "@/backend/integrations/remnashop/client";
+import { remnashopValidatedRequest } from "@/backend/integrations/remnashop/api-client-runtime";
 import type {
   RequestEmailVerificationRequest,
   RequestEmailVerificationResponse,
@@ -20,9 +20,13 @@ export async function requestRemnashopEmailVerification(input: {
   const maxAttempts = 3;
   for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
     try {
-      return await remnashopRequest<RequestEmailVerificationResponse>(
+      return await remnashopValidatedRequest<RequestEmailVerificationResponse>(
         "/auth/email/request-verification",
-        { method: "POST", accessToken: input.accessToken, body: input.body },
+        {
+          method: "POST",
+          accessToken: input.accessToken,
+          body: input.body,
+        },
       );
     } catch (error) {
       if (!transientDeliveryFailure(error) || attempt === maxAttempts) throw error;

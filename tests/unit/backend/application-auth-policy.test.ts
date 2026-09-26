@@ -30,6 +30,7 @@ const emailActor: EmailVerificationActor = {
   pendingUpstreamAccountId: null,
   pendingEmail: null,
   authorizedUpstreamAccountId: "email-account",
+  localUpstreamAccountId: "email-account",
   telegramUsername: null,
 };
 
@@ -143,7 +144,10 @@ describe("application authentication policy", () => {
       }),
       attachTelegram: vi.fn(async () => { order.push("attach"); throw new EmailVerificationError("CONFLICT"); }),
       mergeProviderAccounts: vi.fn(async () => { order.push("merge"); }),
-      linkCurrentAccount: vi.fn(async (_session, flags) => { order.push("link"); expect(flags).toEqual({ upstreamMerged: true, ownerFenceHeld: true }); }),
+      linkCurrentAccount: vi.fn(async (_session, flags) => {
+        order.push("link");
+        expect(flags).toMatchObject({ upstreamMerged: true, ownerFenceHeld: true });
+      }),
     });
 
     await expect(confirmEmailVerificationCode(commands, { code: "123456" }))
@@ -213,7 +217,9 @@ describe("application authentication policy", () => {
 
   it("returns an actionable security-check error without calling the provider", async () => {
     const commands = emailCommands({
-      verifyHuman: vi.fn(async () => { throw new EmailVerificationError("FORBIDDEN"); }),
+      verifyHuman: vi.fn(async () => {
+        throw new EmailVerificationError("SECURITY_CHECK_FAILED");
+      }),
     });
 
     await expect(changeVerifiedEmail(commands, {
@@ -221,10 +227,27 @@ describe("application authentication policy", () => {
       turnstileToken: "wrong-action-token",
     })).resolves.toEqual({
       ok: false,
-      code: "FORBIDDEN",
-      message: "Проверка безопасности не пройдена. Выполните её ещё раз и повторите попытку.",
+      code: "SECURITY_CHECK_FAILED",
+      message: "Cloudflare Turnstile не подтвердил проверку. Выполните её ещё раз и повторите действие.",
     });
     expect(commands.changeProviderEmail).not.toHaveBeenCalled();
+  });
+
+  it("does not describe a provider-level forbidden response as a Turnstile error", async () => {
+    const commands = emailCommands({
+      changeProviderEmail: vi.fn(async () => {
+        throw new EmailVerificationError("FORBIDDEN");
+      }),
+    });
+
+    await expect(changeVerifiedEmail(commands, {
+      email: "new@example.com",
+      turnstileToken: "valid-token",
+    })).resolves.toEqual({
+      ok: false,
+      code: "FORBIDDEN",
+      message: "Действие недоступно.",
+    });
   });
 
   it("falls back from login to registration but does not mutate ownership before verification", async () => {
@@ -263,7 +286,7 @@ describe("application authentication policy", () => {
       .resolves.toEqual({ ok: true, kind: "linked" });
     expect(commands.withOwnerChangeFence).toHaveBeenCalledOnce();
     expect(commands.mergeProviderAccounts).toHaveBeenCalledWith(expect.objectContaining({ sourceAccountId: "telegram-account", targetAccountId: "email-account" }));
-    expect(commands.linkCurrentAccount).toHaveBeenCalledWith(expect.anything(), { upstreamMerged: true, ownerFenceHeld: true });
+    expect(commands.linkCurrentAccount).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ upstreamMerged: true, ownerFenceHeld: true }));
   });
 
   it("refreshes a stale provider session once before replacing the local password session", async () => {

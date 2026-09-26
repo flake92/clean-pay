@@ -21,7 +21,7 @@ function publicPath(name: string, value: string | null) {
   return value;
 }
 
-export function resolveBranding(env: BrandingEnv = process.env) {
+export function resolveBranding(env: BrandingEnv) {
   const name = optional(env.NEXT_PUBLIC_BRAND_NAME) ?? defaultBranding.name;
 
   if (name.length > 80) {
@@ -35,5 +35,10 @@ export function resolveBranding(env: BrandingEnv = process.env) {
 }
 
 export function getBranding() {
-  return resolveBranding();
+  // Keep public variables as direct property reads: Next.js can inline these
+  // references in browser bundles, while aliases of process.env are left empty.
+  return resolveBranding({
+    NEXT_PUBLIC_BRAND_NAME: process.env.NEXT_PUBLIC_BRAND_NAME,
+    NEXT_PUBLIC_BRAND_LOGO_URL: process.env.NEXT_PUBLIC_BRAND_LOGO_URL,
+  });
 }

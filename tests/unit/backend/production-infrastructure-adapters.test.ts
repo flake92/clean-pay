@@ -5,6 +5,7 @@ const mocks = vi.hoisted(() => ({
     webUser: { findUnique: vi.fn() },
     paymentOperation: { findFirst: vi.fn() },
     paymentRecord: { findFirst: vi.fn(), findMany: vi.fn() },
+    paymentHistorySyncState: { findUnique: vi.fn() },
   },
   getAuthorizedRemnashopTokens: vi.fn(),
   getRemnashopUserIdFromAccessToken: vi.fn(),
@@ -22,6 +23,11 @@ const mocks = vi.hoisted(() => ({
   getRemnashopMe: vi.fn(),
   reconcileUserFromRemnashopAuth: vi.fn(),
   assertRateLimit: vi.fn(),
+  assertRateLimitCapacity: vi.fn(),
+  assertTargetRateLimit: vi.fn(),
+  withAuthConcurrency: vi.fn(),
+  revokeWebSessionById: vi.fn(),
+  clearWebSessionCookies: vi.fn(),
   createWebSessionForRemnashopUser: vi.fn(),
 }));
 
@@ -50,37 +56,43 @@ vi.mock("@/backend/observability/logger", () => ({ logger: { warn: mocks.loggerW
 vi.mock("@/backend/integrations/remnashop/session", () => ({
   reconcileUserFromRemnashopAuth: mocks.reconcileUserFromRemnashopAuth,
 }));
-vi.mock("@/backend/limits/rate-limit", () => ({ assertRateLimit: mocks.assertRateLimit }));
+vi.mock("@/backend/limits/rate-limit", () => ({
+  assertRateLimit: mocks.assertRateLimit,
+  assertRateLimitCapacity: mocks.assertRateLimitCapacity,
+  assertTargetRateLimit: mocks.assertTargetRateLimit,
+  withAuthConcurrency: mocks.withAuthConcurrency,
+}));
 vi.mock("@/backend/integrations/sessions/web-session-service", () => ({
   createWebSessionForRemnashopUser: mocks.createWebSessionForRemnashopUser,
 }));
+vi.mock("@/backend/integrations/sessions/web-session-revocation", () => ({
+  revokeWebSessionById: mocks.revokeWebSessionById,
+  clearWebSessionCookies: mocks.clearWebSessionCookies,
+}));
 
 import { prismaPasskeyAccountReader } from "@/backend/integrations/auth/prisma-passkey-account-reader";
-import { productionTelegramWebAppGateway } from "@/backend/integrations/auth/telegram-webapp-gateway";
+import { createProductionTelegramWebAppGateway } from "@/backend/integrations/auth/telegram-webapp-gateway";
 import { loadPaymentHistory } from "@/application/payments/load-payment-history";
-import { productionPaymentHistoryGateway } from "@/backend/integrations/payments/payment-history-reader";
-import type { PaymentMaintenanceRunner } from "@/application/payments/ports/payment-maintenance";
+import { createProductionPaymentHistoryGateway } from "@/backend/integrations/payments/payment-history-reader";
 import { prismaPaymentQueryRepository } from "@/backend/integrations/payments/prisma-payment-query-repository";
 
-function maintenance(): PaymentMaintenanceRunner {
-  return {
-    claimReconciliation: vi.fn(async () => null), recoverPayment: vi.fn(async () => null),
-    completeRecoveredPayment: vi.fn(async () => undefined), resetMissingPayment: vi.fn(async () => undefined),
-    releaseReconciliation: vi.fn(async () => undefined), markReconciliationManual: vi.fn(async () => undefined),
-    failReconciliation: vi.fn(async () => "released" as const), classifyReconciliationError: vi.fn(() => ({ kind: "other" as const })),
-    listHistoryCandidates: vi.fn(async () => []), claimHistory: mocks.claimHistory, authorizeHistory: vi.fn(async () => ({ context: {} })),
-    historyPageSize: vi.fn(async () => 100), loadHistoryPage: mocks.loadHistoryPage,
-    completeHistoryPage: mocks.completeHistoryPage, failHistory: mocks.failHistory, now: vi.fn(() => Date.now()),
-  };
-}
+const productionTelegramWebAppGateway = createProductionTelegramWebAppGateway();
+const productionPaymentHistoryGateway = createProductionPaymentHistoryGateway();
 
 describe("production persistence and Telegram adapters", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.withAuthConcurrency.mockImplementation(async (_action: string, work: () => Promise<unknown>) => work());
     mocks.serializePaymentRecord.mockImplementation((record) => ({ id: record.id }));
     mocks.claimHistory.mockResolvedValue({ context: {}, cursor: null });
     mocks.loadHistoryPage.mockResolvedValue({ context: {} });
     mocks.completeHistoryPage.mockResolvedValue({ applied: 0, hasMore: false });
+    mocks.prisma.paymentHistorySyncState.findUnique.mockResolvedValue({
+      backfillCompletedAt: new Date(),
+      lastSyncedAt: new Date(),
+      failureCount: 0,
+      errorSnapshot: null,
+    });
   });
 
   it("checks passkey existence with a bounded projection", async () => {
@@ -118,46 +130,65 @@ describe("production persistence and Telegram adapters", () => {
     }));
   });
 
-  it("refreshes bounded payment history and degrades individual exact lookups", async () => {
-    mocks.getAuthorizedRemnashopTokens.mockResolvedValue({ accessToken: "access-token" });
-    mocks.getRemnashopUserIdFromAccessToken.mockReturnValue("upstream-user-1");
-    mocks.getPaymentCapabilities.mockResolvedValue({ transactions: { max_page_size: 500 } });
-    mocks.prisma.paymentRecord.findMany
-      .mockResolvedValueOnce([{ paymentId: "payment-1" }, { paymentId: "payment-2" }])
-      .mockResolvedValueOnce([{ id: "record-1" }]);
-    mocks.getExactTransaction
-      .mockResolvedValueOnce({ payment_id: "payment-1" })
-      .mockRejectedValueOnce(new Error("one lookup failed"));
+  it("serves bounded payment history directly from the local snapshot", async () => {
+    mocks.prisma.paymentRecord.findMany.mockResolvedValueOnce([{ id: "record-1" }]);
 
-    const runner = maintenance();
-    await expect(loadPaymentHistory(productionPaymentHistoryGateway, runner, "user-1")).resolves.toEqual({ records: [{ id: "record-1" }], stale: true });
-    expect(mocks.syncExactPaymentRecordFromRemnashop).toHaveBeenCalledOnce();
-    expect(mocks.loadHistoryPage).toHaveBeenCalledWith(expect.anything(), null, 100);
-    expect(mocks.loggerWarn).toHaveBeenCalledWith("payment_history_exact_sync_failed", expect.anything(), expect.anything());
+    await expect(loadPaymentHistory(productionPaymentHistoryGateway, "user-1")).resolves.toEqual({
+      records: [{ id: "record-1" }],
+      status: "current",
+    });
+    expect(mocks.prisma.paymentRecord.findMany).toHaveBeenCalledWith(expect.objectContaining({ take: 20 }));
+    expect(mocks.getAuthorizedRemnashopTokens).not.toHaveBeenCalled();
+    expect(mocks.getExactTransaction).not.toHaveBeenCalled();
+    expect(mocks.loadHistoryPage).not.toHaveBeenCalled();
   });
 
-  it("serves owner-bound cached history when the provider is unavailable", async () => {
-    mocks.getAuthorizedRemnashopTokens.mockRejectedValue(new Error("offline"));
+  it("does not contact an unavailable provider while rendering cached history", async () => {
     mocks.prisma.paymentRecord.findMany.mockResolvedValueOnce([{ id: "cached-record" }]);
-    await expect(loadPaymentHistory(productionPaymentHistoryGateway, maintenance(), "user-1")).resolves.toEqual({
+    await expect(loadPaymentHistory(productionPaymentHistoryGateway, "user-1")).resolves.toEqual({
       records: [{ id: "cached-record" }],
-      stale: true,
+      status: "current",
     });
-    expect(mocks.loggerWarn).toHaveBeenCalledWith("payment_history_sync_degraded", expect.anything(), expect.anything());
+    expect(mocks.getAuthorizedRemnashopTokens).not.toHaveBeenCalled();
+    expect(mocks.loggerWarn).not.toHaveBeenCalled();
   });
 
-  it("supports the legacy payment history endpoint", async () => {
-    mocks.getAuthorizedRemnashopTokens.mockResolvedValue({ accessToken: "access-token" });
-    mocks.getRemnashopUserIdFromAccessToken.mockReturnValue("upstream-user-1");
-    mocks.getPaymentCapabilities.mockResolvedValue(null);
-    mocks.getLegacyTransactions.mockResolvedValue([{ payment_id: "payment-1" }]);
+  it("marks a never-synchronized local history snapshot as stale", async () => {
     mocks.prisma.paymentRecord.findMany.mockResolvedValueOnce([]);
-    await loadPaymentHistory(productionPaymentHistoryGateway, maintenance(), "user-1");
-    expect(mocks.syncPaymentRecordsFromRemnashopTransactions).toHaveBeenCalledWith({
-      userId: "user-1",
-      upstreamAccountId: "upstream-user-1",
-      transactions: [{ payment_id: "payment-1" }],
-    });
+    mocks.prisma.paymentHistorySyncState.findUnique.mockResolvedValueOnce(null);
+
+    await expect(loadPaymentHistory(
+      productionPaymentHistoryGateway,
+      "user-1",
+    )).resolves.toEqual({ records: [], status: "refreshing" });
+    expect(mocks.getAuthorizedRemnashopTokens).not.toHaveBeenCalled();
+  });
+
+  it("distinguishes a failed snapshot from a refresh that is still pending", async () => {
+    mocks.prisma.paymentHistorySyncState.findUnique
+      .mockResolvedValueOnce({
+        backfillCompletedAt: null,
+        lastSyncedAt: null,
+        errorSnapshot: null,
+      })
+      .mockResolvedValueOnce({
+        backfillCompletedAt: null,
+        lastSyncedAt: null,
+        errorSnapshot: { code: "UPSTREAM_UNAVAILABLE" },
+      });
+
+    await expect(prismaPaymentQueryRepository.readHistorySnapshotStatus("refreshing-user"))
+      .resolves.toBe("refreshing");
+    await expect(prismaPaymentQueryRepository.readHistorySnapshotStatus("failed-user"))
+      .resolves.toBe("unavailable");
+  });
+
+  it("leaves legacy history synchronization to the maintenance worker", async () => {
+    mocks.prisma.paymentRecord.findMany.mockResolvedValueOnce([]);
+    await loadPaymentHistory(productionPaymentHistoryGateway, "user-1");
+    expect(mocks.getPaymentCapabilities).not.toHaveBeenCalled();
+    expect(mocks.getLegacyTransactions).not.toHaveBeenCalled();
+    expect(mocks.syncPaymentRecordsFromRemnashopTransactions).not.toHaveBeenCalled();
   });
 
   it("implements granular Telegram WebApp provider and persistence operations", async () => {
@@ -178,6 +209,13 @@ describe("production persistence and Telegram adapters", () => {
     });
     mocks.createWebSessionForRemnashopUser.mockResolvedValue({ id: "session-1" });
 
+    await productionTelegramWebAppGateway.preflightCapacity();
+    const concurrencyWork = vi.fn().mockResolvedValue("guarded-result");
+    await expect(productionTelegramWebAppGateway.withUpstreamConcurrency(
+      "telegram_webapp_login",
+      concurrencyWork,
+    )).resolves.toBe("guarded-result");
+
     const provider = await productionTelegramWebAppGateway.authenticateProvider("signed-init-data");
     const identity = await productionTelegramWebAppGateway.verifiedIdentity(provider);
     await productionTelegramWebAppGateway.rateLimit(String(identity.telegramId));
@@ -187,12 +225,18 @@ describe("production persistence and Telegram adapters", () => {
       upstreamSession: reconciled.upstreamSession!,
     });
     await productionTelegramWebAppGateway.recoverSession(session!.id, reconciled.userId);
-    expect(mocks.assertRateLimit).toHaveBeenCalledWith(expect.objectContaining({ tgId: "123" }));
+    await productionTelegramWebAppGateway.revokeSession(session!.id, reconciled.userId);
+    await productionTelegramWebAppGateway.clearSessionCookies();
+    expect(mocks.assertRateLimitCapacity).toHaveBeenCalledWith("telegram_webapp_login");
+    expect(mocks.withAuthConcurrency).toHaveBeenCalledWith("telegram_webapp_login", concurrencyWork);
+    expect(mocks.assertTargetRateLimit).toHaveBeenCalledWith(expect.objectContaining({ tgId: "123" }));
     expect(mocks.createWebSessionForRemnashopUser).toHaveBeenCalledWith(expect.objectContaining({
       userId: "user-1",
       remnashopAccessTokenEncrypted: "encrypted-access",
     }));
     expect(mocks.recoverRemnashopTelegramSession).toHaveBeenCalledWith("session-1", "user-1");
+    expect(mocks.revokeWebSessionById).toHaveBeenCalledWith("session-1", "user-1");
+    expect(mocks.clearWebSessionCookies).toHaveBeenCalledOnce();
   });
 
   it("returns an unverified Telegram identity for application policy", async () => {

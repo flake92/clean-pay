@@ -1,0 +1,24 @@
+type ChatwootWidgetUser = {
+  identifier: string;
+  identifierHash: string;
+  name: string;
+  email: string | null;
+  customAttributes: Record<string, string>;
+};
+
+export type ChatwootWidgetConfig = {
+  baseUrl: string;
+  identityFingerprint: string;
+  websiteToken: string;
+  user: ChatwootWidgetUser;
+};
+
+type ChatwootManagedLabel = {
+  name: "payment_problem" | "subscription_expired";
+  enabled: boolean;
+};
+
+export type ChatwootSupportContext = {
+  customAttributes: Record<string, string>;
+  managedLabels: ChatwootManagedLabel[];
+};

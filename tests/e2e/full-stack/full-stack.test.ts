@@ -106,7 +106,7 @@ describe("server-rendered application surface", () => {
     },
   );
 
-  it.each(["/cabinet", "/profile", "/payment", "/extend"])(
+  it.each(["/cabinet", "/profile", "/payment", "/extend", "/referral"])(
     "%s enforces its session boundary on the server",
     async (path) => {
       const response = await http(path);
@@ -135,10 +135,20 @@ describe("server-rendered application surface", () => {
   it("keeps the authenticated Telegram user journey available after the transport refactor", async () => {
     const jar = await loginWithTelegramOidc();
 
-    for (const path of ["/cabinet", "/profile", "/payment", "/extend", "/link-account"]) {
+    for (const path of [
+      "/cabinet",
+      "/profile",
+      "/payment",
+      "/extend",
+      "/link-account",
+      "/referral",
+    ]) {
       const response = await http(path, {}, jar);
       expect(response.status, `${path} unexpectedly redirected or failed`).toBe(200);
       expect(response.headers.get("content-type")).toContain("text/html");
+      if (path === "/referral") {
+        await expect(response.text()).resolves.toContain("Пригласить друзей");
+      }
     }
 
     const login = await http("/login", {}, jar);

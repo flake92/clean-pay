@@ -1,11 +1,30 @@
 #!/usr/bin/env node
 
-import { writeFileSync } from "node:fs";
+import { randomUUID } from "node:crypto";
+import {
+  closeSync,
+  constants,
+  fsyncSync,
+  openSync,
+  renameSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
+import { dirname } from "node:path";
 
 import { deployLog } from "./deploy-log.mjs";
-import { parseReconciliationBatch } from "./reconciliation-batch.mjs";
+import {
+  classifyReconciliationBatchHealth,
+  parseReconciliationBatch,
+} from "./reconciliation-batch.mjs";
+import { reconciliationSupportHandles } from "./reconciliation-support-handle.mjs";
+import { createWorkerShutdownController } from "./worker-shutdown.mjs";
 
 const enabled = process.env.PAYMENT_RECONCILIATION_ENABLED === "true";
+const heartbeatFile = "/tmp/clean-pay-reconciliation-heartbeat";
+const maxConsecutiveFailures = 5;
+
+rmSync(heartbeatFile, { force: true });
 
 if (!enabled) {
   deployLog("info", "reconciliation_worker_disabled", "Payment reconciliation worker is disabled by configuration.");
@@ -22,8 +41,6 @@ const intervalSeconds = boundedInteger(
 const endpoint =
   process.env.PAYMENT_RECONCILIATION_INTERNAL_URL?.trim() ||
   "http://app:4000/api/internal/payments/reconcile";
-const heartbeatFile = "/tmp/clean-pay-reconciliation-heartbeat";
-
 if (!secret || secret.length < 32) {
   throw new Error(
     "PAYMENT_RECONCILIATION_SECRET must contain at least 32 characters",
@@ -41,44 +58,69 @@ deployLog("info", "reconciliation_worker_started", "Payment reconciliation worke
   endpoint: parsedEndpoint.origin,
 });
 
-while (true) {
-  const startedAt = Date.now();
+let consecutiveFailures = 0;
+const shutdown = createWorkerShutdownController({
+  onSignal(signal) {
+    deployLog(
+      "info",
+      "reconciliation_worker_shutdown_requested",
+      "Payment reconciliation worker shutdown requested.",
+      { signal },
+    );
+  },
+});
 
-  try {
-    const response = await fetch(parsedEndpoint, {
-      method: "POST",
-      headers: {
-        accept: "application/json",
-        "x-clean-pay-reconciliation-secret": secret,
-      },
-      signal: AbortSignal.timeout(45_000),
-    });
+try {
+  while (!shutdown.requested) {
+    const startedAt = Date.now();
+    let batchHealthy = false;
 
-    if (!response.ok) {
-      await response.body?.cancel();
-      deployLog("warn", "reconciliation_batch_rejected", "Payment reconciliation endpoint returned an unsuccessful response.", {
-        status: response.status,
+    try {
+      const response = await fetch(parsedEndpoint, {
+        method: "POST",
+        headers: {
+          accept: "application/json",
+          "x-clean-pay-reconciliation-secret": secret,
+        },
+        signal: AbortSignal.any([
+          AbortSignal.timeout(45_000),
+          shutdown.signal,
+        ]),
       });
-    } else {
+
+      if (!response.ok) {
+        await response.body?.cancel();
+        throw Object.assign(
+          new Error(`Payment reconciliation endpoint returned HTTP ${response.status}`),
+          { name: "ReconciliationHttpError" },
+        );
+      }
+
       const counts = parseReconciliationBatch(await response.json());
-      const manualOperationIds = counts.manualRequiredOperationIds.join(",");
+      const health = classifyReconciliationBatchHealth(counts);
+      const manualOperationHandles = reconciliationSupportHandles(
+        counts.manualRequiredOperationIds,
+        secret,
+      );
       const history = counts.history;
       const backlog = counts.backlog;
-      const severity = backlog.manualRequired > 0 || backlog.oldestAgeSeconds > 900
+      const severity = !health.healthy || history.failed > 0 || backlog.manualRequired > 0 || backlog.oldestAgeSeconds > 900
         ? "warn"
         : "info";
-      deployLog(severity, "reconciliation_batch_completed", `Payment reconciliation batch completed: manual_operation_ids=${manualOperationIds || "none"}, history_failed=${history.failed}, backlog=${backlog.pending}.`, {
+      deployLog(severity, "reconciliation_batch_completed", "Payment reconciliation batch completed.", {
+        health: health.outcome,
         claimed: counts.claimed,
         succeeded: counts.succeeded,
         in_progress: counts.inProgress,
         unknown: counts.unknown,
         manual_required: counts.manualRequired,
-        manual_operation_ids: manualOperationIds || "none",
+        manual_operation_handles: manualOperationHandles,
         failed: counts.failed,
         history_attempted: history.attempted,
         history_applied: history.applied,
         history_completed: history.completed,
         history_failed: history.failed,
+        history_deferred: history.deferred,
         backlog_pending: backlog.pending,
         backlog_due: backlog.due,
         backlog_manual_required: backlog.manualRequired,
@@ -86,24 +128,106 @@ while (true) {
         backlog_maximum_attempt_count: backlog.maximumAttemptCount,
         backlog_total_failure_count: backlog.totalFailureCount,
       });
-      writeHeartbeat();
-    }
-  } catch (error) {
-    deployLog("error", "reconciliation_batch_failed", "Payment reconciliation batch failed; it will be retried on the next interval.", {
-      error: error instanceof Error ? error.name : "UnknownError",
-      reason: error instanceof Error ? error.message.slice(0, 240) : "unknown_failure",
-    });
-  }
 
-  const remainingMs = Math.max(
-    1_000,
-    intervalSeconds * 1_000 - (Date.now() - startedAt),
+      if (!health.healthy) {
+        throw Object.assign(
+          new Error(`Payment reconciliation batch made no healthy progress (${health.outcome})`),
+          { name: "ReconciliationBatchUnhealthy" },
+        );
+      }
+
+      writeHeartbeat();
+      batchHealthy = true;
+    } catch (error) {
+      if (shutdown.requested) {
+        deployLog(
+          "info",
+          "reconciliation_batch_shutdown_interrupted",
+          "Payment reconciliation batch interrupted by worker shutdown.",
+          { signal: shutdown.requestedSignal },
+        );
+      } else {
+        deployLog("error", "reconciliation_batch_failed", "Payment reconciliation batch failed; it will be retried on the next interval.", {
+          error: error instanceof Error ? error.name : "UnknownError",
+        });
+      }
+    }
+
+    if (shutdown.requested) break;
+
+    if (batchHealthy) {
+      consecutiveFailures = 0;
+    } else {
+      consecutiveFailures += 1;
+
+      if (consecutiveFailures >= maxConsecutiveFailures) {
+        deployLog("error", "reconciliation_worker_failure_limit_reached", "Payment reconciliation worker reached its consecutive failure limit and will restart.", {
+          consecutive_failures: consecutiveFailures,
+        });
+        process.exitCode = 1;
+        break;
+      }
+    }
+
+    const remainingMs = Math.max(
+      1_000,
+      intervalSeconds * 1_000 - (Date.now() - startedAt),
+    );
+    await shutdown.sleep(remainingMs);
+  }
+} finally {
+  deployLog(
+    "info",
+    "reconciliation_worker_stopped",
+    "Payment reconciliation worker stopped.",
+    { signal: shutdown.requestedSignal },
   );
-  await new Promise((resolve) => setTimeout(resolve, remainingMs));
+  shutdown.dispose();
 }
 
 function writeHeartbeat() {
-  writeFileSync(heartbeatFile, String(Date.now()), { encoding: "utf8" });
+  const temporaryPath = `${heartbeatFile}.${process.pid}.${randomUUID()}.tmp`;
+  let descriptor;
+
+  try {
+    descriptor = openSync(
+      temporaryPath,
+      constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL,
+      0o600,
+    );
+    writeFileSync(descriptor, String(Date.now()), "utf8");
+    fsyncSync(descriptor);
+    closeSync(descriptor);
+    descriptor = undefined;
+    renameSync(temporaryPath, heartbeatFile);
+    fsyncDirectory(dirname(heartbeatFile));
+  } finally {
+    if (descriptor !== undefined) closeSync(descriptor);
+    rmSync(temporaryPath, { force: true });
+  }
+}
+
+function fsyncDirectory(directory) {
+  if (process.platform === "win32") return;
+
+  const directoryOnly = typeof constants.O_DIRECTORY === "number"
+    ? constants.O_DIRECTORY
+    : 0;
+  const descriptor = openSync(directory, constants.O_RDONLY | directoryOnly);
+  try {
+    fsyncSync(descriptor);
+  } catch (error) {
+    if (
+      !error
+      || typeof error !== "object"
+      || !("code" in error)
+      || !["EINVAL", "ENOTSUP"].includes(String(error.code))
+    ) {
+      throw error;
+    }
+  } finally {
+    closeSync(descriptor);
+  }
 }
 
 function boundedInteger(name, fallback, min, max) {

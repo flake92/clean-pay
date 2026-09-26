@@ -14,8 +14,15 @@ describe("identity log redaction", () => {
       paymentId: "payment-internal-id",
       hwid: "device-hardware-id",
       nested: { remnashopUserId: "upstream-id" },
+      linkUserId: "linked-user-id",
+      authStateId: "auth-state-id",
+      accountId: "provider-account-id",
+      telegramUsername: "private_username",
+      fullName: "Private Person",
+      photoUrl: "https://example.com/private-photo",
       hasTelegramId: true,
       requestId: "trace-safe-to-retain",
+      traceId: "trace-id-safe-to-retain",
     });
 
     expect(sanitized).toEqual({
@@ -27,8 +34,15 @@ describe("identity log redaction", () => {
       paymentId: "[redacted]",
       hwid: "[redacted]",
       nested: { remnashopUserId: "[redacted]" },
+      linkUserId: "[redacted]",
+      authStateId: "[redacted]",
+      accountId: "[redacted]",
+      telegramUsername: "[redacted]",
+      fullName: "[redacted]",
+      photoUrl: "[redacted]",
       hasTelegramId: true,
       requestId: "trace-safe-to-retain",
+      traceId: "trace-id-safe-to-retain",
     });
     expect(JSON.stringify(sanitized)).not.toContain("123456789");
     expect(JSON.stringify(sanitized)).not.toContain("user@example.com");
@@ -36,15 +50,52 @@ describe("identity log redaction", () => {
 
   it("redacts credentials and email addresses embedded in unstructured errors", () => {
     const sanitized = sanitizeLogValue({
-      error: "SMTP failed for user@example.com; password=hunter2 token='abc.def' Authorization: Bearer bearer-secret",
+      error: "SMTP failed for user@example.com; password=\"two word secret\" token='abc.def' Authorization: Bearer bearer-secret",
     });
 
     expect(JSON.stringify(sanitized)).not.toContain("user@example.com");
-    expect(JSON.stringify(sanitized)).not.toContain("hunter2");
+    expect(JSON.stringify(sanitized)).not.toContain("two word secret");
     expect(JSON.stringify(sanitized)).not.toContain("abc.def");
     expect(JSON.stringify(sanitized)).not.toContain("bearer-secret");
     expect(sanitized).toEqual({
       error: expect.stringContaining("SMTP failed"),
+    });
+  });
+
+  it("redacts exact sensitive field names regardless of their casing", () => {
+    const sanitized = sanitizeLogValue({
+      Response: "provider-secret",
+      "CF-Turnstile-Response": "challenge-secret",
+      TURNSTILETOKEN: "turnstile-secret",
+    });
+
+    expect(sanitized).toEqual({
+      Response: "[redacted]",
+      "CF-Turnstile-Response": "[redacted]",
+      TURNSTILETOKEN: "[redacted]",
+    });
+  });
+
+  it("does not crash the logger on circular metadata", () => {
+    const circular: Record<string, unknown> = { safe: true };
+    circular.self = circular;
+
+    expect(sanitizeLogValue(circular)).toEqual({
+      safe: true,
+      self: "[circular]",
+    });
+  });
+
+  it("sanitizes valid and invalid dates without throwing", () => {
+    const valid = new Date("2026-08-26T10:00:00.000Z");
+    const invalid = new Date(Number.NaN);
+    const error = new Error("ordinary failure");
+
+    expect(() => sanitizeLogValue({ valid, invalid, error })).not.toThrow();
+    expect(sanitizeLogValue({ valid, invalid, error })).toEqual({
+      valid: "2026-08-26T10:00:00.000Z",
+      invalid: "[invalid-date]",
+      error: {},
     });
   });
 });
@@ -74,6 +125,25 @@ describe("log levels", () => {
     unsubscribe();
 
     expect(levels).toEqual(["debug", "info", "warn", "error"]);
+  });
+
+  it("sanitizes metadata and messages before publishing to every subscriber", () => {
+    const events: Parameters<Parameters<typeof logEventBus.subscribe>[0]>[0][] = [];
+    const unsubscribe = logEventBus.subscribe((event) => events.push(event));
+
+    logger.warn(
+      "subscriber_redaction_test",
+      { linkUserId: "private-user", safe: true },
+      { message: "Failed for user@example.com token=private-token" },
+    );
+    unsubscribe();
+
+    expect(events).toContainEqual(expect.objectContaining({
+      message: "Failed for [redacted-email] token=[redacted]",
+      metadata: { linkUserId: "[redacted]", safe: true },
+    }));
+    expect(JSON.stringify(events)).not.toContain("private-user");
+    expect(JSON.stringify(events)).not.toContain("private-token");
   });
 
   it("renders a readable message when a caller supplies only a structured event name", () => {

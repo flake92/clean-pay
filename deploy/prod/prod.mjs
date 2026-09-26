@@ -1,7 +1,13 @@
 import { spawnSync } from "node:child_process";
-import { existsSync, readFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdtempSync,
+  rmdirSync,
+  unlinkSync,
+} from "node:fs";
 import http from "node:http";
 import https from "node:https";
+import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -10,24 +16,101 @@ import {
   ProductionEnvironmentError,
   parseProductionEnvironmentFile,
 } from "./production-env-rules.mjs";
+import {
+  assertRedisOvercommitProbeResult,
+  redisOvercommitProbeArgs,
+} from "./host-safety.mjs";
 import { assessReadinessResponse } from "./readiness.mjs";
+import { readPrivateCredentialFile } from "./credential-file-guard.mjs";
+import {
+  materializeProductionRoleEnvironmentFiles,
+  productionRoleEnvironmentPaths,
+} from "./role-env.mjs";
+import { clearDatabaseAdoptionAuthorization } from "./database-adoption-state.mjs";
+import { assertV011UpgradePreparationNotRequired } from "./production-environment-upgrade.mjs";
+import {
+  acquireProductionOperationLock,
+  exitCodeAfterProductionOperationLockRelease,
+  releaseProductionOperationLock,
+} from "./production-operation-lock.mjs";
 
 const prodDir = path.dirname(fileURLToPath(import.meta.url));
 const rootDir = path.resolve(prodDir, "../..");
 const envFile = path.join(prodDir, ".env");
+let roleEnvironmentFiles = productionRoleEnvironmentPaths(envFile);
 const validateEnvScript = path.join(prodDir, "validate-env.mjs");
 const remnashopRolloutScript = path.join(prodDir, "prepare-remnashop-rollout.sh");
+const imagePreflightScript = path.join(prodDir, "image-preflight.sh");
+const buildProvenanceScript = path.join(prodDir, "build-provenance.sh");
+const operationLockPath = path.join(prodDir, ".production-operation.lock");
+const composeCapabilityScript = path.join(
+  prodDir,
+  "docker-compose-capability-preflight.sh",
+);
 const composeFiles = [
   path.join(prodDir, "docker-compose.yml"),
 ];
+const HTTP_RESPONSE_LIMIT_BYTES = 1_048_576;
+const HTTP_REQUEST_DEADLINE_MS = 10_000;
 
 const args = process.argv.slice(2);
 const debug = args.includes("-debug") || args.includes("--debug");
 const command = args.find((arg) => !arg.startsWith("-")) || "help";
+const supportedCommands = new Set(["build", "up", "down", "logs", "ps", "verify"]);
+const observationalCommands = new Set(["logs", "ps", "verify"]);
 let parsedEnvironment = null;
+let verifiedImages = null;
+let operationLockToken = null;
+let operationLockReleaseAttempted = false;
 
 if (debug) {
   composeFiles.push(path.join(prodDir, "docker-compose.debug.yml"));
+}
+
+function releaseOwnedProductionOperationLock() {
+  if (!operationLockToken) return true;
+  if (operationLockReleaseAttempted) return false;
+  operationLockReleaseAttempted = true;
+
+  try {
+    releaseProductionOperationLock(operationLockPath, operationLockToken);
+    operationLockToken = null;
+    return true;
+  } catch (error) {
+    console.error(
+      "Production operation lock release failed; inspect the fail-closed lock before retrying:",
+      error instanceof Error ? error.message : String(error),
+    );
+    return false;
+  }
+}
+
+function acquireOwnedProductionOperationLock(operation) {
+  try {
+    operationLockToken = acquireProductionOperationLock(
+      operationLockPath,
+      `prod-${operation}`,
+      process.pid,
+    );
+  } catch (error) {
+    console.error(
+      "Another production operation is active or the fail-closed operation lock needs reviewed recovery:",
+      error instanceof Error ? error.message : String(error),
+    );
+    process.exit(1);
+  }
+
+  process.once("exit", (exitCode) => {
+    const releaseSucceeded = releaseOwnedProductionOperationLock();
+    const finalExitCode = exitCodeAfterProductionOperationLockRelease(
+      exitCode,
+      releaseSucceeded,
+    );
+    if (finalExitCode !== exitCode) process.exitCode = finalExitCode;
+  });
+  process.once("SIGHUP", () => process.exit(129));
+  process.once("SIGINT", () => process.exit(130));
+  process.once("SIGTERM", () => process.exit(143));
 }
 
 function readEnvValue(name, fallback) {
@@ -43,8 +126,12 @@ function readEnvValue(name, fallback) {
 function productionFileEnvironment() {
   if (!parsedEnvironment) {
     try {
+      const { contents } = readPrivateCredentialFile(
+        envFile,
+        "production environment file",
+      );
       parsedEnvironment = parseProductionEnvironmentFile(
-        readFileSync(envFile, "utf8"),
+        contents,
         envFile,
       );
     } catch (error) {
@@ -68,7 +155,24 @@ function productionChildEnvironment() {
     delete environment[name];
   }
 
-  return { ...environment, ...productionFileEnvironment() };
+  const childEnvironment = {
+    ...environment,
+    ...productionFileEnvironment(),
+    CLEAN_PAY_APP_ENV_FILE: roleEnvironmentFiles.application,
+    CLEAN_PAY_HOLD_OPERATOR_ENV_FILE: roleEnvironmentFiles.holdOperator,
+    CLEAN_PAY_MIGRATION_ENV_FILE: roleEnvironmentFiles.migration,
+    CLEAN_PAY_POSTGRES_ENV_FILE: roleEnvironmentFiles.postgres,
+    CLEAN_PAY_PROVISION_ENV_FILE: roleEnvironmentFiles.provision,
+    CLEAN_PAY_RECONCILIATION_ENV_FILE: roleEnvironmentFiles.reconciliation,
+    CLEAN_PAY_RETENTION_ENV_FILE: roleEnvironmentFiles.retention,
+  };
+
+  if (verifiedImages) {
+    childEnvironment.CLEAN_PAY_IMAGE = verifiedImages.application;
+    childEnvironment.CLEAN_PAY_MIGRATION_IMAGE = verifiedImages.migration;
+  }
+
+  return childEnvironment;
 }
 
 function composeArgs(...extra) {
@@ -117,8 +221,236 @@ function runDocker(args, options = {}) {
   return result.status ?? 1;
 }
 
-function prepareRemnashopPaymentRollout() {
-  const result = spawnSync("sh", [remnashopRolloutScript, envFile], {
+function assertDockerComposeCapabilities() {
+  const result = spawnSync("sh", [composeCapabilityScript], {
+    cwd: rootDir,
+    env: process.env,
+    stdio: "inherit",
+    shell: false,
+  });
+  if (result.error || result.status !== 0) {
+    console.error(
+      result.error?.message
+        ?? "Docker or Docker Compose lacks a required production capability.",
+    );
+    process.exit(result.status ?? 1);
+  }
+}
+
+function prepareDeploymentImages() {
+  const source = readEnvValue("CLEAN_PAY_DEPLOY_SOURCE", "build");
+  const operation = source === "build" ? "build" : source === "pull" ? "pull" : null;
+
+  if (!operation) {
+    console.error('CLEAN_PAY_DEPLOY_SOURCE must be "build" or "pull".');
+    process.exit(1);
+  }
+
+  console.log(
+    operation === "build"
+      ? "Building application and migration images..."
+      : "Pulling digest-pinned application and migration images...",
+  );
+
+  if (source === "build") {
+    const provenance = spawnSync(
+      "sh",
+      [
+        buildProvenanceScript,
+        rootDir,
+        source,
+        readEnvValue("CLEAN_PAY_RELEASE", "local"),
+        readEnvValue("CLEAN_PAY_REVISION", "local"),
+      ],
+      {
+        cwd: rootDir,
+        env: productionChildEnvironment(),
+        stdio: "inherit",
+        shell: false,
+      },
+    );
+
+    if (provenance.error || provenance.status !== 0) {
+      console.error(provenance.error?.message ?? "Build provenance validation failed.");
+      process.exit(provenance.status ?? 1);
+    }
+  }
+
+  const status = runDocker(composeArgs(operation, "migration", "app"));
+
+  if (status !== 0) {
+    process.exit(status);
+  }
+}
+
+function preflightDeploymentImages() {
+  const verifiedDirectory = mkdtempSync(
+    path.join(tmpdir(), "clean-pay-verified-"),
+  );
+  const verifiedOutput = path.join(verifiedDirectory, "images.env");
+
+  try {
+    const result = spawnSync(
+      "sh",
+      [
+        imagePreflightScript,
+        readEnvValue("CLEAN_PAY_DEPLOY_SOURCE", "build"),
+        readEnvValue("CLEAN_PAY_IMAGE", ""),
+        readEnvValue("CLEAN_PAY_MIGRATION_IMAGE", ""),
+        envFile,
+        readEnvValue("NEXT_PUBLIC_APP_URL", ""),
+        readEnvValue("NEXT_PUBLIC_BRAND_NAME", "Clean Pay"),
+        readEnvValue("NEXT_PUBLIC_BRAND_LOGO_URL", "/clean-pay-logo.png"),
+        readEnvValue("TURNSTILE_SITE_KEY", ""),
+        readEnvValue("CLEAN_PAY_RELEASE", "local"),
+        readEnvValue("CLEAN_PAY_REVISION", "local"),
+        verifiedOutput,
+      ],
+      {
+        cwd: rootDir,
+        env: productionChildEnvironment(),
+        stdio: "inherit",
+        shell: false,
+      },
+    );
+
+    if (result.error) {
+      throw result.error;
+    }
+
+    if (result.status !== 0) {
+      process.exit(result.status ?? 1);
+    }
+
+    const lines = readPrivateCredentialFile(
+      verifiedOutput,
+      "verified image output",
+    ).contents
+      .trimEnd()
+      .split(/\r?\n/);
+    const entries = new Map(lines.map((line) => {
+      const separator = line.indexOf("=");
+      return [line.slice(0, separator), line.slice(separator + 1)];
+    }));
+    const application = entries.get("CLEAN_PAY_VERIFIED_APP_IMAGE");
+    const migration = entries.get("CLEAN_PAY_VERIFIED_MIGRATION_IMAGE");
+    const imageIdPattern = /^sha256:[a-f0-9]{64}$/;
+
+    if (
+      lines.length !== 2 ||
+      entries.size !== 2 ||
+      !imageIdPattern.test(application ?? "") ||
+      !imageIdPattern.test(migration ?? "") ||
+      application === migration
+    ) {
+      throw new Error("Image preflight returned malformed verified image IDs.");
+    }
+
+    verifiedImages = { application, migration };
+  } catch (error) {
+    console.error(error instanceof Error ? error.message : String(error));
+    process.exit(1);
+  } finally {
+    if (existsSync(verifiedOutput)) {
+      unlinkSync(verifiedOutput);
+    }
+    try {
+      rmdirSync(verifiedDirectory);
+    } catch {
+      // The private directory is intentionally retained if it is unexpectedly
+      // non-empty; never recursively remove an unverified path.
+    }
+  }
+}
+
+function prepareRuntimeDependencies() {
+  if (runDocker(composeArgs("pull", "--policy", "missing", "postgres", "redis")) !== 0) {
+    process.exit(1);
+  }
+}
+
+function stopRuntimeServices() {
+  console.log(
+    "Stopping application runtimes for migration; PostgreSQL and Redis stay running...",
+  );
+  if (runDocker(composeArgs(
+    "stop",
+    "reconciliation-worker",
+    "retention-worker",
+    "app",
+  )) !== 0) {
+    process.exit(1);
+  }
+  if (runDocker(composeArgs(
+    "--profile", "operations", "rm", "-f", "-s",
+    "retention-hold", "db-grant-sync", "db-role-provision", "migration",
+  )) !== 0) {
+    process.exit(1);
+  }
+}
+
+function runVerifiedMigration() {
+  if (
+    runDocker(composeArgs(
+      "up", "-d", "--no-build", "--pull", "never", "--wait",
+      "--wait-timeout", "120", "postgres", "redis",
+    )) !== 0 ||
+    runDocker(composeArgs("rm", "-f", "-s", "db-role-provision")) !== 0 ||
+    runDocker(composeArgs(
+      "run", "--rm", "--no-deps", "--pull", "never", "db-role-provision",
+    )) !== 0 ||
+    runDocker(composeArgs("rm", "-f", "-s", "migration")) !== 0 ||
+    runDocker(composeArgs("run", "--rm", "--no-deps", "--pull", "never", "migration")) !== 0 ||
+    runDocker(composeArgs("rm", "-f", "-s", "db-grant-sync")) !== 0 ||
+    runDocker(composeArgs(
+      "run", "--rm", "--no-deps", "--pull", "never", "db-grant-sync",
+    )) !== 0
+  ) {
+    process.exit(1);
+  }
+}
+
+function clearDatabaseAdoptionAuthorizationAfterMigration() {
+  try {
+    clearDatabaseAdoptionAuthorization(envFile);
+    parsedEnvironment = null;
+    roleEnvironmentFiles = materializeProductionRoleEnvironmentFiles(envFile);
+  } catch (error) {
+    console.error(
+      "Could not clear one-time database adoption authorization; application runtimes remain stopped:",
+      error instanceof Error ? error.message : String(error),
+    );
+    process.exit(1);
+  }
+}
+
+function startVerifiedRuntimes() {
+  const services = readEnvValue("PAYMENT_RECONCILIATION_ENABLED", "true") === "true"
+    ? ["retention-worker", "reconciliation-worker"]
+    : ["retention-worker"];
+  const appStatus = runDocker(composeArgs(
+    "up", "-d", "--no-deps", "--no-build", "--pull", "never", "--wait",
+    "--wait-timeout", "180", "app",
+  ));
+
+  if (appStatus !== 0) {
+    process.exit(appStatus);
+  }
+
+  const workerStatus = runDocker(composeArgs(
+    "up", "-d", "--no-deps", "--no-build", "--pull", "never", "--wait",
+    "--wait-timeout", "180", ...services,
+  ));
+
+  if (workerStatus !== 0) {
+    process.exit(workerStatus);
+  }
+
+  verifiedImages = null;
+}
+
+function prepareRemnashopPaymentRollout(phase = "finalize") {
+  const result = spawnSync("sh", [remnashopRolloutScript, envFile, phase], {
     cwd: rootDir,
     env: productionChildEnvironment(),
     stdio: "inherit",
@@ -299,6 +631,22 @@ function ensureEdgeNetwork() {
   }
 }
 
+function assertRedisHostMemoryPolicy() {
+  try {
+    const result = spawnSync("docker", redisOvercommitProbeArgs(), {
+      cwd: rootDir,
+      encoding: "utf8",
+      env: productionChildEnvironment(),
+      shell: false,
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    assertRedisOvercommitProbeResult(result);
+  } catch (error) {
+    console.error(error instanceof Error ? error.message : String(error));
+    process.exit(1);
+  }
+}
+
 function requireEnvFile() {
   if (!existsSync(envFile)) {
     console.error(`Missing ${envFile}. Copy deploy/prod/.env.example and fill real values.`);
@@ -307,12 +655,23 @@ function requireEnvFile() {
 }
 
 function validateProductionEnvFile() {
-  const result = spawnSync(process.execPath, [validateEnvScript, "--env-file", envFile], {
-    cwd: rootDir,
-    env: process.env,
-    stdio: "inherit",
-    shell: false,
-  });
+  try {
+    readPrivateCredentialFile(envFile, "production environment file");
+    assertV011UpgradePreparationNotRequired(envFile);
+  } catch (error) {
+    console.error(error instanceof Error ? error.message : String(error));
+    process.exit(1);
+  }
+  const result = spawnSync(
+    process.execPath,
+    [validateEnvScript, "--clean-pay-env-file", envFile],
+    {
+      cwd: rootDir,
+      env: process.env,
+      stdio: "inherit",
+      shell: false,
+    },
+  );
 
   if (result.error) {
     console.error(result.error.message);
@@ -322,29 +681,57 @@ function validateProductionEnvFile() {
   if (result.status !== 0) {
     process.exit(result.status ?? 1);
   }
+
+  try {
+    roleEnvironmentFiles = materializeProductionRoleEnvironmentFiles(envFile);
+  } catch (error) {
+    console.error(error instanceof Error ? error.message : String(error));
+    process.exit(1);
+  }
 }
 
 function get(url, headers = {}) {
   return new Promise((resolve, reject) => {
     const transport = new URL(url).protocol === "https:" ? https : http;
+    let settled = false;
+    let deadline;
+    const settle = (error, result) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(deadline);
+      if (error) reject(error);
+      else resolve(result);
+    };
     const request = transport.get(url, { headers }, (response) => {
       let body = "";
+      let bodyBytes = 0;
 
       response.setEncoding("utf8");
       response.on("data", (chunk) => {
+        bodyBytes += Buffer.byteLength(chunk, "utf8");
+        if (bodyBytes > HTTP_RESPONSE_LIMIT_BYTES) {
+          const error = new Error(`Response from ${url} exceeded ${HTTP_RESPONSE_LIMIT_BYTES} bytes`);
+          response.destroy(error);
+          request.destroy(error);
+          settle(error);
+          return;
+        }
         body += chunk;
       });
-      response.on("end", () => resolve({
+      response.on("error", (error) => settle(error));
+      response.on("end", () => settle(null, {
         status: response.statusCode,
         body,
         headers: response.headers,
       }));
     });
 
-    request.on("error", reject);
-    request.setTimeout(10_000, () => {
-      request.destroy(new Error(`Timed out waiting for ${url}`));
-    });
+    request.on("error", (error) => settle(error));
+    deadline = setTimeout(() => {
+      const error = new Error(`Timed out waiting for ${url}`);
+      request.destroy(error);
+      settle(error);
+    }, HTTP_REQUEST_DEADLINE_MS);
   });
 }
 
@@ -389,14 +776,13 @@ async function verify() {
 
       if (assessment.ready) {
         console.log(`OK ${url}`);
-        console.log(response.body);
         assertReconciliationWorkerHealthy();
         assertRetentionWorkerHealthy();
         await verifyExternalSecurityHeaders();
         return;
       }
 
-      lastError = new Error(`${assessment.reason}: ${response.body}`);
+      lastError = new Error("Detailed readiness checks have not passed");
     } catch (error) {
       lastError = error;
     }
@@ -409,21 +795,40 @@ async function verify() {
   process.exit(1);
 }
 
+if (!supportedCommands.has(command)) {
+  console.log("Usage: node deploy/prod/prod.mjs <build|up|down|logs|ps|verify> [-debug]");
+  process.exit(command === "help" ? 0 : 1);
+}
+
+acquireOwnedProductionOperationLock(command);
 requireEnvFile();
+validateProductionEnvFile();
+if (command === "build" || command === "up") {
+  assertDockerComposeCapabilities();
+}
+if (observationalCommands.has(command) && !releaseOwnedProductionOperationLock()) {
+  process.exit(1);
+}
 
 switch (command) {
   case "build":
-    validateProductionEnvFile();
-    run("docker", composeArgs("build"));
+    prepareDeploymentImages();
+    preflightDeploymentImages();
+    verifiedImages = null;
     break;
   case "up":
-    validateProductionEnvFile();
+    assertRedisHostMemoryPolicy();
     ensureEdgeNetwork();
-    if (runDocker(composeArgs("up", "-d", "--build")) !== 0) {
-      process.exit(1);
-    }
+    prepareRemnashopPaymentRollout("check");
+    prepareDeploymentImages();
+    preflightDeploymentImages();
+    prepareRuntimeDependencies();
+    stopRuntimeServices();
+    runVerifiedMigration();
+    clearDatabaseAdoptionAuthorizationAfterMigration();
+    startVerifiedRuntimes();
     await verify();
-    prepareRemnashopPaymentRollout();
+    prepareRemnashopPaymentRollout("finalize");
     break;
   case "down":
     run("docker", composeArgs("down"));
@@ -447,6 +852,5 @@ switch (command) {
     await verify();
     break;
   default:
-    console.log("Usage: node deploy/prod/prod.mjs <build|up|down|logs|ps|verify> [-debug]");
-    process.exit(command === "help" ? 0 : 1);
+    throw new Error(`Unsupported production command escaped validation: ${command}`);
 }

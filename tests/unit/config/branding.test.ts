@@ -37,12 +37,16 @@ describe("cabinet branding", () => {
   it("wires branding into visible shell surfaces and Docker build args", () => {
     const files = [
       "src/app/layout.tsx",
-      "src/frontend/components/layout/auth-shell.tsx",
+      "src/app/install/page.tsx",
+      "src/app/offline/page.tsx",
+      "src/frontend/components/auth-shell.tsx",
+      "src/frontend/components/install-app-button.tsx",
+      "src/frontend/components/ios-install-guide.tsx",
       "src/frontend/layout/AppTopbar.tsx",
       "src/frontend/layout/AppFooter.tsx",
       "src/frontend/layout/AppMenu.tsx",
       "src/frontend/layout/useCleanPayMenu.ts",
-      "src/frontend/components/layout/page-header.tsx",
+      "src/frontend/components/page-header.tsx",
       "src/frontend/components/support-panel.tsx",
       "src/app/tariffs/page.tsx",
       "src/app/profile/page.tsx",
@@ -55,6 +59,28 @@ describe("cabinet branding", () => {
     expect(readFileSync("Dockerfile", "utf8")).toContain(
       'ARG NEXT_PUBLIC_BRAND_NAME="Clean Pay"',
     );
+    expect(readFileSync("Dockerfile", "utf8")).toContain(
+      "ENV CLEAN_PAY_BAKED_BRAND_NAME=${NEXT_PUBLIC_BRAND_NAME}",
+    );
     expect(readFileSync("deploy/prod/docker-compose.yml", "utf8")).toContain("NEXT_PUBLIC_BRAND_NAME");
+  });
+
+  it("uses direct public env reads so Next.js can inline branding in client bundles", () => {
+    const branding = readFileSync("src/shared/branding.ts", "utf8");
+
+    expect(branding).toContain("process.env.NEXT_PUBLIC_BRAND_NAME");
+    expect(branding).toContain("process.env.NEXT_PUBLIC_BRAND_LOGO_URL");
+    expect(branding).not.toContain("env = process.env");
+
+    for (const file of [
+      "src/app/install/page.tsx",
+      "src/app/offline/page.tsx",
+      "src/frontend/components/install-app-button.tsx",
+      "src/frontend/components/ios-install-guide.tsx",
+    ]) {
+      const source = readFileSync(file, "utf8");
+      expect(source, `${file} should resolve deployment branding`).toContain("getBranding");
+      expect(source, `${file} should not hard-code the default brand`).not.toMatch(/\bClean Pay\b/);
+    }
   });
 });

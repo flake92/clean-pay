@@ -1,0 +1,1251 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://clean-pay.dev/schemas/dual-image-provider-overlap-proof-v1.json",
+  "title": "Clean Pay dual-image provider overlap proof",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "kind", "stacks", "comparison", "lifecycle"],
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "kind": { "const": "clean-pay-dual-image-provider-overlap-proof" },
+    "stacks": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["baseline", "candidate"],
+      "properties": {
+        "baseline": { "$ref": "#/$defs/baselineStack" },
+        "candidate": { "$ref": "#/$defs/candidateStack" }
+      },
+      "allOf": [
+        {
+          "oneOf": [
+            {
+              "properties": {
+                "baseline": {
+                  "properties": {
+                    "applicationImage": { "$ref": "#/$defs/applicationImageClassic" }
+                  }
+                },
+                "candidate": {
+                  "properties": {
+                    "applicationImage": { "$ref": "#/$defs/applicationImageClassic" }
+                  }
+                }
+              }
+            },
+            {
+              "properties": {
+                "baseline": {
+                  "properties": {
+                    "applicationImage": { "$ref": "#/$defs/applicationImageContainerd" }
+                  }
+                },
+                "candidate": {
+                  "properties": {
+                    "applicationImage": { "$ref": "#/$defs/applicationImageContainerd" }
+                  }
+                }
+              }
+            }
+          ]
+        }
+      ]
+    },
+    "comparison": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "status",
+        "distinctComposeProjects",
+        "distinctApplicationImages",
+        "distinctSourceRevisions",
+        "samePublicBuildContract",
+        "sameFixtureContract",
+        "sameScenarioAndSeed",
+        "sameBrowserProject",
+        "sameConnectProxyCounters",
+        "sameHistoryContract",
+        "sameOwnedResetContract",
+        "sameProviderRecordSet",
+        "eachOneShotOverlapProven",
+        "arrivalOrderRelationship"
+      ],
+      "properties": {
+        "status": { "const": "proven" },
+        "distinctComposeProjects": { "const": true },
+        "distinctApplicationImages": { "const": true },
+        "distinctSourceRevisions": { "const": true },
+        "samePublicBuildContract": { "const": true },
+        "sameFixtureContract": { "const": true },
+        "sameScenarioAndSeed": { "const": true },
+        "sameBrowserProject": { "const": true },
+        "sameConnectProxyCounters": { "const": true },
+        "sameHistoryContract": { "const": true },
+        "sameOwnedResetContract": { "const": true },
+        "sameProviderRecordSet": { "const": true },
+        "eachOneShotOverlapProven": { "const": true },
+        "arrivalOrderRelationship": { "enum": ["same", "reordered"] }
+      }
+    },
+    "lifecycle": { "$ref": "#/$defs/lifecycle" }
+  },
+  "$defs": {
+    "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "imageDigest": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" },
+    "baselineStack": {
+      "allOf": [
+        { "$ref": "#/$defs/stack" },
+        {
+          "properties": {
+            "role": { "const": "baseline" },
+            "composeProject": {
+              "pattern": "^clean-pay-browser-journey-provider-proof-baseline-[a-f0-9]{12}$"
+            }
+          }
+        }
+      ]
+    },
+    "candidateStack": {
+      "allOf": [
+        { "$ref": "#/$defs/stack" },
+        {
+          "properties": {
+            "role": { "const": "candidate" },
+            "composeProject": {
+              "pattern": "^clean-pay-browser-journey-provider-proof-candidate-[a-f0-9]{12}$"
+            }
+          }
+        }
+      ]
+    },
+    "stack": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "role",
+        "composeProject",
+        "connectProxyTarget",
+        "journeyContractSha256",
+        "fixtureContract",
+        "scenario",
+        "browser",
+        "applicationImage",
+        "runtimeBinding",
+        "connectProxyAuthorityLedger",
+        "connectProxyCounters",
+        "reset",
+        "navigation",
+        "providerOverlap"
+      ],
+      "properties": {
+        "role": { "enum": ["baseline", "candidate"] },
+        "composeProject": {
+          "type": "string",
+          "pattern": "^clean-pay-browser-journey-provider-proof-(?:baseline|candidate)-[a-f0-9]{12}$"
+        },
+        "connectProxyTarget": {
+          "type": "string",
+          "pattern": "^127\\.0\\.0\\.(?:[2-9]|[1-9]\\d|1\\d\\d|2[0-4]\\d|25[0-4]):443$"
+        },
+        "journeyContractSha256": { "$ref": "#/$defs/sha256" },
+        "fixtureContract": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["domain", "sha256"],
+          "properties": {
+            "domain": { "const": "clean-pay-browser-journey-fixture-v5" },
+            "sha256": { "$ref": "#/$defs/sha256" }
+          }
+        },
+        "scenario": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["label", "scenarioSha256", "seedSha256"],
+          "properties": {
+            "label": { "const": "provider-overlap-v1" },
+            "scenarioSha256": { "$ref": "#/$defs/sha256" },
+            "seedSha256": { "$ref": "#/$defs/sha256" }
+          }
+        },
+        "browser": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "project",
+            "playwrightVersion",
+            "chromiumVersion",
+            "userAgentSha256",
+            "viewport",
+            "locale",
+            "timezoneId",
+            "colorScheme"
+          ],
+          "properties": {
+            "project": { "const": "provider-overlap-1440x900" },
+            "playwrightVersion": { "type": "string", "pattern": "^\\d+\\.\\d+\\.\\d+$" },
+            "chromiumVersion": { "type": "string", "pattern": "^\\d+\\.\\d+\\.\\d+\\.\\d+$" },
+            "userAgentSha256": { "$ref": "#/$defs/sha256" },
+            "viewport": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["width", "height"],
+              "properties": { "width": { "const": 1440 }, "height": { "const": 900 } }
+            },
+            "locale": { "const": "ru-RU" },
+            "timezoneId": { "const": "Europe/Moscow" },
+            "colorScheme": { "const": "light" }
+          }
+        },
+        "applicationImage": { "$ref": "#/$defs/applicationImage" },
+        "runtimeBinding": { "$ref": "#/$defs/runtimeBinding" },
+        "connectProxyAuthorityLedger": {
+          "type": "array",
+          "items": {
+            "enum": [
+              "challenges.cloudflare.com:443",
+              "chatwoot.browser.clean-pay.dev:443",
+              "oauth.telegram.org:443",
+              "pay.ci.clean-pay.dev:443"
+            ]
+          },
+          "minItems": 4,
+          "maxItems": 4,
+          "uniqueItems": true
+        },
+        "connectProxyCounters": { "$ref": "#/$defs/connectProxyCounters" },
+        "reset": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["database"],
+          "properties": { "database": { "$ref": "#/$defs/databaseReset" } }
+        },
+        "navigation": { "$ref": "#/$defs/navigation" },
+        "providerOverlap": { "$ref": "#/$defs/providerOverlap" }
+      }
+    },
+    "applicationImage": {
+      "oneOf": [
+        { "$ref": "#/$defs/applicationImageClassic" },
+        { "$ref": "#/$defs/applicationImageContainerd" }
+      ]
+    },
+    "applicationImageClassic": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "assetImageDigest",
+        "configDigest",
+        "manifestDigest",
+        "publicBuildContract",
+        "referenceSha256",
+        "repoDigestContractSha256",
+        "revision",
+        "role",
+        "runtimeImageDigest"
+      ],
+      "properties": {
+        "assetImageDigest": { "$ref": "#/$defs/imageDigest" },
+        "configDigest": { "$ref": "#/$defs/imageDigest" },
+        "manifestDigest": { "$ref": "#/$defs/imageDigest" },
+        "referenceSha256": { "$ref": "#/$defs/sha256" },
+        "repoDigestContractSha256": { "$ref": "#/$defs/sha256" },
+        "revision": { "type": "string", "pattern": "^[a-f0-9]{40}$" },
+        "role": { "const": "app" },
+        "runtimeImageDigest": { "$ref": "#/$defs/imageDigest" },
+        "publicBuildContract": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["version", "sha256"],
+          "properties": {
+            "version": { "const": "1" },
+            "sha256": { "$ref": "#/$defs/sha256" }
+          }
+        }
+      }
+    },
+    "applicationImageContainerd": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "assetImageDigest",
+        "configDigest",
+        "imageSelectionMode",
+        "manifestDigest",
+        "publicBuildContract",
+        "referenceSha256",
+        "repoDigestContractSha256",
+        "revision",
+        "role",
+        "runtimeImageDigest"
+      ],
+      "properties": {
+        "assetImageDigest": { "$ref": "#/$defs/imageDigest" },
+        "configDigest": { "$ref": "#/$defs/imageDigest" },
+        "imageSelectionMode": { "const": "containerd-root-manifest" },
+        "manifestDigest": { "$ref": "#/$defs/imageDigest" },
+        "referenceSha256": { "$ref": "#/$defs/sha256" },
+        "repoDigestContractSha256": { "$ref": "#/$defs/sha256" },
+        "revision": { "type": "string", "pattern": "^[a-f0-9]{40}$" },
+        "role": { "const": "app" },
+        "runtimeImageDigest": { "$ref": "#/$defs/imageDigest" },
+        "publicBuildContract": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["version", "sha256"],
+          "properties": {
+            "version": { "const": "1" },
+            "sha256": { "$ref": "#/$defs/sha256" }
+          }
+        }
+      }
+    },
+    "databaseReset": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "scopeSha256",
+        "schemaSha256",
+        "tableCount",
+        "sequenceCount",
+        "resetSequence",
+        "transaction",
+        "redis"
+      ],
+      "properties": {
+        "scopeSha256": { "$ref": "#/$defs/sha256" },
+        "schemaSha256": { "$ref": "#/$defs/sha256" },
+        "tableCount": { "type": "integer", "minimum": 1 },
+        "sequenceCount": { "const": 0 },
+        "resetSequence": { "const": 1 },
+        "transaction": { "const": "truncate-public-application-tables-cascade-no-sequences" },
+        "redis": { "const": "flush-owned-db-0" }
+      }
+    },
+    "navigation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "eventLifecycle",
+        "finalUrl",
+        "headingVisible",
+        "requestCount",
+        "requestContractSha256",
+        "requestOrderContractSha256",
+        "requestOrderLedger",
+        "semanticRequestLedger",
+        "historyContractSha256",
+        "historyCount",
+        "historyLedger",
+        "staticLoadGraph",
+        "staticLoadGraphContractSha256",
+        "staticRequestContractSha256",
+        "staticRequestCount",
+        "staticRequestLedger",
+        "unexpectedRequestCount",
+        "unexpectedConsoleCount",
+        "unexpectedPageErrorCount"
+      ],
+      "properties": {
+        "eventLifecycle": { "$ref": "#/$defs/eventLifecycle" },
+        "finalUrl": { "const": "https://pay.ci.clean-pay.dev/cabinet" },
+        "headingVisible": { "const": true },
+        "requestCount": { "type": "integer", "minimum": 18, "maximum": 256 },
+        "requestContractSha256": { "$ref": "#/$defs/sha256" },
+        "requestOrderContractSha256": { "$ref": "#/$defs/sha256" },
+        "requestOrderLedger": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["kind", "occurrence"],
+            "properties": {
+              "kind": { "enum": ["semantic", "static"] },
+              "occurrence": { "type": "integer", "minimum": 1, "maximum": 256 }
+            }
+          },
+          "minItems": 1,
+          "maxItems": 256
+        },
+        "semanticRequestLedger": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/semanticRequestEntry" },
+          "minItems": 9,
+          "maxItems": 256
+        },
+        "historyContractSha256": { "$ref": "#/$defs/sha256" },
+        "historyCount": { "const": 4 },
+        "historyLedger": {
+          "type": "array",
+          "prefixItems": [
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["kind", "location"],
+              "properties": {
+                "kind": { "const": "checkpoint" },
+                "location": { "const": "app-profile" }
+              }
+            },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "frameRelation", "kind", "loaderRelation", "location", "navigationType"
+              ],
+              "properties": {
+                "frameRelation": { "const": "same-main-frame" },
+                "kind": { "const": "document-navigation" },
+                "loaderRelation": { "const": "changed" },
+                "location": { "const": "app-cabinet" },
+                "navigationType": { "const": "Navigation" }
+              }
+            },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "historyLengthRelation", "kind", "location", "operationSequence",
+                "stateTransition", "urlRelation"
+              ],
+              "properties": {
+                "historyLengthRelation": { "const": "unchanged" },
+                "kind": { "const": "replaceState" },
+                "location": { "const": "app-cabinet" },
+                "operationSequence": { "const": 1 },
+                "stateTransition": { "const": "unmarked-to-next-app-router" },
+                "urlRelation": { "const": "unchanged" }
+              }
+            },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "frameRelation", "kind", "location", "navigationType", "pairedOperationSequence"
+              ],
+              "properties": {
+                "frameRelation": { "const": "same-main-frame" },
+                "kind": { "const": "same-document-navigation" },
+                "location": { "const": "app-cabinet" },
+                "navigationType": { "const": "historyApi" },
+                "pairedOperationSequence": { "const": 1 }
+              }
+            }
+          ],
+          "minItems": 4,
+          "maxItems": 4
+        },
+        "staticLoadGraph": { "$ref": "#/$defs/staticLoadGraph" },
+        "staticLoadGraphContractSha256": { "$ref": "#/$defs/sha256" },
+        "staticRequestContractSha256": { "$ref": "#/$defs/sha256" },
+        "staticRequestCount": { "type": "integer", "minimum": 9, "maximum": 256 },
+        "staticRequestLedger": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/staticRequestEntry" },
+          "minItems": 9,
+          "maxItems": 256
+        },
+        "unexpectedRequestCount": { "const": 0 },
+        "unexpectedConsoleCount": { "const": 0 },
+        "unexpectedPageErrorCount": { "const": 0 }
+      }
+    },
+    "eventLifecycle": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["drainedEventCount", "lateEventCount", "sourceCounts", "status"],
+      "properties": {
+        "drainedEventCount": { "type": "integer", "minimum": 59, "maximum": 773 },
+        "lateEventCount": { "const": 0 },
+        "sourceCounts": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "console",
+            "history",
+            "page",
+            "pageerror",
+            "request",
+            "responseFallback",
+            "route",
+            "routeFallback",
+            "terminal"
+          ],
+          "properties": {
+            "console": { "type": "integer", "minimum": 0, "maximum": 256 },
+            "history": { "type": "integer", "minimum": 0, "maximum": 256 },
+            "page": { "type": "integer", "minimum": 0, "maximum": 256 },
+            "pageerror": { "type": "integer", "minimum": 0, "maximum": 256 },
+            "request": { "type": "integer", "minimum": 0, "maximum": 256 },
+            "responseFallback": { "type": "integer", "minimum": 0, "maximum": 256 },
+            "route": { "type": "integer", "minimum": 0, "maximum": 256 },
+            "routeFallback": { "type": "integer", "minimum": 0, "maximum": 256 },
+            "terminal": { "type": "integer", "minimum": 0, "maximum": 256 }
+          }
+        },
+        "status": { "const": "sealed-clean" }
+      }
+    },
+    "semanticRequestEntry": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "disposition",
+        "key",
+        "redirectEdge",
+        "responseContentType",
+        "responseFailureSha256",
+        "responseStatus"
+      ],
+      "properties": {
+        "disposition": { "enum": ["abort", "continue"] },
+        "key": {
+          "enum": [
+            "app-brand-logo",
+            "app-cabinet-action",
+            "app-cabinet-document",
+            "app-cabinet-prefetch-blocked",
+            "app-cabinet-rsc",
+            "app-login-action",
+            "app-login-document",
+            "app-login-root-rsc",
+            "app-login-rsc",
+            "app-profile-action",
+            "app-profile-document",
+            "app-profile-rsc",
+            "app-root-rsc",
+            "app-telegram-callback",
+            "app-telegram-start",
+            "app-web-manifest",
+            "chatwoot-sdk-script",
+            "chatwoot-widget-conversation-frame",
+            "chatwoot-widget-frame",
+            "telegram-oidc-authorize",
+            "turnstile-widget-script"
+          ]
+        },
+        "redirectEdge": { "type": ["string", "null"] },
+        "responseContentType": { "type": ["string", "null"] },
+        "responseFailureSha256": {
+          "anyOf": [
+            { "$ref": "#/$defs/sha256" },
+            { "type": "null" }
+          ]
+        },
+        "responseStatus": { "type": ["integer", "null"] }
+      }
+    },
+    "staticRequestEntry": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "assetBytes", "assetSha256", "class", "contentType", "documentKey", "pathSha256"
+      ],
+      "properties": {
+        "assetBytes": { "type": "integer", "minimum": 1, "maximum": 134217728 },
+        "assetSha256": { "$ref": "#/$defs/sha256" },
+        "class": {
+          "enum": [
+            "next-static-css",
+            "next-static-font",
+            "next-static-image",
+            "next-static-js"
+          ]
+        },
+        "contentType": {
+          "enum": [
+            "application/javascript",
+            "application/vnd.ms-fontobject",
+            "font/ttf",
+            "font/woff",
+            "font/woff2",
+            "image/png",
+            "image/svg+xml",
+            "image/vnd.microsoft.icon",
+            "image/x-icon",
+            "text/css",
+            "text/javascript"
+          ]
+        },
+        "documentKey": {
+          "enum": ["app-login-document", "app-profile-document", "app-cabinet-document"]
+        },
+        "pathSha256": { "$ref": "#/$defs/sha256" }
+      }
+    },
+    "staticLoadGraph": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "assetAttestationSha256",
+        "assetInventorySha256",
+        "cssMediaReferenceLedger",
+        "declaredPathLedger",
+        "declaredPathSha256s",
+        "documentLoadLedger",
+        "expectedChunkPathSha256s",
+        "inventoryLedger",
+        "inventoryLedgerContractSha256",
+        "routeDeclaredPathContractSha256",
+        "routeDeclaredPathSha256s"
+      ],
+      "properties": {
+        "assetAttestationSha256": { "$ref": "#/$defs/sha256" },
+        "assetInventorySha256": { "$ref": "#/$defs/sha256" },
+        "cssMediaReferenceLedger": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["occurrence", "sourcePathSha256", "targetPathSha256"],
+            "properties": {
+              "occurrence": { "type": "integer", "minimum": 1, "maximum": 256 },
+              "sourcePathSha256": { "$ref": "#/$defs/sha256" },
+              "targetPathSha256": { "$ref": "#/$defs/sha256" }
+            }
+          },
+          "minItems": 8,
+          "maxItems": 8,
+          "uniqueItems": true
+        },
+        "declaredPathLedger": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["class", "pathSha256"],
+            "properties": {
+              "class": { "enum": ["chunk", "media"] },
+              "pathSha256": { "$ref": "#/$defs/sha256" }
+            }
+          },
+          "minItems": 1,
+          "maxItems": 256,
+          "uniqueItems": true
+        },
+        "declaredPathSha256s": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/sha256" },
+          "minItems": 1,
+          "maxItems": 256,
+          "uniqueItems": true
+        },
+        "documentLoadLedger": {
+          "type": "array",
+          "prefixItems": [
+            { "$ref": "#/$defs/loginDocumentLoad" },
+            { "$ref": "#/$defs/profileDocumentLoad" },
+            { "$ref": "#/$defs/cabinetDocumentLoad" }
+          ],
+          "minItems": 3,
+          "maxItems": 3
+        },
+        "expectedChunkPathSha256s": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/sha256" },
+          "minItems": 1,
+          "maxItems": 256,
+          "uniqueItems": true
+        },
+        "inventoryLedger": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["assetBytes", "assetSha256", "extension", "pathSha256"],
+            "properties": {
+              "assetBytes": { "type": "integer", "minimum": 1, "maximum": 134217728 },
+              "assetSha256": { "$ref": "#/$defs/sha256" },
+              "extension": {
+                "enum": ["css", "eot", "ico", "js", "png", "svg", "ttf", "woff", "woff2"]
+              },
+              "pathSha256": { "$ref": "#/$defs/sha256" }
+            }
+          },
+          "minItems": 1,
+          "maxItems": 4096,
+          "uniqueItems": true
+        },
+        "inventoryLedgerContractSha256": { "$ref": "#/$defs/sha256" },
+        "routeDeclaredPathContractSha256": { "$ref": "#/$defs/sha256" },
+        "routeDeclaredPathSha256s": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/sha256" },
+          "minItems": 1,
+          "maxItems": 256,
+          "uniqueItems": true
+        }
+      }
+    },
+    "documentLoad": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "documentKey", "expectedChunkPathSha256s", "expectedMediaPathSha256s",
+        "routeDeclaredPathSha256s"
+      ],
+      "properties": {
+        "documentKey": { "type": "string" },
+        "expectedChunkPathSha256s": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/sha256" },
+          "minItems": 1,
+          "maxItems": 256,
+          "uniqueItems": true
+        },
+        "expectedMediaPathSha256s": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/sha256" },
+          "minItems": 2,
+          "maxItems": 2,
+          "uniqueItems": true
+        },
+        "routeDeclaredPathSha256s": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/sha256" },
+          "minItems": 1,
+          "maxItems": 64,
+          "uniqueItems": true
+        }
+      }
+    },
+    "loginDocumentLoad": {
+      "allOf": [
+        { "$ref": "#/$defs/documentLoad" },
+        { "properties": { "documentKey": { "const": "app-login-document" } } }
+      ]
+    },
+    "profileDocumentLoad": {
+      "allOf": [
+        { "$ref": "#/$defs/documentLoad" },
+        { "properties": { "documentKey": { "const": "app-profile-document" } } }
+      ]
+    },
+    "cabinetDocumentLoad": {
+      "allOf": [
+        { "$ref": "#/$defs/documentLoad" },
+        { "properties": { "documentKey": { "const": "app-cabinet-document" } } }
+      ]
+    },
+    "runtimeBinding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "status",
+        "applicationImageBindingContractSha256",
+        "applicationRepoDigestContractSha256",
+        "projectSha256",
+        "journeyContractSha256",
+        "networkSha256",
+        "connectProxyTargetSha256",
+        "publicationsSha256",
+        "serviceIdentitySha256",
+        "composeRuntimeContractSha256",
+        "fixtureExecutionContractSha256",
+        "fixtureBindingContractSha256",
+        "fixtureMountContractSha256",
+        "globalFixtureContractSha256",
+        "generatedEnvironmentDirectorySha256",
+        "migrationImageBindingContractSha256",
+        "oneShotLifecycleContractSha256",
+        "ownedInputReceiptSha256",
+        "pairCoexistenceContractSha256",
+        "pairLaunchContractSha256",
+        "staticAssetAttestationSha256",
+        "staticAssetInventoryProjectionSha256",
+        "staticAssetInventorySha256",
+        "staticAssetRouteGraphSha256",
+        "syntheticEnvironmentContractSha256",
+        "syntheticRoleEnvironmentContractSha256",
+        "syntheticRoleEnvironmentPolicySha256"
+      ],
+      "properties": {
+        "status": { "const": "preflight-proven" },
+        "applicationImageBindingContractSha256": { "$ref": "#/$defs/sha256" },
+        "applicationRepoDigestContractSha256": { "$ref": "#/$defs/sha256" },
+        "projectSha256": { "$ref": "#/$defs/sha256" },
+        "journeyContractSha256": { "$ref": "#/$defs/sha256" },
+        "networkSha256": { "$ref": "#/$defs/sha256" },
+        "connectProxyTargetSha256": { "$ref": "#/$defs/sha256" },
+        "publicationsSha256": { "$ref": "#/$defs/sha256" },
+        "serviceIdentitySha256": { "$ref": "#/$defs/sha256" },
+        "composeRuntimeContractSha256": { "$ref": "#/$defs/sha256" },
+        "fixtureExecutionContractSha256": { "$ref": "#/$defs/sha256" },
+        "fixtureBindingContractSha256": { "$ref": "#/$defs/sha256" },
+        "fixtureMountContractSha256": { "$ref": "#/$defs/sha256" },
+        "globalFixtureContractSha256": { "$ref": "#/$defs/sha256" },
+        "generatedEnvironmentDirectorySha256": { "$ref": "#/$defs/sha256" },
+        "migrationImageBindingContractSha256": { "$ref": "#/$defs/sha256" },
+        "oneShotLifecycleContractSha256": { "$ref": "#/$defs/sha256" },
+        "ownedInputReceiptSha256": { "$ref": "#/$defs/sha256" },
+        "pairCoexistenceContractSha256": { "$ref": "#/$defs/sha256" },
+        "pairLaunchContractSha256": { "$ref": "#/$defs/sha256" },
+        "staticAssetAttestationSha256": { "$ref": "#/$defs/sha256" },
+        "staticAssetInventoryProjectionSha256": { "$ref": "#/$defs/sha256" },
+        "staticAssetInventorySha256": { "$ref": "#/$defs/sha256" },
+        "staticAssetRouteGraphSha256": { "$ref": "#/$defs/sha256" },
+        "syntheticEnvironmentContractSha256": { "$ref": "#/$defs/sha256" },
+        "syntheticRoleEnvironmentContractSha256": { "$ref": "#/$defs/sha256" },
+        "syntheticRoleEnvironmentPolicySha256": { "$ref": "#/$defs/sha256" }
+      }
+    },
+    "connectProxyCounters": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "accepted",
+        "rejected",
+        "upstreamAttempts",
+        "upstreamConnected",
+        "upstreamFailures"
+      ],
+      "properties": {
+        "accepted": { "const": 4 },
+        "rejected": { "const": 0 },
+        "upstreamAttempts": { "const": 4 },
+        "upstreamConnected": { "const": 4 },
+        "upstreamFailures": { "const": 0 }
+      }
+    },
+    "cleanupReceipt": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["stacks", "status"],
+      "properties": {
+        "status": { "const": "verifier-owned-stack-pair-cleaned" },
+        "stacks": {
+          "type": "array",
+          "prefixItems": [
+            { "$ref": "#/$defs/baselineCleanupReceipt" },
+            { "$ref": "#/$defs/candidateCleanupReceipt" }
+          ],
+          "minItems": 2,
+          "maxItems": 2
+        }
+      }
+    },
+    "cleanupStackReceipt": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["role", "generatedEnvironmentDirectorySha256", "projectSha256", "status"],
+      "properties": {
+        "role": { "enum": ["baseline", "candidate"] },
+        "generatedEnvironmentDirectorySha256": { "$ref": "#/$defs/sha256" },
+        "projectSha256": { "$ref": "#/$defs/sha256" },
+        "status": { "const": "verifier-owned-stack-cleaned" }
+      }
+    },
+    "baselineCleanupReceipt": {
+      "allOf": [
+        { "$ref": "#/$defs/cleanupStackReceipt" },
+        { "properties": { "role": { "const": "baseline" } } }
+      ]
+    },
+    "candidateCleanupReceipt": {
+      "allOf": [
+        { "$ref": "#/$defs/cleanupStackReceipt" },
+        { "properties": { "role": { "const": "candidate" } } }
+      ]
+    },
+    "pairLaunchReceipt": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "barrierSha256",
+        "coexistence",
+        "dispatches",
+        "inputReceiptContractSha256s",
+        "lifecycleNotBefore",
+        "status"
+      ],
+      "properties": {
+        "barrierSha256": { "$ref": "#/$defs/sha256" },
+        "coexistence": { "$ref": "#/$defs/pairCoexistenceReceipt" },
+        "dispatches": {
+          "type": "array",
+          "prefixItems": [
+            { "$ref": "#/$defs/baselinePairDispatch" },
+            { "$ref": "#/$defs/candidatePairDispatch" }
+          ],
+          "minItems": 2,
+          "maxItems": 2
+        },
+        "inputReceiptContractSha256s": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/sha256" },
+          "minItems": 2,
+          "maxItems": 2,
+          "uniqueItems": true
+        },
+        "lifecycleNotBefore": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "status": { "const": "dual-compose-up-dispatched-after-shared-barrier" }
+      }
+    },
+    "pairDispatch": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["barrierSha256", "ordinal", "projectSha256"],
+      "properties": {
+        "barrierSha256": { "$ref": "#/$defs/sha256" },
+        "ordinal": { "enum": [0, 1] },
+        "projectSha256": { "$ref": "#/$defs/sha256" }
+      }
+    },
+    "baselinePairDispatch": {
+      "allOf": [
+        { "$ref": "#/$defs/pairDispatch" },
+        { "properties": { "ordinal": { "const": 0 } } }
+      ]
+    },
+    "candidatePairDispatch": {
+      "allOf": [
+        { "$ref": "#/$defs/pairDispatch" },
+        { "properties": { "ordinal": { "const": 1 } } }
+      ]
+    },
+    "pairCoexistenceReceipt": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["observations", "status"],
+      "properties": {
+        "observations": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/pairCoexistenceObservation" },
+          "minItems": 2,
+          "maxItems": 2
+        },
+        "status": { "const": "both-project-container-sets-coexisted" }
+      }
+    },
+    "pairCoexistenceObservation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["containerSetSha256", "projectSha256", "serviceCount", "services"],
+      "properties": {
+        "containerSetSha256": { "$ref": "#/$defs/sha256" },
+        "projectSha256": { "$ref": "#/$defs/sha256" },
+        "serviceCount": { "const": 13 },
+        "services": {
+          "type": "array",
+          "prefixItems": [
+            { "$ref": "#/$defs/coexistApp" },
+            { "$ref": "#/$defs/coexistBrowserCaReady" },
+            { "$ref": "#/$defs/coexistBrowserDbObserver" },
+            { "$ref": "#/$defs/coexistBrowserDbObserverProvision" },
+            { "$ref": "#/$defs/coexistBrowserOidcMock" },
+            { "$ref": "#/$defs/coexistBrowserProviderMock" },
+            { "$ref": "#/$defs/coexistBrowserProxy" },
+            { "$ref": "#/$defs/coexistDbGrantSync" },
+            { "$ref": "#/$defs/coexistDbRoleProvision" },
+            { "$ref": "#/$defs/coexistMigration" },
+            { "$ref": "#/$defs/coexistPostgres" },
+            { "$ref": "#/$defs/coexistRedis" },
+            { "$ref": "#/$defs/coexistRetentionWorker" }
+          ],
+          "items": false,
+          "minItems": 13,
+          "maxItems": 13
+        }
+      }
+    },
+    "coexistService": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["containerIdSha256", "service", "state"],
+      "properties": {
+        "containerIdSha256": { "$ref": "#/$defs/sha256" },
+        "service": { "type": "string" },
+        "state": { "enum": ["exited-zero", "running", "running-healthy"] }
+      }
+    },
+    "coexistApp": {
+      "allOf": [{ "$ref": "#/$defs/coexistService" }, {
+        "properties": { "service": { "const": "app" }, "state": { "const": "running-healthy" } }
+      }]
+    },
+    "coexistBrowserCaReady": {
+      "allOf": [{ "$ref": "#/$defs/coexistService" }, {
+        "properties": { "service": { "const": "browser-ca-ready" }, "state": { "const": "exited-zero" } }
+      }]
+    },
+    "coexistBrowserDbObserver": {
+      "allOf": [{ "$ref": "#/$defs/coexistService" }, {
+        "properties": { "service": { "const": "browser-db-observer" }, "state": { "const": "running-healthy" } }
+      }]
+    },
+    "coexistBrowserDbObserverProvision": {
+      "allOf": [{ "$ref": "#/$defs/coexistService" }, {
+        "properties": { "service": { "const": "browser-db-observer-provision" }, "state": { "const": "exited-zero" } }
+      }]
+    },
+    "coexistBrowserOidcMock": {
+      "allOf": [{ "$ref": "#/$defs/coexistService" }, {
+        "properties": { "service": { "const": "browser-oidc-mock" }, "state": { "const": "running-healthy" } }
+      }]
+    },
+    "coexistBrowserProviderMock": {
+      "allOf": [{ "$ref": "#/$defs/coexistService" }, {
+        "properties": { "service": { "const": "browser-provider-mock" }, "state": { "const": "running-healthy" } }
+      }]
+    },
+    "coexistBrowserProxy": {
+      "allOf": [{ "$ref": "#/$defs/coexistService" }, {
+        "properties": { "service": { "const": "browser-proxy" }, "state": { "const": "running" } }
+      }]
+    },
+    "coexistDbGrantSync": {
+      "allOf": [{ "$ref": "#/$defs/coexistService" }, {
+        "properties": { "service": { "const": "db-grant-sync" }, "state": { "const": "exited-zero" } }
+      }]
+    },
+    "coexistDbRoleProvision": {
+      "allOf": [{ "$ref": "#/$defs/coexistService" }, {
+        "properties": { "service": { "const": "db-role-provision" }, "state": { "const": "exited-zero" } }
+      }]
+    },
+    "coexistMigration": {
+      "allOf": [{ "$ref": "#/$defs/coexistService" }, {
+        "properties": { "service": { "const": "migration" }, "state": { "const": "exited-zero" } }
+      }]
+    },
+    "coexistPostgres": {
+      "allOf": [{ "$ref": "#/$defs/coexistService" }, {
+        "properties": { "service": { "const": "postgres" }, "state": { "const": "running-healthy" } }
+      }]
+    },
+    "coexistRedis": {
+      "allOf": [{ "$ref": "#/$defs/coexistService" }, {
+        "properties": { "service": { "const": "redis" }, "state": { "const": "running-healthy" } }
+      }]
+    },
+    "coexistRetentionWorker": {
+      "allOf": [{ "$ref": "#/$defs/coexistService" }, {
+        "properties": { "service": { "const": "retention-worker" }, "state": { "const": "running-healthy" } }
+      }]
+    },
+    "lifecycle": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "status",
+        "automaticCleanup",
+        "cleanupMode",
+        "cleanupHelper",
+        "ownershipGate",
+        "cleanup",
+        "launch",
+        "projects"
+      ],
+      "properties": {
+        "status": { "const": "verifier-owned-cleanup-completed-before-evidence-write" },
+        "automaticCleanup": { "const": true },
+        "cleanupMode": { "const": "exact-verifier-owned-stack-pair-v1" },
+        "cleanupHelper": {
+          "const": "tests/browser/journeys/journey-owned-stack-orchestrator.mjs"
+        },
+        "ownershipGate": {
+          "const": "absence-before-up-and-compose-project-labels-before-down-volumes"
+        },
+        "cleanup": { "$ref": "#/$defs/cleanupReceipt" },
+        "launch": { "$ref": "#/$defs/pairLaunchReceipt" },
+        "projects": {
+          "type": "array",
+          "prefixItems": [
+            { "$ref": "#/$defs/baselineLifecycleProject" },
+            { "$ref": "#/$defs/candidateLifecycleProject" }
+          ],
+          "minItems": 2,
+          "maxItems": 2
+        }
+      }
+    },
+    "lifecycleProject": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "role",
+        "composeProject",
+        "projectSha256",
+        "journeyContractSha256",
+        "generatedEnvironmentDirectorySha256"
+      ],
+      "properties": {
+        "role": { "enum": ["baseline", "candidate"] },
+        "composeProject": {
+          "type": "string",
+          "pattern": "^clean-pay-browser-journey-provider-proof-(?:baseline|candidate)-[a-f0-9]{12}$"
+        },
+        "projectSha256": { "$ref": "#/$defs/sha256" },
+        "journeyContractSha256": { "$ref": "#/$defs/sha256" },
+        "generatedEnvironmentDirectorySha256": { "$ref": "#/$defs/sha256" }
+      }
+    },
+    "baselineLifecycleProject": {
+      "allOf": [
+        { "$ref": "#/$defs/lifecycleProject" },
+        {
+          "properties": {
+            "role": { "const": "baseline" },
+            "composeProject": {
+              "pattern": "^clean-pay-browser-journey-provider-proof-baseline-[a-f0-9]{12}$"
+            }
+          }
+        }
+      ]
+    },
+    "candidateLifecycleProject": {
+      "allOf": [
+        { "$ref": "#/$defs/lifecycleProject" },
+        {
+          "properties": {
+            "role": { "const": "candidate" },
+            "composeProject": {
+              "pattern": "^clean-pay-browser-journey-provider-proof-candidate-[a-f0-9]{12}$"
+            }
+          }
+        }
+      ]
+    },
+    "participantBase": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["service", "method", "pathname", "entered", "ledgerSequence"],
+      "properties": {
+        "service": { "const": "remnashop" },
+        "method": { "const": "GET" },
+        "pathname": { "type": "string" },
+        "entered": { "const": true },
+        "ledgerSequence": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "devicesParticipant": {
+      "allOf": [
+        { "$ref": "#/$defs/participantBase" },
+        { "properties": { "pathname": { "const": "/api/v1/public/subscription/devices" } } }
+      ]
+    },
+    "offersParticipant": {
+      "allOf": [
+        { "$ref": "#/$defs/participantBase" },
+        { "properties": { "pathname": { "const": "/api/v1/public/subscription/offers" } } }
+      ]
+    },
+    "credentialContract": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["header_names", "authorization_scheme", "cookie_names"],
+      "properties": {
+        "header_names": { "const": [] },
+        "authorization_scheme": { "const": null },
+        "cookie_names": { "const": ["access_token"] }
+      }
+    },
+    "readRecord": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "ledgerIndex",
+        "sequence",
+        "service",
+        "method",
+        "pathname",
+        "query_keys",
+        "body_bytes",
+        "body_sha256",
+        "body_contract",
+        "idempotency_key_present",
+        "idempotency_key_sha256",
+        "idempotency_key_contract",
+        "credential_contract",
+        "effect"
+      ],
+      "properties": {
+        "ledgerIndex": { "type": "integer", "minimum": 0 },
+        "sequence": { "type": "integer", "minimum": 1 },
+        "service": { "const": "remnashop" },
+        "method": { "const": "GET" },
+        "pathname": {
+          "enum": [
+            "/api/v1/public/subscription/devices",
+            "/api/v1/public/subscription/offers"
+          ]
+        },
+        "query_keys": { "const": [] },
+        "body_bytes": { "const": 0 },
+        "body_sha256": {
+          "const": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        "body_contract": { "const": null },
+        "idempotency_key_present": { "const": false },
+        "idempotency_key_sha256": { "const": null },
+        "idempotency_key_contract": { "const": null },
+        "credential_contract": { "$ref": "#/$defs/credentialContract" },
+        "effect": { "enum": ["read_devices", "read_offers"] }
+      }
+    },
+    "providerOverlap": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "contractVersion",
+        "probe",
+        "occurrence",
+        "timeoutMs",
+        "participants",
+        "duplicates",
+        "enteredCount",
+        "maxInFlight",
+        "release",
+        "outcome",
+        "arrivalOrder",
+        "ledgerRange",
+        "records"
+      ],
+      "properties": {
+        "contractVersion": { "const": 1 },
+        "probe": { "const": "cabinet-offers-devices-overlap" },
+        "occurrence": { "const": 1 },
+        "timeoutMs": { "type": "integer", "minimum": 100, "maximum": 10000 },
+        "participants": {
+          "type": "array",
+          "prefixItems": [
+            { "$ref": "#/$defs/devicesParticipant" },
+            { "$ref": "#/$defs/offersParticipant" }
+          ],
+          "minItems": 2,
+          "maxItems": 2
+        },
+        "duplicates": { "const": [] },
+        "enteredCount": { "const": 2 },
+        "maxInFlight": { "const": 2 },
+        "release": { "const": "all-entered" },
+        "outcome": { "const": "proven" },
+        "arrivalOrder": {
+          "type": "array",
+          "items": { "enum": ["read_devices", "read_offers"] },
+          "minItems": 2,
+          "maxItems": 2,
+          "uniqueItems": true
+        },
+        "ledgerRange": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["firstSequence", "lastSequence", "adjacent"],
+          "properties": {
+            "firstSequence": { "type": "integer", "minimum": 1 },
+            "lastSequence": { "type": "integer", "minimum": 2 },
+            "adjacent": { "const": true }
+          }
+        },
+        "records": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/readRecord" },
+          "minItems": 2,
+          "maxItems": 2
+        }
+      }
+    }
+  }
+}

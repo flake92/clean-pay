@@ -33,6 +33,9 @@ describe("guided account setup redirects", () => {
     expect(registrationEmailVerificationPath(paymentPath)).toBe(
       "/register/verify-email?redirect_to=%2Fpayment%3Fplan%3Dpro%26duration%3D30%26gateway%3Dcard",
     );
+    expect(registrationEmailVerificationPath(paymentPath, { deliveryFailed: true })).toBe(
+      "/register/verify-email?delivery=failed&redirect_to=%2Fpayment%3Fplan%3Dpro%26duration%3D30%26gateway%3Dcard",
+    );
     expect(accountSetupCompletePath(paymentPath)).toBe(
       "/payment?plan=pro&duration=30&gateway=card&account_setup=account-ready",
     );
@@ -42,9 +45,13 @@ describe("guided account setup redirects", () => {
     for (const unsafe of [
       "https://evil.example/payment",
       "//evil.example/payment",
+      "/missing",
       "/api",
       "/api/internal/private-operation",
+      "/auth",
       "/auth/",
+      "/Cabinet",
+      "/cabinet/",
       "/link-account?redirect_to=/payment",
       "/link-account/",
       "/verify-email",
@@ -53,6 +60,21 @@ describe("guided account setup redirects", () => {
       "/passkey/setup/",
     ]) {
       expect(safeAccountSetupDestination(unsafe)).toBe("/cabinet");
+    }
+  });
+
+  it("keeps legitimate user-page destinations including query and hash", () => {
+    for (const destination of [
+      "/cabinet?tab=devices#active",
+      "/extend?duration=30&gateway=card",
+      paymentPath,
+      "/profile",
+      "/referral",
+      "/support#contacts",
+      "/tariffs?campaign=summer",
+      "/invite/Friend42?source=email",
+    ]) {
+      expect(safeAccountSetupDestination(destination)).toBe(destination);
     }
   });
 
