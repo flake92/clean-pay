@@ -33,7 +33,7 @@ import {
   assertLinkedEmailFailureProof,
 } from "../../../tests/browser/journeys/linked-email-failure-proof-contract.mjs";
 
-const baselineRevision = "f5cb6f543d85256e7733a1ade6a4f451d86cf378";
+const baselineRevision = "d701707befd76b91a31f4b1a2dc134733e9061aa";
 const candidateRevision = "b0cbdddbbbbc537b9f15bcfdbf4a0fa86d3c65b4";
 const captureId = "0123456789abcdef";
 const externalTemporaryRoot = path.join(tmpdir(), "clean-pay-external-ci-temp");
@@ -135,7 +135,7 @@ function validPhaseResult(phase: typeof phaseNames[number]) {
   if (phase === "preparation") {
     return {
       baselineArchiveSha256:
-        "6ccdccdd162ede951850759392a72376792988080307b4e29ae0cffef2397a03",
+        "d0556ecb62bf1bb93c6db8dd355fe84b18396689edbb176201afc63dfa5f4521",
       baselineReceiptSha256: digest,
       status: "immutable-baseline-owned",
     };
@@ -553,7 +553,7 @@ describe("ephemeral production-image live overlap runner", () => {
     expect(liveProof).toBeGreaterThan(containerdStore);
   });
 
-  it("keeps user behavior blocking while exact A/B overlap is scheduled or explicitly requested", () => {
+  it("keeps user behavior blocking while exact A/B overlap is explicitly requested", () => {
     const workflowTriggers = workflow.slice(0, workflow.indexOf("permissions:"));
     const validate = workflow.slice(
       workflow.indexOf("  validate:"),
@@ -564,8 +564,8 @@ describe("ephemeral production-image live overlap runner", () => {
       workflow.indexOf("  remnashop-migration-rehearsal:"),
     );
 
-    expect(workflowTriggers).toContain("schedule:");
-    expect(workflowTriggers).toContain('cron: "17 1 * * *"');
+    expect(workflowTriggers).not.toContain("schedule:");
+    expect(workflowTriggers).toContain("workflow_dispatch:");
     expect(validate).toContain("npm run test:coverage");
     expect(validate).toContain("npm run test:coverage:frontend");
     expect(validate).toContain("npm run build");

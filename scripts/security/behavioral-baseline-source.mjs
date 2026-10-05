@@ -17,12 +17,12 @@ import { pathToFileURL } from "node:url";
 
 export const BEHAVIORAL_BASELINE_SOURCE = Object.freeze({
   archiveBytes: 7_587_840,
-  archiveSha256: "6ccdccdd162ede951850759392a72376792988080307b4e29ae0cffef2397a03",
-  commit: "f5cb6f543d85256e7733a1ade6a4f451d86cf378",
-  extractedAggregateSha256: "1745a78bfd75561381380888690c5ad59ef308f6911731bd23e05e499d6e43d8",
+  archiveSha256: "d0556ecb62bf1bb93c6db8dd355fe84b18396689edbb176201afc63dfa5f4521",
+  commit: "d701707befd76b91a31f4b1a2dc134733e9061aa",
+  extractedAggregateSha256: "12a8e82cb1b8794dccdbeb779cc3ac4d8838d0c9a28b5feffed506a621227654",
   extractedFileCount: 657,
-  extractedTotalBytes: 6_993_136,
-  tree: "6647fc51c61018ba46aae95da21e534434028fbe",
+  extractedTotalBytes: 6_993_155,
+  tree: "39da81a1524acf808a9d35f626b1507472ee247b",
 });
 
 const execFileAsync = promisify(execFile);
