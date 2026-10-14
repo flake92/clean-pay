@@ -37,7 +37,13 @@ export async function authenticateTelegramWebApp(
     await gateway.rateLimit(verifiedIdentity.telegramId);
 
     const reconciled = await gateway.reconcileIdentity(providerSession, verifiedIdentity);
-    if (!reconciled.upstreamSession) throw new TelegramWebAppWorkflowError("INTERNAL_ERROR");
+    // A recovery login (the Telegram account now resolves to another upstream
+    // owner, proven by the verified e-mail) carries no upstream tokens. As in
+    // the OIDC callback, the local session is created first and recoverSession
+    // attaches the proven owner's tokens. A regular login must carry them.
+    if (!reconciled.requiresRecovery && !reconciled.upstreamSession) {
+      throw new TelegramWebAppWorkflowError("INTERNAL_ERROR");
+    }
     const session = await gateway.createSession({
       userId: reconciled.userId,
       upstreamSession: reconciled.upstreamSession,
