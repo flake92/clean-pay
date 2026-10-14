@@ -185,14 +185,14 @@ describe("Telegram WebApp login lifecycle", () => {
     expect(fixture.authenticate).not.toHaveBeenCalled();
     expect(fixture.markSession).not.toHaveBeenCalled();
     expect(fixture.replaceLocation).toHaveBeenCalledWith(
-      "https://pay.example/auth/telegram/start?redirect_to=%2Fpayment%3Fplan%3Dpro%26duration%3D30%23checkout",
+      "https://pay.example/login?redirect_to=%2Fpayment%3Fplan%3Dpro%26duration%3D30%23checkout",
     );
     expect(events).toEqual([
       "load-script",
       "get-webapp",
       "ready",
       "expand",
-      "replace:https://pay.example/auth/telegram/start?redirect_to=%2Fpayment%3Fplan%3Dpro%26duration%3D30%23checkout",
+      "replace:https://pay.example/login?redirect_to=%2Fpayment%3Fplan%3Dpro%26duration%3D30%23checkout",
     ]);
   });
 
@@ -296,7 +296,7 @@ describe("Telegram WebApp login architecture", () => {
     expect(facade).not.toMatch(/^export (?:type|interface) /m);
     expect(facade).toContain("redirectTo?: string");
     expect(normalizedTelegramLoginJsxHash()).toBe(
-      "96D462CB8F3126B0D12048739F0CFE157E435CCB23E367CB00D796375A673213",
+      "C41A640CB2BD6C789BF5EE2C693305A24D0E1737835707477D556C70272FCBD2",
     );
   });
 

@@ -4,7 +4,10 @@ import { LinkButton } from "@/frontend/components/prime/link-button";
 import {
   useTelegramWebAppLoginController,
 } from "@/frontend/hooks/use-telegram-webapp-login-controller";
-import { telegramWebAppLoginProgressMessage } from "@/frontend/lib/telegram-webapp-login-transitions";
+import {
+  telegramWebAppLoginProgressMessage,
+  telegramWebAppRetryPath,
+} from "@/frontend/lib/telegram-webapp-login-transitions";
 import { Message } from "@/frontend/components/sakai/form-foundation";
 import { ProgressSpinner } from "primereact/progressspinner";
 
@@ -19,7 +22,9 @@ export function TelegramWebAppLogin({ redirectTo = "/cabinet" }: { redirectTo?: 
         <>
           <Message severity="error" text={error} />
           <div className="flex flex-wrap justify-content-center gap-2">
-            <LinkButton href={`/auth/telegram/start?redirect_to=${encodeURIComponent(redirectTo)}`} label="Повторить вход через Telegram" />
+            {/* external: a full page load re-runs the Mini App login; a client-side
+                navigation to the same page would keep the failed state. */}
+            <LinkButton href={telegramWebAppRetryPath(redirectTo)} label="Повторить вход через Telegram" external />
             <LinkButton href={`/login?redirect_to=${encodeURIComponent(redirectTo)}`} label="Открыть обычный вход" outlined />
           </div>
         </>
