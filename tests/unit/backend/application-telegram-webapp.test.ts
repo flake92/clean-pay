@@ -96,18 +96,31 @@ describe("authenticateTelegramWebApp", () => {
   });
 
   it("recovers a newly created session when reconciliation requests it", async () => {
+    // Reconciliation returns no upstream tokens when recovery is required.
+    const target = gateway({
+      reconcileIdentity: vi.fn(async () => ({ userId: "user-2", requiresRecovery: true })),
+      createSession: vi.fn(async () => ({ id: "session-2" })),
+    });
+
+    await expect(authenticateTelegramWebApp(target, "signed-data")).resolves.toEqual({ ok: true });
+    expect(target.createSession).toHaveBeenCalledWith({ userId: "user-2", upstreamSession: undefined });
+    expect(target.recoverSession).toHaveBeenCalledWith("session-2", "user-2");
+  });
+
+  it("keeps provided upstream tokens for a recovery login", async () => {
     const target = gateway({
       reconcileIdentity: vi.fn(async () => ({ userId: "user-2", upstreamSession, requiresRecovery: true })),
       createSession: vi.fn(async () => ({ id: "session-2" })),
     });
 
     await expect(authenticateTelegramWebApp(target, "signed-data")).resolves.toEqual({ ok: true });
+    expect(target.createSession).toHaveBeenCalledWith({ userId: "user-2", upstreamSession });
     expect(target.recoverSession).toHaveBeenCalledWith("session-2", "user-2");
   });
 
   it("revokes only the newly created session when recovery fails", async () => {
     const target = gateway({
-      reconcileIdentity: vi.fn(async () => ({ userId: "user-2", upstreamSession, requiresRecovery: true })),
+      reconcileIdentity: vi.fn(async () => ({ userId: "user-2", requiresRecovery: true })),
       createSession: vi.fn(async () => ({ id: "session-2" })),
       recoverSession: vi.fn(async () => { throw new Error("recovery unavailable"); }),
     });

@@ -18,7 +18,9 @@ export interface TelegramWebAppGateway {
     upstreamSession?: UpstreamSession;
     requiresRecovery: boolean;
   }>;
-  createSession(input: { userId: string; upstreamSession: UpstreamSession }): Promise<{ id: string } | null>;
+  // upstreamSession is absent for a recovery login: the session is created
+  // without provider tokens and recoverSession attaches the proven owner's.
+  createSession(input: { userId: string; upstreamSession?: UpstreamSession }): Promise<{ id: string } | null>;
   recoverSession(sessionId: string, userId: string): Promise<void>;
   revokeSession(sessionId: string, userId: string): Promise<void>;
   clearSessionCookies(): Promise<void>;

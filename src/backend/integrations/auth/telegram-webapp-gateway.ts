@@ -15,7 +15,10 @@ import {
   assertTargetRateLimit,
   withAuthConcurrency,
 } from "@/backend/limits/rate-limit";
-import { createWebSessionForRemnashopUser } from "@/backend/integrations/sessions/web-session-service";
+import {
+  createWebSession,
+  createWebSessionForRemnashopUser,
+} from "@/backend/integrations/sessions/web-session-service";
 import {
   clearWebSessionCookies,
   revokeWebSessionById,
@@ -78,6 +81,10 @@ export function createProductionTelegramWebAppGateway(
   },
 
   async createSession({ userId, upstreamSession }) {
+    if (!upstreamSession) {
+      // Recovery login: provider tokens are attached by recoverSession.
+      return createWebSession(userId, { authMethod: WebSessionAuthMethod.TELEGRAM });
+    }
     return createWebSessionForRemnashopUser({
       userId,
       authMethod: WebSessionAuthMethod.TELEGRAM,
