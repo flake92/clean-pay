@@ -18,6 +18,7 @@ import {
   telegramWebAppFallbackUrl,
   telegramWebAppLoginErrorMessage,
   telegramWebAppLoginProgressMessage,
+  telegramWebAppRetryPath,
 } from "@/frontend/lib/telegram-webapp-login-transitions";
 import { hasTurnstileSiteKey } from "@/frontend/lib/turnstile-transitions";
 
@@ -59,15 +60,19 @@ describe("browser integration transitions", () => {
       "Входим через Telegram...",
     );
     expect(telegramWebAppLoginProgressMessage(true)).toBe(
-      "Открываем вход Telegram...",
+      "Открываем страницу входа...",
     );
+    // Not /auth/telegram/start: it requires a Turnstile token only the login page has.
     expect(
       telegramWebAppFallbackUrl(
         "https://pay.example.com",
         "/payment?plan=pro&duration=30",
       ),
     ).toBe(
-      "https://pay.example.com/auth/telegram/start?redirect_to=%2Fpayment%3Fplan%3Dpro%26duration%3D30",
+      "https://pay.example.com/login?redirect_to=%2Fpayment%3Fplan%3Dpro%26duration%3D30",
+    );
+    expect(telegramWebAppRetryPath("/payment?plan=pro&duration=30")).toBe(
+      "/auth/telegram/webapp?redirect_to=%2Fpayment%3Fplan%3Dpro%26duration%3D30",
     );
   });
 
