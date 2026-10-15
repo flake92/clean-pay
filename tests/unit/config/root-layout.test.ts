@@ -21,6 +21,7 @@ const allowedRootFiles = [
   "eslint.config.mjs",
   "LICENSE",
   "Makefile",
+  "menu.sh",
   "next.config.ts",
   "package-lock.json",
   "package.json",
