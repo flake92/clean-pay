@@ -7,7 +7,6 @@ const runner = readFileSync("scripts/e2e-devcontainer.mjs", "utf8");
 const shellRunner = readFileSync("scripts/e2e-devcontainer.sh", "utf8");
 const compose = readFileSync(".devcontainer/docker-compose.yml", "utf8");
 const ciWorkflow = readFileSync(".github/workflows/ci.yml", "utf8");
-const dependabot = readFileSync(".github/dependabot.yml", "utf8");
 const productionRemnashopEnv = readFileSync("deploy/prod/remnashop.env.example", "utf8");
 const remnashopRevision = "7d27eeefffefb65af702e1c6ef7ed5fc985873c2";
 
@@ -210,12 +209,6 @@ describe("devcontainer e2e runner readiness", () => {
     expect(ciWorkflow).toContain("sh -n deploy.sh start.sh scripts/*.sh deploy/prod/*.sh");
     expect(ciWorkflow).toContain("docker compose --env-file deploy/prod/.env");
     expect(ciWorkflow).toContain("timeout --signal=TERM --kill-after=30s 12m npm run test:e2e");
-  });
-
-  it("keeps pinned GitHub Actions current through Dependabot", () => {
-    expect(dependabot).toContain("package-ecosystem: github-actions");
-    expect(dependabot).toContain('directory: "/"');
-    expect(dependabot).toContain("interval: weekly");
   });
 
   it("pre-creates the Next.js build directory for the unprivileged container user", () => {

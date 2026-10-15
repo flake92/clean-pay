@@ -90,7 +90,7 @@ describe("verify-email controller characterization", () => {
       .toHaveProperty("type", "email");
   });
 
-  it("keeps EMAIL_REQUIRED silent outside guided recovery", async () => {
+  it("explains EMAIL_REQUIRED without leaking provider detail outside guided recovery", async () => {
     mocks.requestEmailVerificationCodeAction.mockResolvedValueOnce({
       ok: false,
       code: "EMAIL_REQUIRED",
@@ -112,7 +112,9 @@ describe("verify-email controller characterization", () => {
         email: "owner@example.com",
       });
     });
-    expect(screen.queryByRole("alert")).toBeNull();
+    const alert = await screen.findByRole("alert");
+    expect(alert.textContent).toContain("Привязать аккаунт");
+    expect(alert.textContent).not.toContain("provider detail");
     expect(mocks.replaceWith).not.toHaveBeenCalled();
   });
 

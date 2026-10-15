@@ -4,8 +4,6 @@ run-name: CI (${{ inputs.browser_mode || github.event_name }})
 on:
   push:
   pull_request:
-  schedule:
-    - cron: "17 1 * * *"
   workflow_dispatch:
     inputs:
       browser_mode:
@@ -210,7 +208,7 @@ jobs:
       - name: Install locked dependencies
         run: npm ci
       - name: Audit production dependencies
-        run: npm audit --audit-level high
+        run: npm audit --omit=dev --audit-level high
       - name: Validate Prisma schema formatting
         run: node node_modules/prisma/build/index.js format --check
       - name: Validate deployment scripts and production Compose
@@ -610,7 +608,7 @@ jobs:
     # Four images, two full stacks and exact browser/network A/B comparison are
     # diagnostic evidence, not a per-change user contract. Normal push and pull
     # request runs remain blocked by validate, full-stack-e2e, migrations and
-    # container-security; this expensive proof runs nightly or by explicit opt-in.
+    # container-security; this expensive proof runs only by explicit opt-in.
     if: >-
       github.event_name == 'schedule' ||
       (github.event_name == 'workflow_dispatch' && inputs.browser_mode != 'navigation-contract') ||

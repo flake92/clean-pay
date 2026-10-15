@@ -1,0 +1,12 @@
+# Gitleaks configuration: default rules plus a narrow allowlist.
+title = "clean-pay gitleaks config"
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Synthetic test fixtures and digests of synthetic idempotency keys"
+paths = [
+  '''^tests/''',
+  '''^test/''',
+]
