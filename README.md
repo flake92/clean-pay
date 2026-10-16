@@ -286,11 +286,155 @@ curl -f https://pay.example.com/api/health/readiness
 ./deploy.sh install
 ```
 
-Полный список переменных с комментариями находится в
-[`deploy/prod/.env.example`](deploy/prod/.env.example). Основной
-`deploy/prod/.env` должен оставаться обычным файлом владельца с правами `0600`.
-Сгенерированные `.env.app`, `.env.migration`, `.env.provision` и файлы workers
-не редактируйте вручную.
+Все переменные описаны в разделе [«Переменные окружения»](#переменные-окружения)
+и с примерами значений — в [`deploy/prod/.env.example`](deploy/prod/.env.example).
+Основной `deploy/prod/.env` должен оставаться обычным файлом владельца с правами
+`0600`. Сгенерированные `.env.app`, `.env.migration`, `.env.provision` и файлы
+workers не редактируйте вручную.
+
+## Переменные окружения
+
+Мастер `./deploy.sh setup` заполняет обязательные значения и генерирует
+секреты, поэтому вручную обычно меняют только адреса, интеграции и
+необязательные функции. Формат `deploy/prod/.env` строгий: одна запись
+`ИМЯ=значение` на строку, без подстановок `$VAR`, комментариев в конце строки
+и повторов; значение с символом `$` заключите в одинарные кавычки. Неизвестные
+имена отклоняются валидатором, как и слабые секреты и значения-заглушки
+`change-me`.
+
+После изменения выполните `./deploy.sh restart`. Если изменилось что-то из
+группы «Адреса и бренд», выполните `./deploy.sh build` и `./deploy.sh install`:
+эти значения вшиваются в образ при сборке, и при расхождении с образом
+валидатор остановит запуск с сообщением «rebuild the image».
+
+### Адреса и бренд (вшиваются в образ)
+
+| Переменная | Назначение |
+| --- | --- |
+| `APP_URL` | публичный HTTPS origin кабинета, например `https://pay.example.com` |
+| `NEXT_PUBLIC_APP_URL` | тот же origin, что и `APP_URL` |
+| `NEXT_PUBLIC_APP_ALIAS_ORIGINS` | необязательно: дополнительные HTTPS origins этой же установки через запятую (второй домен). Только с них принимаются формы, вход и оплата помимо основного адреса |
+| `NEXT_PUBLIC_BRAND_NAME` | название в интерфейсе, до 80 символов |
+| `NEXT_PUBLIC_BRAND_LOGO_URL` | путь к логотипу от корня сайта, например `/clean-pay-logo.png` |
+| `TURNSTILE_ENABLED` | Cloudflare Turnstile; в production обязательно `true` |
+| `TURNSTILE_SITE_KEY` | публичный site key Turnstile (не тестовый) |
+
+Если кабинет открывается по двум доменам, укажите основной в `APP_URL` и
+`NEXT_PUBLIC_APP_URL`, а второй — в `NEXT_PUBLIC_APP_ALIAS_ORIGINS`, и пересоберите
+образ. Без этого запросы со второго домена отклоняются защитой от CSRF.
+
+### Развёртывание и образы
+
+| Переменная | Назначение |
+| --- | --- |
+| `COMPOSE_PROJECT_NAME` | имя Compose-проекта, по умолчанию `clean-pay-prod` |
+| `CLEAN_PAY_CONFIG_VERSION` | версия формата конфигурации, сейчас `0.2.0` |
+| `CLEAN_PAY_UPGRADE_SOURCE_VERSION` | служебная: записывается только `prepare-v0.1.1-upgrade` |
+| `CLEAN_PAY_MIN_FREE_DISK_MB` | минимум свободного места перед сборкой, по умолчанию 8192 |
+| `CLEAN_PAY_DEPLOY_SOURCE` | `build` — сборка на сервере, `pull` — готовые образы из реестра |
+| `CLEAN_PAY_IMAGE`, `CLEAN_PAY_MIGRATION_IMAGE` | образы приложения и миграций |
+| `CLEAN_PAY_RELEASE`, `CLEAN_PAY_REVISION` | метки релиза и commit, меню заполняет их само |
+| `CLEAN_PAY_BIND`, `CLEAN_PAY_PORT` | адрес и порт публикации приложения; по умолчанию только loopback-интерфейс, порт `4000` |
+| `CLEAN_PAY_EDGE_NETWORK` | Docker-сеть reverse proxy |
+| `REMNASHOP_DOCKER_NETWORK` | внешняя Docker-сеть Remnashop, по умолчанию `remnawave-network` |
+| `LOG_LEVEL` | `debug`, `info`, `warn` или `error` |
+
+### PostgreSQL и Redis
+
+| Переменная | Назначение |
+| --- | --- |
+| `POSTGRES_DB`, `POSTGRES_USER`, `POSTGRES_PASSWORD` | bootstrap-суперпользователь; доступен только PostgreSQL и provisioner |
+| `DATABASE_URL` | роль приложения |
+| `MIGRATION_DATABASE_URL` | роль миграций |
+| `RETENTION_DATABASE_URL` | роль worker очистки данных |
+| `HOLD_OPERATOR_DATABASE_URL` | роль оператора удержания платёжных данных |
+| `CLEAN_PAY_DATABASE_ADOPT_EXISTING`, `CLEAN_PAY_DATABASE_ADOPTION_BACKUP_CONFIRMED` | однократное принятие существующей базы после проверенной копии; выставляет `authorize-existing-database` |
+| `DATABASE_POOL_MAX`, `DATABASE_CONNECTION_TIMEOUT_MS`, `DATABASE_IDLE_TIMEOUT_MS`, `DATABASE_QUERY_TIMEOUT_MS`, `DATABASE_STATEMENT_TIMEOUT_MS`, `DATABASE_IDLE_TRANSACTION_TIMEOUT_MS`, `DATABASE_LOCK_TIMEOUT_MS` | пул и тайм-ауты приложения |
+| `RETENTION_DATABASE_POOL_MAX`, `RETENTION_DATABASE_CONNECTION_TIMEOUT_MS`, `RETENTION_DATABASE_IDLE_TIMEOUT_MS`, `RETENTION_DATABASE_QUERY_TIMEOUT_MS`, `RETENTION_DATABASE_STATEMENT_TIMEOUT_MS`, `RETENTION_DATABASE_IDLE_TRANSACTION_TIMEOUT_MS`, `RETENTION_DATABASE_LOCK_TIMEOUT_MS` | те же параметры для worker очистки |
+| `REDIS_URL` | Redis для лимитов, блокировок и одноразовых состояний |
+
+Все пять учётных записей БД должны различаться.
+
+### Remnashop и Remnawave
+
+| Переменная | Назначение |
+| --- | --- |
+| `REMNASHOP_API_BASE_URL` | публичный API Remnashop, `…/api/v1/public` |
+| `REMNASHOP_ADMIN_API_BASE_URL` | необязательно; по умолчанию выводится из публичного адреса (`…/api/v1/admin`) |
+| `REMNASHOP_API_KEY` | ключ приложения в Remnashop |
+| `REMNASHOP_AUTH_SERVICE_KEY` | ключ auth-сервиса; то же значение задаётся в `APP_AUTH_SERVICE_KEY` Remnashop |
+| `REMNASHOP_API_CONTAINER`, `REMNASHOP_WORKER_CONTAINER`, `REMNASHOP_SCHEDULER_CONTAINER`, `REMNASHOP_POSTGRES_CONTAINER` | имена контейнеров Remnashop для проверок при установке |
+| `REMNASHOP_MINIMUM_ALEMBIC_REVISION` | минимальная схема Remnashop, не ниже `0059` |
+| `REMNASHOP_ENV_FILE`, `REMNASHOP_ENV_EXPECTED_UID`, `REMNASHOP_ENV_EXPECTED_GID` | путь к `.env` Remnashop и ожидаемый владелец |
+| `REMNAWAVE_API_BASE_URL`, `REMNAWAVE_TOKEN` | API панели Remnawave |
+| `REMNAWAVE_SUBSCRIPTION_ORIGINS` | точные HTTPS origins ссылок подписки через запятую |
+
+### Платежи
+
+| Переменная | Назначение |
+| --- | --- |
+| `PAYMENT_REDIRECT_ORIGINS` | точные HTTPS origins платёжных шлюзов, на которые разрешён переход |
+| `PAYMENT_RECONCILIATION_ENABLED` | фоновое восстановление платежей с неизвестным исходом |
+| `PAYMENT_RECONCILIATION_SECRET` | секрет внутреннего эндпоинта восстановления, от 32 символов |
+| `PAYMENT_RECONCILIATION_BATCH_SIZE`, `PAYMENT_RECONCILIATION_INTERVAL_SECONDS` | размер пачки и период |
+| `PAYMENT_RECONCILIATION_INTERNAL_URL` | внутренний адрес эндпоинта восстановления |
+
+### Хранение данных
+
+| Переменная | Назначение |
+| --- | --- |
+| `AUTH_STATE_RETENTION_DAYS`, `SESSION_RETENTION_DAYS`, `RATE_LIMIT_RETENTION_DAYS` | срок хранения служебных записей входа, сессий и лимитов |
+| `AUDIT_INFO_RETENTION_DAYS`, `AUDIT_SECURITY_RETENTION_DAYS` | журнал аудита: обычные и security-события |
+| `PAYMENT_DATA_RETENTION_ENABLED` | очистка чувствительных платёжных данных |
+| `PAYMENT_SENSITIVE_RETENTION_DAYS`, `PAYMENT_OPERATION_SNAPSHOT_RETENTION_DAYS`, `PAYMENT_HOLD_DISPOSED_RETENTION_DAYS` | сроки для ссылок и снимков провайдера, снимков операций и снятых удержаний |
+| `DATA_RETENTION_INTERVAL_SECONDS` | период запуска очистки |
+
+Подробнее: [`docs/payment-data-retention.md`](docs/payment-data-retention.md).
+
+### Безопасность и сессии
+
+| Переменная | Назначение |
+| --- | --- |
+| `WEB_JWT_SECRET` | подпись access-токенов |
+| `WEB_REFRESH_KEY_ID`, `WEB_REFRESH_SECRET` | текущий ключ шифрования refresh-данных |
+| `WEB_REFRESH_PREVIOUS_KEYS` | необязательно: прежние ключи на время ротации, JSON `{"id":"secret"}` |
+| `AUDIT_IP_HASH_SECRET` | соль хеша IP в журнале аудита |
+| `TRUSTED_PROXY_HOPS` | число доверенных прокси перед приложением (`1` для Caddy); по нему определяется IP клиента для аудита и лимитов |
+| `RATE_LIMIT_IDENTITY_SECRET` | ключ хеширования идентификаторов в лимитах |
+| `AUTH_RATE_LIMIT_CAPACITY` | общий лимит анонимных попыток входа, регистрации и сброса пароля за 15 минут; дополнительно у каждого IP клиента свой лимит — 100 |
+| `AUTH_CONCURRENCY_LIMIT` | число одновременных обращений к Remnashop и Turnstile при входе |
+| `READINESS_INTERNAL_SECRET` | секрет внутренних readiness и метрик |
+| `COOKIE_SECURE`, `COOKIE_SAMESITE` | атрибуты cookie; в production `COOKIE_SECURE=true` |
+| `TURNSTILE_SECRET_KEY`, `TURNSTILE_VERIFY_URL` | серверный ключ Turnstile и адрес проверки (официальный) |
+
+Обновление статуса оплаты обращается к Remnashop не чаще 120 раз за 5 минут
+на пользователя; сверх этого страница показывает последний сохранённый статус.
+
+### Telegram
+
+| Переменная | Назначение |
+| --- | --- |
+| `TELEGRAM_OIDC_CLIENT_ID`, `TELEGRAM_OIDC_CLIENT_SECRET` | OIDC-клиент Telegram; ID совпадает с ID бота |
+| `TELEGRAM_BOT_TOKEN` | токен бота |
+| `TELEGRAM_OIDC_ISSUER`, `TELEGRAM_OIDC_AUTHORIZATION_ENDPOINT`, `TELEGRAM_OIDC_TOKEN_ENDPOINT`, `TELEGRAM_OIDC_JWKS_URI` | необязательно; в production допускаются только официальные адреса Telegram, они же по умолчанию |
+
+### Поддержка
+
+| Переменная | Назначение |
+| --- | --- |
+| `SUPPORT_ENABLED` | раздел поддержки в кабинете |
+| `SUPPORT_EMAIL`, `SUPPORT_TELEGRAM_USERNAME`, `SUPPORT_FAQ_URL` | контакты и ссылка на FAQ |
+| `CHATWOOT_BASE_URL`, `CHATWOOT_WEBSITE_TOKEN`, `CHATWOOT_HMAC_TOKEN` | чат Chatwoot, задаются все три вместе (см. ниже) |
+
+### Дополнительные проверки готовности
+
+| Переменная | Назначение |
+| --- | --- |
+| `CLEAN_PAY_READINESS_REMNAWAVE_URL` | необязательная проверка Remnawave; origin должен совпадать с `REMNAWAVE_API_BASE_URL` |
+| `CLEAN_PAY_READINESS_MAILPIT_URL` | проверка Mailpit для тестовых стендов |
+
+Отдельно от `deploy/prod/.env` меню хранит свои параметры в
+`deploy/prod/menu.env` (см. [«Настройки меню»](#настройки-меню)).
 
 ## Обновление
 
