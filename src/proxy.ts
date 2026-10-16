@@ -167,6 +167,7 @@ async function browserMutationGuard(request: NextRequest) {
     pathname: request.nextUrl.pathname,
     headers: request.headers,
     trustedAppUrl: process.env.NEXT_PUBLIC_APP_URL,
+    trustedAliasOrigins: process.env.NEXT_PUBLIC_APP_ALIAS_ORIGINS,
     hasAccessCookie: request.cookies.has(accessCookieName),
     hasRefreshCookie: request.cookies.has(refreshCookieName),
     cloneBody: () => request.clone().body,

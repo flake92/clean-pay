@@ -61,6 +61,7 @@ const FORBIDDEN_COMPOSE_CONTROL_NAMES = new Set([
 ]);
 
 const FORBIDDEN_ENV_FILE_METADATA_NAMES = new Set([
+  "CLEAN_PAY_BAKED_APP_ALIAS_ORIGINS",
   "CLEAN_PAY_BAKED_BRAND_LOGO_URL",
   "CLEAN_PAY_BAKED_BRAND_NAME",
   "CLEAN_PAY_BAKED_PUBLIC_APP_URL",
@@ -111,6 +112,7 @@ export const PRODUCTION_ENVIRONMENT_FILE_NAMES = Object.freeze([
   "HOLD_OPERATOR_DATABASE_URL",
   "LOG_LEVEL",
   "MIGRATION_DATABASE_URL",
+  "NEXT_PUBLIC_APP_ALIAS_ORIGINS",
   "NEXT_PUBLIC_APP_URL",
   "NEXT_PUBLIC_BRAND_LOGO_URL",
   "NEXT_PUBLIC_BRAND_NAME",
@@ -203,6 +205,7 @@ export const COMPOSE_INTERPOLATION_ENVIRONMENT_NAMES = Object.freeze([
   "COMPOSE_PROFILES",
   "COMPOSE_PROJECT_NAME",
   "LOG_LEVEL",
+  "NEXT_PUBLIC_APP_ALIAS_ORIGINS",
   "NEXT_PUBLIC_APP_URL",
   "NEXT_PUBLIC_BRAND_LOGO_URL",
   "NEXT_PUBLIC_BRAND_NAME",
@@ -298,6 +301,11 @@ export function validateProductionPublicBuildConfiguration(environment) {
     "NEXT_PUBLIC_APP_URL",
     required("NEXT_PUBLIC_APP_URL"),
   ).origin;
+  const appAliasOrigins = publicAppAliasOrigins(
+    "NEXT_PUBLIC_APP_ALIAS_ORIGINS",
+    deploymentEnvironmentValue(environment, "NEXT_PUBLIC_APP_ALIAS_ORIGINS", false),
+    appUrl,
+  );
   const brandName = required("NEXT_PUBLIC_BRAND_NAME");
   const brandLogoUrl = required("NEXT_PUBLIC_BRAND_LOGO_URL");
   const turnstileEnabled = bool(
@@ -328,7 +336,13 @@ export function validateProductionPublicBuildConfiguration(environment) {
     fail("TURNSTILE_SITE_KEY must be a complete Cloudflare site key");
   }
 
-  return Object.freeze({ appUrl, brandName, brandLogoUrl, turnstileSiteKey });
+  return Object.freeze({
+    appUrl,
+    appAliasOrigins,
+    brandName,
+    brandLogoUrl,
+    turnstileSiteKey,
+  });
 }
 
 export function validateDeploymentImageReferences(environment) {
@@ -594,6 +608,28 @@ export function validateProductionEnvironment(environment) {
   ) {
     fail(
       "CLEAN_PAY_BAKED_PUBLIC_APP_URL must match NEXT_PUBLIC_APP_URL; rebuild the image",
+    );
+  }
+
+  const appAliasOrigins = publicAppAliasOrigins(
+    "NEXT_PUBLIC_APP_ALIAS_ORIGINS",
+    optional("NEXT_PUBLIC_APP_ALIAS_ORIGINS"),
+    publicAppUrl.origin,
+  );
+
+  // Baked metadata is present only inside an image. Images built before alias
+  // support carry no baked aliases, so they match only an empty list.
+  const bakedAppAliasOrigins = bakedPublicAppUrl
+    ? publicAppAliasOrigins(
+        "CLEAN_PAY_BAKED_APP_ALIAS_ORIGINS",
+        optional("CLEAN_PAY_BAKED_APP_ALIAS_ORIGINS"),
+        publicAppUrl.origin,
+      )
+    : appAliasOrigins;
+
+  if (appAliasOrigins.join(",") !== bakedAppAliasOrigins.join(",")) {
+    fail(
+      "CLEAN_PAY_BAKED_APP_ALIAS_ORIGINS must match NEXT_PUBLIC_APP_ALIAS_ORIGINS; rebuild the image",
     );
   }
 
@@ -1467,6 +1503,21 @@ function publicHttpsOriginList(name, value) {
   }
 
   return origins;
+}
+
+// Extra public HTTPS origins of the same installation, canonical and sorted so
+// the runtime value can be compared with the one baked into the image.
+function publicAppAliasOrigins(name, value, primaryOrigin) {
+  if (value === null || value === undefined || value === "") {
+    return Object.freeze([]);
+  }
+
+  const origins = publicHttpsOriginList(name, value);
+  if (origins.includes(primaryOrigin)) {
+    fail(`${name} must not repeat NEXT_PUBLIC_APP_URL`);
+  }
+
+  return Object.freeze([...origins].sort());
 }
 
 function publicHttpsUrl(name, value) {

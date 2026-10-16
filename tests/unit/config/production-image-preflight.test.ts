@@ -116,15 +116,22 @@ describe("production public build validation", () => {
     expect(validateProductionPublicBuildConfiguration(validPublicBuild))
       .toMatchObject({
         appUrl: "https://pay.clean-pay.dev",
+        appAliasOrigins: [],
         brandName: "Clean Pay",
         brandLogoUrl: "/clean-pay-logo.png",
       });
+    expect(validateProductionPublicBuildConfiguration({
+      ...validPublicBuild,
+      NEXT_PUBLIC_APP_ALIAS_ORIGINS: "https://pay-b.clean-pay.dev,https://pay-a.clean-pay.dev",
+    }).appAliasOrigins).toEqual(["https://pay-a.clean-pay.dev", "https://pay-b.clean-pay.dev"]);
 
     for (const [override, expected] of [
       [{ NEXT_PUBLIC_APP_URL: "http://pay.clean-pay.dev" }, "valid https"],
       [{ NEXT_PUBLIC_BRAND_LOGO_URL: "/brand/%2e%2e/private.png" }, "root-relative"],
       [{ TURNSTILE_ENABLED: "false" }, "must be true"],
       [{ TURNSTILE_SITE_KEY: "1x00000000000000000000AA" }, "non-test"],
+      [{ NEXT_PUBLIC_APP_ALIAS_ORIGINS: "http://pay-a.clean-pay.dev" }, "NEXT_PUBLIC_APP_ALIAS_ORIGINS[1]"],
+      [{ NEXT_PUBLIC_APP_ALIAS_ORIGINS: "https://pay.clean-pay.dev" }, "must not repeat NEXT_PUBLIC_APP_URL"],
     ] as const) {
       expect(() => validateProductionPublicBuildConfiguration({
         ...validPublicBuild,

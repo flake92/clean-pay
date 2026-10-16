@@ -16,17 +16,6 @@ export type BrowserMutationPolicyResult =
       status: 413;
     };
 
-// These two HTTPS origins are public entry points for the same Clean Pay
-// deployment. Keep this trust relationship explicit: the Next.js standalone
-// adapter exposes an internal container origin to middleware, while Host and
-// forwarding headers are ingress metadata and must not expand the CSRF trust
-// boundary. Installations with any other configured origin remain exact-match
-// only.
-const cleanPayPublicOrigins = new Set([
-  "https://cleanvpn.edge-connect.uk",
-  "https://oplata.clear-vpn.org",
-]);
-
 function parseOrigin(value: string | null | undefined) {
   if (!value || value === "null") {
     return null;
@@ -45,24 +34,37 @@ function parseOrigin(value: string | null | undefined) {
   }
 }
 
+// Extra public origins of the same installation (for example a second domain
+// in front of the same deployment). The Next.js standalone adapter exposes an
+// internal container origin to middleware, while Host and forwarding headers
+// are ingress metadata and must not expand the CSRF trust boundary, so every
+// alias has to be listed explicitly. Callers pass NEXT_PUBLIC_APP_ALIAS_ORIGINS,
+// which is inlined at build time and keeps this gate identical to Next's own
+// Server Action origin check (next.config.ts derives allowedOrigins from it).
+export function parseAliasOrigins(value: string | null | undefined) {
+  return (value ?? "")
+    .split(",")
+    .map((entry) => parseOrigin(entry.trim()))
+    .filter((origin): origin is string => origin !== null);
+}
+
 function isTrustedRequestOrigin(
   requestOrigin: string,
   configuredOrigin: string,
+  aliasOrigins: readonly string[],
 ) {
-  if (requestOrigin === configuredOrigin) {
-    return true;
-  }
-
-  return cleanPayPublicOrigins.has(configuredOrigin)
-    && cleanPayPublicOrigins.has(requestOrigin);
+  return requestOrigin === configuredOrigin
+    || aliasOrigins.includes(requestOrigin);
 }
 
 export function validateRequestSource({
   headers,
   trustedAppUrl,
+  trustedAliasOrigins,
 }: {
   headers: Headers;
   trustedAppUrl: string | undefined;
+  trustedAliasOrigins?: string | undefined;
 }): RequestSourceValidationResult {
   const trustedOrigin = parseOrigin(trustedAppUrl);
   const originHeader = headers.get("origin");
@@ -73,7 +75,11 @@ export function validateRequestSource({
   if (
     !trustedOrigin
     || !requestOrigin
-    || !isTrustedRequestOrigin(requestOrigin, trustedOrigin)
+    || !isTrustedRequestOrigin(
+      requestOrigin,
+      trustedOrigin,
+      parseAliasOrigins(trustedAliasOrigins),
+    )
   ) {
     return { ok: false, reason: "untrusted_origin", status: 403 };
   }
@@ -146,6 +152,7 @@ export async function browserMutationPolicy({
   pathname,
   headers,
   trustedAppUrl,
+  trustedAliasOrigins,
   hasAccessCookie,
   hasRefreshCookie,
   cloneBody,
@@ -154,12 +161,13 @@ export async function browserMutationPolicy({
   pathname: string;
   headers: Headers;
   trustedAppUrl: string | undefined;
+  trustedAliasOrigins?: string | undefined;
   hasAccessCookie: boolean;
   hasRefreshCookie: boolean;
   cloneBody: () => ReadableStream<Uint8Array> | null;
 }): Promise<BrowserMutationPolicyResult> {
   if (isServerActionRequest(method, headers)) {
-    const source = validateRequestSource({ headers, trustedAppUrl });
+    const source = validateRequestSource({ headers, trustedAppUrl, trustedAliasOrigins });
     if (!source.ok) return source;
     if (await serverActionBodyExceedsLimit({ headers, cloneBody })) {
       return {
@@ -172,7 +180,7 @@ export async function browserMutationPolicy({
   }
 
   if (pathname === "/auth/telegram/callback" && method === "POST") {
-    return validateRequestSource({ headers, trustedAppUrl });
+    return validateRequestSource({ headers, trustedAppUrl, trustedAliasOrigins });
   }
 
   if (pathname === "/auth/telegram/start") {
@@ -180,7 +188,7 @@ export async function browserMutationPolicy({
       return { ok: true };
     }
 
-    return validateRequestSource({ headers, trustedAppUrl });
+    return validateRequestSource({ headers, trustedAppUrl, trustedAliasOrigins });
   }
 
   return { ok: true };

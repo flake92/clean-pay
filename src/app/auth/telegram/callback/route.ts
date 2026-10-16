@@ -412,6 +412,7 @@ export async function POST(request: Request) {
   const source = validateRequestSource({
     headers: request.headers,
     trustedAppUrl: getEnv().publicAppUrl,
+    trustedAliasOrigins: process.env.NEXT_PUBLIC_APP_ALIAS_ORIGINS,
   });
   if (!source.ok) {
     return NextResponse.json(

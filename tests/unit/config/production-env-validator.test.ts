@@ -212,6 +212,48 @@ function runRuntimeStdinValidator(overrides: EnvOverride = {}) {
 }
 
 describe("production env validator", () => {
+  it("validates public alias origins and binds them to the image that baked them", () => {
+    const primary = validEnv.NEXT_PUBLIC_APP_URL!;
+    const aliases = "https://pay-b.clean-pay.dev,https://pay-a.clean-pay.dev";
+
+    expect(() => validateProductionEnvironment({
+      ...validEnv,
+      NEXT_PUBLIC_APP_ALIAS_ORIGINS: aliases,
+    })).not.toThrow();
+    for (const [value, expected] of [
+      ["http://pay-a.clean-pay.dev", "NEXT_PUBLIC_APP_ALIAS_ORIGINS[1]"],
+      ["https://pay-a.clean-pay.dev/path", "NEXT_PUBLIC_APP_ALIAS_ORIGINS[1]"],
+      ["https://pay-a.clean-pay.dev,", "comma-separated HTTPS origins"],
+      ["https://pay-a.clean-pay.dev,https://pay-a.clean-pay.dev", "duplicate origins"],
+      [primary, "must not repeat NEXT_PUBLIC_APP_URL"],
+    ]) {
+      expect(() => validateProductionEnvironment({
+        ...validEnv,
+        NEXT_PUBLIC_APP_ALIAS_ORIGINS: value,
+      })).toThrow(expected);
+    }
+
+    const image = { ...validEnv, CLEAN_PAY_BAKED_PUBLIC_APP_URL: primary };
+    expect(() => validateProductionEnvironment(image)).not.toThrow();
+    expect(() => validateProductionEnvironment({
+      ...image,
+      NEXT_PUBLIC_APP_ALIAS_ORIGINS: aliases,
+      // Order is not significant; the canonical sets are compared.
+      CLEAN_PAY_BAKED_APP_ALIAS_ORIGINS: "https://pay-a.clean-pay.dev,https://pay-b.clean-pay.dev",
+    })).not.toThrow();
+    for (const drift of [
+      { NEXT_PUBLIC_APP_ALIAS_ORIGINS: aliases },
+      { CLEAN_PAY_BAKED_APP_ALIAS_ORIGINS: aliases },
+      {
+        NEXT_PUBLIC_APP_ALIAS_ORIGINS: aliases,
+        CLEAN_PAY_BAKED_APP_ALIAS_ORIGINS: "https://pay-a.clean-pay.dev",
+      },
+    ]) {
+      expect(() => validateProductionEnvironment({ ...image, ...drift }))
+        .toThrow("CLEAN_PAY_BAKED_APP_ALIAS_ORIGINS must match NEXT_PUBLIC_APP_ALIAS_ORIGINS; rebuild the image");
+    }
+  });
+
   it("keeps the production env example limited to variables used by production code", () => {
     const source = [
       "deploy/prod/docker-compose.yml",

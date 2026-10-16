@@ -5,12 +5,12 @@ const buildId = process.env.CLEAN_PAY_BUILD_ID?.trim()
   || process.env.GITHUB_SHA?.trim()
   || randomUUID();
 
-const configuredPublicHost = (() => {
-  const value = process.env.NEXT_PUBLIC_APP_URL?.trim();
-  if (!value) return undefined;
+function publicHost(value: string | undefined) {
+  const trimmed = value?.trim();
+  if (!trimmed) return undefined;
 
   try {
-    const url = new URL(value);
+    const url = new URL(trimmed);
     if (!["http:", "https:"].includes(url.protocol) || url.username || url.password) {
       return undefined;
     }
@@ -18,12 +18,14 @@ const configuredPublicHost = (() => {
   } catch {
     return undefined;
   }
-})();
+}
 
+// NEXT_PUBLIC_APP_ALIAS_ORIGINS lists extra public origins of this same
+// installation. The proxy's CSRF gate reads the same build-time value, so both
+// origin checks always agree.
 const serverActionAllowedOrigins = [...new Set([
-  configuredPublicHost,
-  "cleanvpn.edge-connect.uk",
-  "oplata.clear-vpn.org",
+  publicHost(process.env.NEXT_PUBLIC_APP_URL),
+  ...(process.env.NEXT_PUBLIC_APP_ALIAS_ORIGINS ?? "").split(",").map(publicHost),
 ].filter((host): host is string => Boolean(host)))];
 
 const nextConfig: NextConfig = {
@@ -36,8 +38,8 @@ const nextConfig: NextConfig = {
       // stable external 413 instead of Next's generic RSC 500 response.
       bodySizeLimit: "64kb",
       // Next performs its own Origin-versus-forwarded-host check after the
-      // application proxy has accepted a mutation. Both public hostnames are
-      // exact aliases of this installation, so keep that second gate aligned
+      // application proxy has accepted a mutation. Configured aliases are exact
+      // public origins of this installation, so keep that second gate aligned
       // without granting a wildcard or trusting forwarding metadata in the
       // application-level policy.
       allowedOrigins: serverActionAllowedOrigins,

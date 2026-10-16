@@ -37,39 +37,55 @@ describe("proxy browser mutation policy", () => {
     })).toEqual({ ok: false, reason: "untrusted_origin", status: 403 });
   });
 
-  it("treats only the two owned Clean Pay origins as one explicit trust group", () => {
-    for (const [trustedAppUrl, source] of [
-      ["https://cleanvpn.edge-connect.uk", "https://oplata.clear-vpn.org"],
-      ["https://oplata.clear-vpn.org", "https://cleanvpn.edge-connect.uk"],
+  it("trusts only the configured public origin and its explicit aliases", () => {
+    const trustedAliasOrigins = "https://pay-alias.example.net, https://pay-third.example.org";
+    for (const source of [
+      "https://pay.example.com",
+      "https://pay-alias.example.net",
+      "https://pay-third.example.org",
     ]) {
       expect(validateRequestSource({
         headers: new Headers({ origin: source }),
-        trustedAppUrl,
+        trustedAppUrl: "https://pay.example.com",
+        trustedAliasOrigins,
       })).toEqual({ ok: true });
       expect(validateRequestSource({
         headers: new Headers({ referer: `${source}/support?from=profile` }),
-        trustedAppUrl,
+        trustedAppUrl: "https://pay.example.com",
+        trustedAliasOrigins,
       })).toEqual({ ok: true });
     }
   });
 
   it.each([
     "https://attacker.example",
-    "https://oplata.clear-vpn.org.attacker.example",
-    "http://oplata.clear-vpn.org",
-    "https://oplata.clear-vpn.org:444",
-    "https://user:password@oplata.clear-vpn.org",
-  ])("rejects a non-member of the Clean Pay origin group: %s", (origin) => {
+    "https://pay-alias.example.net.attacker.example",
+    "http://pay-alias.example.net",
+    "https://pay-alias.example.net:444",
+    "https://user:password@pay-alias.example.net",
+  ])("rejects an origin outside the configured alias list: %s", (origin) => {
     expect(validateRequestSource({
       headers: new Headers({ origin }),
-      trustedAppUrl: "https://cleanvpn.edge-connect.uk",
+      trustedAppUrl: "https://pay.example.com",
+      trustedAliasOrigins: "https://pay-alias.example.net",
     })).toEqual({ ok: false, reason: "untrusted_origin", status: 403 });
   });
 
-  it("does not enable the Clean Pay aliases for an unrelated installation", () => {
+  it("trusts no alias unless the installation configures one", () => {
+    for (const trustedAliasOrigins of [undefined, "", " , ", "not a url"]) {
+      expect(validateRequestSource({
+        headers: new Headers({ origin: "https://pay-alias.example.net" }),
+        trustedAppUrl: "https://pay.example.com",
+        trustedAliasOrigins,
+      })).toEqual({ ok: false, reason: "untrusted_origin", status: 403 });
+    }
+  });
+
+  it("does not let an alias stand in for a missing primary origin", () => {
     expect(validateRequestSource({
-      headers: new Headers({ origin: "https://oplata.clear-vpn.org" }),
-      trustedAppUrl: "https://pay.example.com",
+      headers: new Headers({ origin: "https://pay-alias.example.net" }),
+      trustedAppUrl: undefined,
+      trustedAliasOrigins: "https://pay-alias.example.net",
     })).toEqual({ ok: false, reason: "untrusted_origin", status: 403 });
   });
 
@@ -145,16 +161,17 @@ describe("proxy browser mutation policy", () => {
     expect(oversizedClone).not.toHaveBeenCalled();
   });
 
-  it("applies the Server Action byte limit after accepting the owned public alias", async () => {
+  it("applies the Server Action byte limit after accepting a configured public alias", async () => {
     const exactClone = vi.fn(() => stream(serverActionBodyLimitBytes));
     await expect(browserMutationPolicy({
       method: "POST",
       pathname: "/support",
       headers: new Headers({
         "next-action": "id",
-        origin: "https://oplata.clear-vpn.org",
+        origin: "https://pay-alias.example.net",
       }),
-      trustedAppUrl: "https://cleanvpn.edge-connect.uk",
+      trustedAppUrl: "https://pay.example.com",
+      trustedAliasOrigins: "https://pay-alias.example.net",
       hasAccessCookie: true,
       hasRefreshCookie: true,
       cloneBody: exactClone,
@@ -167,9 +184,10 @@ describe("proxy browser mutation policy", () => {
       pathname: "/support",
       headers: new Headers({
         "next-action": "id",
-        origin: "https://oplata.clear-vpn.org",
+        origin: "https://pay-alias.example.net",
       }),
-      trustedAppUrl: "https://cleanvpn.edge-connect.uk",
+      trustedAppUrl: "https://pay.example.com",
+      trustedAliasOrigins: "https://pay-alias.example.net",
       hasAccessCookie: true,
       hasRefreshCookie: true,
       cloneBody: oversizedClone,

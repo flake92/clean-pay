@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import nextConfig from "../../../next.config";
 import { buildContentSecurityPolicy } from "@/shared/security/content-security-policy";
@@ -10,12 +10,32 @@ describe("application security headers", () => {
     expect(nextConfig.poweredByHeader).toBe(false);
   });
 
-  it("keeps Next's Server Action origin gate aligned with the exact public aliases", () => {
+  it("keeps Next's Server Action origin gate aligned with the configured public origins", () => {
     expect(nextConfig.experimental?.serverActions?.allowedOrigins).toEqual([
       "localhost:8080",
-      "cleanvpn.edge-connect.uk",
-      "oplata.clear-vpn.org",
     ]);
+    expect(readFileSync("next.config.ts", "utf8")).toContain(
+      "process.env.NEXT_PUBLIC_APP_ALIAS_ORIGINS",
+    );
+  });
+
+  it("adds every configured alias host and nothing else to Next's origin gate", async () => {
+    vi.resetModules();
+    vi.stubEnv("NEXT_PUBLIC_APP_URL", "https://pay.example.com");
+    vi.stubEnv(
+      "NEXT_PUBLIC_APP_ALIAS_ORIGINS",
+      "https://pay-alias.example.net, not a url, https://pay.example.com",
+    );
+    try {
+      const { default: configured } = await import("../../../next.config");
+      expect(configured.experimental?.serverActions?.allowedOrigins).toEqual([
+        "pay.example.com",
+        "pay-alias.example.net",
+      ]);
+    } finally {
+      vi.unstubAllEnvs();
+      vi.resetModules();
+    }
   });
 
   it("keeps transport security headers on every response", async () => {

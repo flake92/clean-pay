@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   consumeTelegramPopupToken: vi.fn(),
@@ -135,6 +135,10 @@ vi.mock("@/backend/integrations/payments/payment-user-merge-service", () => ({
 import { GET, POST } from "@/app/auth/telegram/callback/route";
 
 describe("Telegram callback payment-owner fence", () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.publicAppUrl = "https://clean-pay.example.com";
@@ -227,16 +231,16 @@ describe("Telegram callback payment-owner fence", () => {
     }));
   });
 
-  it("accepts the owned public alias for the Telegram popup callback", async () => {
-    mocks.publicAppUrl = "https://cleanvpn.edge-connect.uk";
+  it("accepts a configured public alias for the Telegram popup callback", async () => {
+    vi.stubEnv("NEXT_PUBLIC_APP_ALIAS_ORIGINS", "https://pay-alias.example.net");
 
     const response = await POST(new Request(
-      "https://oplata.clear-vpn.org/auth/telegram/callback",
+      "https://pay-alias.example.net/auth/telegram/callback",
       {
         method: "POST",
         headers: {
           "content-type": "application/json",
-          origin: "https://oplata.clear-vpn.org",
+          origin: "https://pay-alias.example.net",
         },
         body: JSON.stringify({ idToken: "telegram-id-token" }),
       },
@@ -247,10 +251,10 @@ describe("Telegram callback payment-owner fence", () => {
   });
 
   it("rejects an unowned Origin even when the callback URL uses the public alias", async () => {
-    mocks.publicAppUrl = "https://cleanvpn.edge-connect.uk";
+    vi.stubEnv("NEXT_PUBLIC_APP_ALIAS_ORIGINS", "https://pay-alias.example.net");
 
     const response = await POST(new Request(
-      "https://oplata.clear-vpn.org/auth/telegram/callback",
+      "https://pay-alias.example.net/auth/telegram/callback",
       {
         method: "POST",
         headers: {

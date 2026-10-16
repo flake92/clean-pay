@@ -23,10 +23,11 @@ const productionBaseline = "0ede176ad863c7a721a9fbbf43f583e838516d4b";
 const mainLineBaseline = "6bfa135c5a3bf6e8f787d603f15c8b636cb15965";
 
 describe("rollback environment compatibility", () => {
-  it("removes only the three additive settings unknown to the production baseline", () => {
+  it("removes only the additive settings unknown to the production baseline", () => {
     const omitted = [
       "CLEAN_PAY_CONFIG_VERSION",
       "CLEAN_PAY_UPGRADE_SOURCE_VERSION",
+      "NEXT_PUBLIC_APP_ALIAS_ORIGINS",
       "PAYMENT_DATA_RETENTION_ENABLED",
     ];
     expect(PRODUCTION_ROLLBACK_COMPATIBILITY).toEqual({
@@ -40,6 +41,7 @@ describe("rollback environment compatibility", () => {
       "CLEAN_PAY_UPGRADE_SOURCE_VERSION=0.1.1",
       "PAYMENT_DATA_RETENTION_ENABLED=false",
       "NEXT_PUBLIC_APP_URL=https://pay.clean-pay.dev",
+      "NEXT_PUBLIC_APP_ALIAS_ORIGINS=https://pay-alias.clean-pay.dev",
       "",
     ].join("\n");
 

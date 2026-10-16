@@ -45,6 +45,7 @@ function signedAccessToken(
 describe("proxy session refresh navigation", () => {
   const previousSecret = process.env.WEB_JWT_SECRET;
   const previousPublicAppUrl = process.env.NEXT_PUBLIC_APP_URL;
+  const previousAliasOrigins = process.env.NEXT_PUBLIC_APP_ALIAS_ORIGINS;
 
   beforeEach(() => {
     vi.clearAllMocks();
@@ -57,6 +58,8 @@ describe("proxy session refresh navigation", () => {
     else process.env.WEB_JWT_SECRET = previousSecret;
     if (previousPublicAppUrl === undefined) delete process.env.NEXT_PUBLIC_APP_URL;
     else process.env.NEXT_PUBLIC_APP_URL = previousPublicAppUrl;
+    if (previousAliasOrigins === undefined) delete process.env.NEXT_PUBLIC_APP_ALIAS_ORIGINS;
+    else process.env.NEXT_PUBLIC_APP_ALIAS_ORIGINS = previousAliasOrigins;
   });
 
   it.each(["/support", "/tariffs"])(
@@ -340,10 +343,10 @@ describe("proxy session refresh navigation", () => {
   });
 
   it.each([
-    "https://cleanvpn.edge-connect.uk",
-    "https://oplata.clear-vpn.org",
-  ])("accepts a Server Action from the owned public origin %s behind the standalone adapter", async (origin) => {
-    process.env.NEXT_PUBLIC_APP_URL = "https://cleanvpn.edge-connect.uk";
+    "https://pay.example.com",
+    "https://pay-alias.example.net",
+  ])("accepts a Server Action from the configured public origin %s behind the standalone adapter", async (origin) => {
+    process.env.NEXT_PUBLIC_APP_ALIAS_ORIGINS = "https://pay-alias.example.net";
     const response = await proxy(new NextRequest(
       "https://0.0.0.0:4000/support",
       {
@@ -365,7 +368,7 @@ describe("proxy session refresh navigation", () => {
   });
 
   it("does not let forged forwarding metadata expand the public-origin trust group", async () => {
-    process.env.NEXT_PUBLIC_APP_URL = "https://cleanvpn.edge-connect.uk";
+    process.env.NEXT_PUBLIC_APP_ALIAS_ORIGINS = "https://pay-alias.example.net";
     const response = await proxy(new NextRequest(
       "https://0.0.0.0:4000/support",
       {
@@ -374,7 +377,7 @@ describe("proxy session refresh navigation", () => {
           "content-type": "text/plain;charset=UTF-8",
           "next-action": "synthetic-action-id",
           host: "0.0.0.0:4000",
-          "x-forwarded-host": "oplata.clear-vpn.org",
+          "x-forwarded-host": "pay-alias.example.net",
           "x-forwarded-proto": "https",
           origin: "https://attacker.example",
         },

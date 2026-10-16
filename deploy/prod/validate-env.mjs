@@ -12,6 +12,7 @@ import { deployLog } from "./deploy-log.mjs";
 import { readPrivateCredentialFile } from "./credential-file-guard.mjs";
 
 const IMAGE_METADATA_NAMES = Object.freeze([
+  "CLEAN_PAY_BAKED_APP_ALIAS_ORIGINS",
   "CLEAN_PAY_BAKED_PUBLIC_APP_URL",
   "CLEAN_PAY_BAKED_BRAND_NAME",
   "CLEAN_PAY_BAKED_BRAND_LOGO_URL",
