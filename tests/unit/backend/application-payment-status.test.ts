@@ -4,7 +4,10 @@ import {
   loadPaymentStatus,
   loadPaymentStatusSnapshot,
 } from "@/application/payments/load-payment-status";
-import type { PaymentStatusReader } from "@/application/payments/ports/payment-status-reader";
+import {
+  PaymentStatusGatewayError,
+  type PaymentStatusReader,
+} from "@/application/payments/ports/payment-status-reader";
 import type { PaymentMaintenanceRunner } from "@/application/payments/ports/payment-maintenance";
 
 function reconciliation(overrides: Partial<PaymentMaintenanceRunner> = {}): PaymentMaintenanceRunner {
@@ -28,7 +31,7 @@ function reconciliation(overrides: Partial<PaymentMaintenanceRunner> = {}): Paym
 function reader(overrides: Partial<PaymentStatusReader> = {}): PaymentStatusReader {
   return {
     loadActor: vi.fn(async () => ({ id: "user-1", emailVerified: true, telegramId: null })),
-    findOperation: vi.fn(async () => null), authorize: vi.fn(async () => ({ context: {}, upstreamAccountId: "upstream-1" })),
+    findOperation: vi.fn(async () => null), rateLimitSync: vi.fn(async () => undefined), authorize: vi.fn(async () => ({ context: {}, upstreamAccountId: "upstream-1" })),
     assertUpstreamOwner: vi.fn(async () => undefined), loadCapabilities: vi.fn(async () => ({ maxPageSize: 250 })),
     loadExactTransaction: vi.fn(async () => null), persistExactTransaction: vi.fn(async () => undefined),
     loadLegacyTransactions: vi.fn(async () => []), persistLegacyTransactions: vi.fn(async () => undefined),
@@ -39,6 +42,62 @@ function reader(overrides: Partial<PaymentStatusReader> = {}): PaymentStatusRead
 }
 
 describe("payment status application workflow", () => {
+  it("answers from local state without provider calls once the sync budget is spent", async () => {
+    const payment = { payment_id: "local" } as never;
+    const maintenance = reconciliation();
+    const subject = reader({
+      findOperation: vi.fn(async () => ({
+        id: "op-1", status: "OUTCOME_UNKNOWN", manualRequired: false,
+        paymentId: "11111111-1111-4111-8111-111111111111", paymentStatus: "PENDING", payment,
+      })),
+      rateLimitSync: vi.fn(async () => { throw new PaymentStatusGatewayError("RATE_LIMITED"); }),
+      findPayment: vi.fn(async () => payment),
+    });
+
+    await expect(loadPaymentStatus(subject, maintenance, {
+      paymentId: null,
+      operationId: "op-1",
+    })).resolves.toMatchObject({
+      status: "ready",
+      data: { operation: { status: "outcome_unknown" }, payment, subscription: null },
+    });
+    expect(subject.rateLimitSync).toHaveBeenCalledWith("user-1");
+    expect(subject.authorize).not.toHaveBeenCalled();
+    expect(maintenance.claimReconciliation).not.toHaveBeenCalled();
+  });
+
+  it("matches a client payment id against its operation case-insensitively", async () => {
+    const paymentId = "aaaaaaaa-1111-4111-8111-111111111111";
+    const subject = reader({
+      findOperation: vi.fn(async () => ({
+        id: "op-1", status: "OUTCOME_UNKNOWN", manualRequired: false,
+        paymentId, paymentStatus: "PENDING", payment: null,
+      })),
+    });
+
+    await expect(loadPaymentStatusSnapshot(subject, {
+      paymentId: paymentId.toUpperCase(),
+      operationId: "op-1",
+    })).resolves.toMatchObject({ status: "ready" });
+    await expect(loadPaymentStatusSnapshot(subject, {
+      paymentId: "bbbbbbbb-1111-4111-8111-111111111111",
+      operationId: "op-1",
+    })).resolves.toMatchObject({ status: "error" });
+  });
+
+  it("does not spend the sync budget on terminal operations", async () => {
+    const subject = reader({
+      findOperation: vi.fn(async () => ({
+        id: "op-1", status: "FAILED_FINAL", manualRequired: false,
+        paymentId: null, paymentStatus: null, payment: null,
+      })),
+    });
+
+    await expect(loadPaymentStatus(subject, reconciliation(), { paymentId: null, operationId: "op-1" }))
+      .resolves.toMatchObject({ status: "ready", data: { operation: { status: "failed" } } });
+    expect(subject.rateLimitSync).not.toHaveBeenCalled();
+  });
+
   it("loads the render-time snapshot without provider calls or writes", async () => {
     const payment = { payment_id: "local" } as never;
     const subject = reader({

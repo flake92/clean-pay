@@ -31,11 +31,13 @@ vi.mock("@/backend/integrations/payments/payment-owner-service", () => ({
 }));
 
 import {
+  AUTH_CLIENT_PREFLIGHT_LIMIT,
   assertCooldown,
   assertRateLimit,
   assertRateLimitCapacity,
   assertTargetRateLimit,
   rateLimitCapacityKey,
+  rateLimitClientKey,
   rateLimitKey,
   withAuthConcurrency,
 } from "@/backend/limits/rate-limit";
@@ -133,6 +135,50 @@ describe("rate limiting", () => {
       1,
       expect.stringMatching(/^clean-pay:rate-limit:v4:auth:auth_login:email:[a-f0-9]{64}$/),
       60,
+    ]);
+  });
+
+  it("charges a trusted client bucket before the shared preflight capacity", async () => {
+    mocks.redisCommand.mockResolvedValueOnce([1, 1]);
+
+    await assertRateLimitCapacity("auth_command", 60, "203.0.113.7");
+
+    expect(mocks.redisCommand).toHaveBeenCalledWith([
+      "EVAL",
+      expect.stringContaining("return {client, 0}"),
+      2,
+      rateLimitClientKey("auth_command", "203.0.113.7"),
+      "clean-pay:rate-limit:v4:auth:auth_command:capacity",
+      60,
+      AUTH_CLIENT_PREFLIGHT_LIMIT,
+    ]);
+    expect(rateLimitClientKey("auth_command", "203.0.113.7")).toMatch(
+      /^clean-pay:rate-limit:v4:auth:auth_command:client:[a-f0-9]{64}$/,
+    );
+    expect(rateLimitClientKey("auth_command", "203.0.113.7")).not.toContain("203.0.113.7");
+  });
+
+  it("rejects a client over its own budget without blaming the shared capacity", async () => {
+    mocks.redisCommand
+      .mockResolvedValueOnce([AUTH_CLIENT_PREFLIGHT_LIMIT + 1, 0])
+      .mockResolvedValueOnce(120);
+
+    await expect(assertRateLimitCapacity("auth_command", 900, "203.0.113.7"))
+      .rejects.toMatchObject({ code: "RATE_LIMITED", status: 429, debug: { retryAfterSeconds: 120 } });
+    expect(mocks.redisCommand).toHaveBeenLastCalledWith([
+      "TTL",
+      rateLimitClientKey("auth_command", "203.0.113.7"),
+    ]);
+  });
+
+  it("still enforces the shared capacity for clients within their own budget", async () => {
+    mocks.redisCommand.mockResolvedValueOnce([1, 1_000_001]).mockResolvedValueOnce(30);
+
+    await expect(assertRateLimitCapacity("auth_command", 900, "203.0.113.7"))
+      .rejects.toMatchObject({ code: "RATE_LIMITED", status: 429 });
+    expect(mocks.redisCommand).toHaveBeenLastCalledWith([
+      "TTL",
+      "clean-pay:rate-limit:v4:auth:auth_command:capacity",
     ]);
   });
 

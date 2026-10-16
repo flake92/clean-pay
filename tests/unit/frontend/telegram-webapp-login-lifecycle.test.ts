@@ -54,9 +54,15 @@ function normalizedTelegramLoginJsx() {
     ts.forEachChild(node, visit);
   }
   visit(component);
-  // The TypeScript printer re-emits the JSX from its AST, so the text does not
-  // depend on source formatting; the inline snapshot shows exactly what changed.
-  return jsx.join("\n\n").replace(/\r\n/g, "\n");
+  // The printer re-emits attributes from the AST, but JSX text keeps its source
+  // indentation; strip per-line indentation so reformatting does not fail the
+  // snapshot while a real markup change still shows as a readable diff.
+  return jsx
+    .join("\n\n")
+    .replace(/\r\n/g, "\n")
+    .split("\n")
+    .map((line) => line.trim())
+    .join("\n");
 }
 
 function controllerDependencies({
@@ -297,18 +303,18 @@ describe("Telegram WebApp login architecture", () => {
     expect(facade).toContain("redirectTo?: string");
     expect(normalizedTelegramLoginJsx()).toMatchInlineSnapshot(`
       "<div className="flex flex-column align-items-center gap-4 text-center">
-            {error ? (<>
-                <Message severity="error" text={error}/>
-                <div className="flex flex-wrap justify-content-center gap-2">
-                  
-                  <LinkButton href={telegramWebAppRetryPath(redirectTo)} label="Повторить вход через Telegram" external/>
-                  <LinkButton href={\`/login?redirect_to=\${encodeURIComponent(redirectTo)}\`} label="Открыть обычный вход" outlined/>
-                </div>
-              </>) : (<>
-                <ProgressSpinner aria-label="Вход через Telegram" style={{ width: "48px", height: "48px" }}/>
-                <Message severity="info" text={telegramWebAppLoginProgressMessage(fallbackStarted)}/>
-              </>)}
-          </div>"
+      {error ? (<>
+      <Message severity="error" text={error}/>
+      <div className="flex flex-wrap justify-content-center gap-2">
+
+      <LinkButton href={telegramWebAppRetryPath(redirectTo)} label="Повторить вход через Telegram" external/>
+      <LinkButton href={\`/login?redirect_to=\${encodeURIComponent(redirectTo)}\`} label="Открыть обычный вход" outlined/>
+      </div>
+      </>) : (<>
+      <ProgressSpinner aria-label="Вход через Telegram" style={{ width: "48px", height: "48px" }}/>
+      <Message severity="info" text={telegramWebAppLoginProgressMessage(fallbackStarted)}/>
+      </>)}
+      </div>"
     `);
   });
 

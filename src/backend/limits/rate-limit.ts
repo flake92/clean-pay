@@ -1,8 +1,10 @@
 import { createHmac, randomUUID } from 'node:crypto';
+import { headers } from 'next/headers';
 
 import { redisCommand } from '@/backend/cache/redis';
 import { getEnv } from '@/backend/config/env';
 import { ServiceError } from '@/backend/errors/service-error';
+import { getTrustedClientIp } from '@/backend/observability/audit';
 import { logger } from '@/backend/observability/logger';
 import { recordOperationalEvent } from '@/backend/observability/metrics';
 
@@ -27,7 +29,12 @@ function normalizePart(value: string | number | bigint | null | undefined) {
   return String(value).trim().toLowerCase();
 }
 
-function digest(kind: "email" | "tgid" | "session", value: string) {
+// Anonymous preflight budget per trusted client address. The shared capacity
+// bucket is global, so without this a single source could exhaust it before
+// any human proof and lock every user out for the rest of the window.
+export const AUTH_CLIENT_PREFLIGHT_LIMIT = 100;
+
+function digest(kind: "email" | "tgid" | "session" | "client", value: string) {
   return createHmac("sha256", getEnv().rateLimitIdentitySecret)
     .update(`clean-pay:rate-limit:v4:${kind}:${value}`)
     .digest("hex");
@@ -51,6 +58,20 @@ export function rateLimitKey({ action, email, tgId, sessionId }: RateLimitIdenti
 export function rateLimitCapacityKey(action: string) {
   const normalizedAction = normalizePart(action) ?? "unknown";
   return `clean-pay:rate-limit:v4:auth:${normalizedAction}:capacity`;
+}
+
+export function rateLimitClientKey(action: string, clientIp: string) {
+  const normalizedAction = normalizePart(action) ?? "unknown";
+  return `clean-pay:rate-limit:v4:auth:${normalizedAction}:client:${digest("client", clientIp.trim().toLowerCase())}`;
+}
+
+async function currentTrustedClientIp() {
+  try {
+    return getTrustedClientIp(await headers(), getEnv().trustedProxyHops);
+  } catch {
+    // Outside a request scope (workers, scripts) there is no client address.
+    return null;
+  }
 }
 
 function concurrencyKey(action: string) {
@@ -140,12 +161,78 @@ export async function assertRateLimit(options: RateLimitOptions) {
 export async function assertRateLimitCapacity(
   action: string,
   windowSeconds = 15 * 60,
+  clientIp?: string | null,
 ) {
-  await assertRateLimit({
+  const resolvedClientIp = clientIp === undefined
+    ? await currentTrustedClientIp()
+    : clientIp;
+  const capacityKey = rateLimitCapacityKey(action);
+  if (!resolvedClientIp) {
+    await assertRateLimit({
+      action,
+      limit: getEnv().authRateLimitCapacity,
+      windowSeconds,
+    });
+    return;
+  }
+
+  const clientKey = rateLimitClientKey(action, resolvedClientIp);
+  let counts: unknown;
+  try {
+    // A client over its own budget is rejected without consuming the shared
+    // capacity, so one source cannot starve everybody else.
+    counts = await redisCommand([
+      "EVAL",
+      "local client = redis.call('INCR', KEYS[1]); if client == 1 then redis.call('EXPIRE', KEYS[1], ARGV[1]); end; if client > tonumber(ARGV[2]) then return {client, 0} end; local capacity = redis.call('INCR', KEYS[2]); if capacity == 1 then redis.call('EXPIRE', KEYS[2], ARGV[1]); end; return {client, capacity}",
+      2,
+      clientKey,
+      capacityKey,
+      windowSeconds,
+      AUTH_CLIENT_PREFLIGHT_LIMIT,
+    ]);
+  } catch (error) {
+    logger.error("auth_rate_limit_unavailable", {
+      action,
+      errorName: error instanceof Error ? error.name : "UnknownError",
+    });
+    throw new ServiceError("UPSTREAM_UNAVAILABLE", 503, "Authentication protection is temporarily unavailable", {
+      retryAfterSeconds: Math.min(windowSeconds, 30),
+    });
+  }
+
+  if (
+    !Array.isArray(counts) ||
+    counts.length !== 2 ||
+    counts.some((value) => typeof value !== "number")
+  ) {
+    throw new ServiceError('UPSTREAM_UNAVAILABLE', 503, 'Redis returned invalid rate-limit counters', {
+      message: 'Invalid Redis INCR response',
+    });
+  }
+
+  const [clientCount, capacityCount] = counts as [number, number];
+  const clientExceeded = clientCount > AUTH_CLIENT_PREFLIGHT_LIMIT;
+  const capacityExceeded = capacityCount > getEnv().authRateLimitCapacity;
+  if (!clientExceeded && !capacityExceeded) return;
+
+  const exceededKey = clientExceeded ? clientKey : capacityKey;
+  let retryAfterSeconds: number;
+  try {
+    retryAfterSeconds = await getRetryAfterSeconds(exceededKey, windowSeconds);
+  } catch {
+    retryAfterSeconds = Math.min(windowSeconds, 30);
+  }
+
+  recordOperationalEvent(
+    clientExceeded ? "rate_limit_client_rejected" : "rate_limit_capacity_rejected",
     action,
-    limit: getEnv().authRateLimitCapacity,
-    windowSeconds,
-  });
+  );
+  throw new ServiceError(
+    'RATE_LIMITED',
+    429,
+    'Too many attempts. Try again later.',
+    { retryAfterSeconds },
+  );
 }
 
 /**

@@ -37,6 +37,10 @@ export function parseJsonBase64Url<T>(value: string) {
   return JSON.parse(Buffer.from(value, "base64url").toString("utf8")) as T;
 }
 
+// GCM accepts truncated authentication tags unless the length is pinned, which
+// would weaken forgery resistance to the shortest tag an attacker supplies.
+const GCM_AUTH_TAG_BYTES = 16;
+
 function encryptionKey(secret: string) {
   return createHash("sha256").update(secret).digest();
 }
@@ -77,6 +81,7 @@ function decryptVersionedEnvelope(
     "aes-256-gcm",
     purposeEncryptionKey(secret, purpose),
     Buffer.from(iv, "base64url"),
+    { authTagLength: GCM_AUTH_TAG_BYTES },
   );
   decipher.setAAD(Buffer.from(associatedData, "utf8"));
   decipher.setAuthTag(Buffer.from(authTag, "base64url"));
@@ -220,6 +225,7 @@ export function decryptSecret(value: string, secret: string) {
     "aes-256-gcm",
     encryptionKey(secret),
     Buffer.from(iv, "base64url"),
+    { authTagLength: GCM_AUTH_TAG_BYTES },
   );
   decipher.setAuthTag(Buffer.from(authTag, "base64url"));
 

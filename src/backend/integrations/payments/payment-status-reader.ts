@@ -13,6 +13,7 @@ import { isPaymentManualRequired } from "@/backend/payments/manual-review";
 import { assertPaymentUpstreamIdentity } from "@/backend/integrations/payments/payment-owner-service";
 import { serializePaymentRecord, syncExactPaymentRecordFromRemnashop, syncPaymentRecordsFromRemnashopTransactions } from "@/backend/integrations/payments/payment-record-service";
 import { getCurrentUser } from "@/backend/integrations/sessions/web-session-service";
+import { assertTargetRateLimit } from "@/backend/limits/rate-limit";
 import type { CurrentSubscriptionResponse, PaymentTransactionResponse } from "@/backend/integrations/remnashop/contracts";
 
 type AuthorizationContext = Awaited<ReturnType<typeof getAuthorizedRemnashopTokens>>;
@@ -52,6 +53,16 @@ export function createProductionPaymentStatusReader(
     return { id: user.id, emailVerified: user.emailVerified, telegramId: user.telegramId };
   },
   findOperation: operation,
+  async rateLimitSync(userId) {
+    // The return page polls every few seconds; anything faster is a client
+    // loop that would only multiply provider calls.
+    await adapt(() => assertTargetRateLimit({
+      action: "payment_status_sync",
+      sessionId: `user:${userId}`,
+      limit: 120,
+      windowSeconds: 5 * 60,
+    }));
+  },
   async authorize() {
     const authorized = await adapt(authorizeSession);
     return { context: authorized, upstreamAccountId: getRemnashopUserIdFromAccessToken(authorized.accessToken) };

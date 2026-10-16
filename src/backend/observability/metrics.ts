@@ -35,6 +35,7 @@ const OPERATIONAL_EVENTS = new Set([
   "encrypted_refresh_successor_rewrapped",
   "encrypted_telegram_callback_result_rewrapped",
   "rate_limit_capacity_rejected",
+  "rate_limit_client_rejected",
   "rate_limit_target_rejected",
   "refresh_token_reuse_detected",
   "refresh_token_rotation_failed",

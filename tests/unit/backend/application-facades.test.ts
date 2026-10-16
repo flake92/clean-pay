@@ -457,7 +457,7 @@ describe("application facades", () => {
     const paymentStatus = { payment: null, operation: null, subscription: null };
     const statusReader = {
       loadActor: vi.fn(async () => ({ id: "user-1", emailVerified: true, telegramId: null })),
-      findOperation: vi.fn(async () => null), authorize: vi.fn(async () => ({ context: {}, upstreamAccountId: "upstream-1" })),
+      findOperation: vi.fn(async () => null), rateLimitSync: vi.fn(async () => undefined), authorize: vi.fn(async () => ({ context: {}, upstreamAccountId: "upstream-1" })),
       assertUpstreamOwner: vi.fn(async () => undefined), loadCapabilities: vi.fn(async () => null),
       loadExactTransaction: vi.fn(async () => null), persistExactTransaction: vi.fn(async () => undefined),
       loadLegacyTransactions: vi.fn(async () => []), persistLegacyTransactions: vi.fn(async () => undefined),

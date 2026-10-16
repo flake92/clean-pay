@@ -27,6 +27,11 @@ function view(operation: PaymentStatusOperation | null, subscription: PaymentSta
   return { payment, operation: operation ? operationStatus(operation) : null, subscription };
 }
 
+// UUIDs are case-insensitive; compare a client-supplied id in canonical form.
+function samePaymentId(left: string, right: string) {
+  return left.toLowerCase() === right.toLowerCase();
+}
+
 function validateInput(input: { paymentId: string | null; operationId: string | null }) {
   if (input.paymentId && !paymentIdPattern.test(input.paymentId)) {
     throw new PaymentStatusGatewayError("VALIDATION_ERROR");
@@ -54,7 +59,7 @@ async function snapshot(
     ? await reader.findOperation(actor.id, input.operationId)
     : null;
   const operationPaymentId = operation?.paymentId ?? null;
-  if (input.paymentId && input.operationId && operationPaymentId && input.paymentId !== operationPaymentId) {
+  if (input.paymentId && input.operationId && operationPaymentId && !samePaymentId(input.paymentId, operationPaymentId)) {
     throw new PaymentStatusGatewayError("CONFLICT");
   }
   const resolvedPaymentId = input.operationId ? operationPaymentId : input.paymentId;
@@ -74,9 +79,19 @@ async function execute(reader: PaymentStatusReader, reconciliation: PaymentMaint
   let operation = input.operationId || !input.paymentId ? await reader.findOperation(actor.id, input.operationId) : null;
   let status = operation ? operationStatus(operation) : null;
   let operationPaymentId = operation?.paymentId ?? null;
-  if (input.paymentId && input.operationId && operationPaymentId && input.paymentId !== operationPaymentId) throw new PaymentStatusGatewayError("CONFLICT");
+  if (input.paymentId && input.operationId && operationPaymentId && !samePaymentId(input.paymentId, operationPaymentId)) throw new PaymentStatusGatewayError("CONFLICT");
   let resolvedPaymentId = input.operationId ? operationPaymentId : input.paymentId;
   if (operation && status && terminal(operation, status)) return view(operation, null, operation.payment);
+
+  try {
+    await reader.rateLimitSync(actor.id);
+  } catch (error) {
+    if (!(error instanceof PaymentStatusGatewayError) || error.code !== "RATE_LIMITED") throw error;
+    // Over the sync budget: answer from the local state without provider calls.
+    const payment = resolvedPaymentId ? await reader.findPayment(actor.id, resolvedPaymentId)
+      : input.operationId ? operation?.payment ?? null : await reader.findLatestPayment(actor.id);
+    return view(operation, null, payment);
+  }
 
   const authorization = await reader.authorize();
   await reader.assertUpstreamOwner(actor.id, authorization.upstreamAccountId);

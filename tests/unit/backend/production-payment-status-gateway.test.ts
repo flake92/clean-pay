@@ -6,7 +6,10 @@ const mocks = vi.hoisted(() => ({
   getPaymentCapabilities: vi.fn(), getExactTransaction: vi.fn(), getLegacyTransactions: vi.fn(),
   assertPaymentUpstreamIdentity: vi.fn(), syncExactPaymentRecordFromRemnashop: vi.fn(),
   syncPaymentRecordsFromRemnashopTransactions: vi.fn(), remnashopRequest: vi.fn(),
+  assertTargetRateLimit: vi.fn(),
 }));
+
+vi.mock("@/backend/limits/rate-limit", () => ({ assertTargetRateLimit: mocks.assertTargetRateLimit }));
 
 vi.mock("@/backend/integrations/sessions/web-session-service", () => ({ getCurrentUser: mocks.getCurrentUser }));
 vi.mock("@/backend/integrations/remnashop/client", () => ({
@@ -41,6 +44,19 @@ import { createProductionPaymentStatusReader } from "@/backend/integrations/paym
 const gateway = createProductionPaymentStatusReader();
 
 describe("production payment status gateway", () => {
+  it("bounds provider synchronization per local user and maps rejection", async () => {
+    await gateway.rateLimitSync("user-1");
+    expect(mocks.assertTargetRateLimit).toHaveBeenCalledWith({
+      action: "payment_status_sync",
+      sessionId: "user:user-1",
+      limit: 120,
+      windowSeconds: 300,
+    });
+
+    mocks.assertTargetRateLimit.mockRejectedValueOnce(new ServiceError("RATE_LIMITED", 429));
+    await expect(gateway.rateLimitSync("user-1")).rejects.toMatchObject({ code: "RATE_LIMITED" });
+  });
+
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.getCurrentUser.mockResolvedValue({ id: "user-1", emailVerified: true, telegramId: null });

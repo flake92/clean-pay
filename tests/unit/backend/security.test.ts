@@ -120,6 +120,20 @@ describe("security crypto helpers", () => {
     )).toMatchObject({ value: "previous-token", needsRewrap: false });
   });
 
+  it("rejects truncated GCM authentication tags", () => {
+    const [iv, authTag, encrypted] = encryptSecret("access-token", "refresh-secret").split(".");
+    const truncatedTag = Buffer.from(authTag!, "base64url").subarray(0, 4).toString("base64url");
+    expect(() => decryptSecret([iv, truncatedTag, encrypted].join("."), "refresh-secret")).toThrow();
+
+    const keyring = {
+      primary: { id: "key-a", secret: "synthetic-key-A-with-enough-entropy-123456" }, // gitleaks:allow -- synthetic test credential
+      previous: [],
+    };
+    const parts = encryptKeyringSecret("token", keyring, "purpose-a").split(".");
+    parts[4] = Buffer.from(parts[4]!, "base64url").subarray(0, 8).toString("base64url");
+    expect(() => decryptKeyringSecret(parts.join("."), keyring, "purpose-a")).toThrow();
+  });
+
   it("binds versioned envelopes to their key id and purpose", () => {
     const keyring = {
       primary: { id: "key-a", secret: "synthetic-key-A-with-enough-entropy-123456" }, // gitleaks:allow -- synthetic test credential

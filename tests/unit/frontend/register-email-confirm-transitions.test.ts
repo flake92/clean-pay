@@ -58,9 +58,15 @@ function normalizedRegisterEmailConfirmJsx() {
   }
   visit(component);
 
-  // The TypeScript printer re-emits the JSX from its AST, so the text does not
-  // depend on source formatting; the inline snapshot shows exactly what changed.
-  return jsx.join("\n\n").replace(/\r\n/g, "\n");
+  // The printer re-emits attributes from the AST, but JSX text keeps its source
+  // indentation; strip per-line indentation so reformatting does not fail the
+  // snapshot while a real markup change still shows as a readable diff.
+  return jsx
+    .join("\n\n")
+    .replace(/\r\n/g, "\n")
+    .split("\n")
+    .map((line) => line.trim())
+    .join("\n");
 }
 
 describe("register e-mail confirmation transitions", () => {
@@ -164,22 +170,22 @@ describe("register e-mail confirmation architecture", () => {
     expect(source).toContain("verificationDeliveryFailed?: boolean;");
     expect(normalizedRegisterEmailConfirmJsx()).toMatchInlineSnapshot(`
       "<div className="flex flex-column gap-3">
-            {verificationDeliveryFailed ? (<Message severity="warn" text="Аккаунт создан, но письмо с кодом не удалось отправить автоматически. Нажмите «Отправить код повторно»."/>) : null}
-            {turnstileEnabled ? (<TurnstileWidget action="email_verification" onReady={setTurnstile} onToken={setTurnstileToken} siteKey={turnstileSiteKey}/>) : null}
-            <form className="flex flex-column gap-3" onSubmit={onSubmit}>
-              <label className="flex flex-column gap-2">
-                <span className="text-sm font-medium text-700">Код подтверждения</span>
-                <InputText inputMode="numeric" maxLength={6} minLength={6} name="code" pattern="[0-9]{6}" placeholder="000000" required/>
-              </label>
-              {error ? <Message severity="error" text={error}/> : null}
-              {message ? <Message severity="success" text={message}/> : null}
-              <div className="flex flex-column gap-2 sm:flex-row">
-                <Button className="flex-1" disabled={loading !== null} label="Подтвердить e-mail" loading={loading === "confirm"} type="submit"/>
-                <Button className="flex-1" disabled={loading !== null} label="Отправить код повторно" loading={loading === "resend"} onClick={resendCode} outlined type="button"/>
-                <Button className="flex-1" disabled={loading !== null} label="Назад" loading={loading === "back"} onClick={goBackToRegister} outlined severity="secondary" type="button"/>
-              </div>
-            </form>
-          </div>"
+      {verificationDeliveryFailed ? (<Message severity="warn" text="Аккаунт создан, но письмо с кодом не удалось отправить автоматически. Нажмите «Отправить код повторно»."/>) : null}
+      {turnstileEnabled ? (<TurnstileWidget action="email_verification" onReady={setTurnstile} onToken={setTurnstileToken} siteKey={turnstileSiteKey}/>) : null}
+      <form className="flex flex-column gap-3" onSubmit={onSubmit}>
+      <label className="flex flex-column gap-2">
+      <span className="text-sm font-medium text-700">Код подтверждения</span>
+      <InputText inputMode="numeric" maxLength={6} minLength={6} name="code" pattern="[0-9]{6}" placeholder="000000" required/>
+      </label>
+      {error ? <Message severity="error" text={error}/> : null}
+      {message ? <Message severity="success" text={message}/> : null}
+      <div className="flex flex-column gap-2 sm:flex-row">
+      <Button className="flex-1" disabled={loading !== null} label="Подтвердить e-mail" loading={loading === "confirm"} type="submit"/>
+      <Button className="flex-1" disabled={loading !== null} label="Отправить код повторно" loading={loading === "resend"} onClick={resendCode} outlined type="button"/>
+      <Button className="flex-1" disabled={loading !== null} label="Назад" loading={loading === "back"} onClick={goBackToRegister} outlined severity="secondary" type="button"/>
+      </div>
+      </form>
+      </div>"
     `);
   });
 

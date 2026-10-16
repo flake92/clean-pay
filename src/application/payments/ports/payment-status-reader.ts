@@ -19,6 +19,8 @@ export type PaymentStatusTransaction = { context: unknown };
 export interface PaymentStatusReader {
   loadActor(): Promise<{ id: string; emailVerified: boolean; telegramId: string | null } | null>;
   findOperation(userId: string, operationId: string | null): Promise<PaymentStatusOperation | null>;
+  /** Bounds provider synchronization per user; throws RATE_LIMITED when exhausted. */
+  rateLimitSync(userId: string): Promise<void>;
   authorize(): Promise<PaymentStatusAuthorization>;
   assertUpstreamOwner(userId: string, upstreamAccountId: string): Promise<void>;
   loadCapabilities(authorization: PaymentStatusAuthorization): Promise<{ maxPageSize: number } | null>;
