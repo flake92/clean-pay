@@ -47,9 +47,12 @@ ENV NEXT_TELEMETRY_DISABLED=1
 
 # Runtime packages receive security fixes from the digest-pinned Debian base and
 # are covered by the image vulnerability gate; exact apt versions would prevent
-# those fixes from being selected on a rebuild.
+# those fixes from being selected on a rebuild. The upgrade also applies
+# bookworm-security updates published after the base image was built (the
+# official image can lag behind fixed packages such as perl-base).
 # hadolint ignore=DL3008
 RUN apt-get update \
+    && apt-get upgrade -y --no-install-recommends \
     && apt-get install -y --no-install-recommends ca-certificates libpcre2-8-0 openssl \
     && rm -rf /var/lib/apt/lists/* \
     && groupadd --system --gid 1001 nodejs \

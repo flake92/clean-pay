@@ -123,7 +123,7 @@ describe("production image source selection", () => {
       "node:24.22.0-bookworm-slim@sha256:a5f4366e834695d5f363b920c104953a535d3a9864d1bdf74566a0ebe01daee5";
 
     expect(dockerfile.match(new RegExp(pinnedBase, "g"))).toHaveLength(2);
-    expect(dockerfile).not.toMatch(/^FROM node:24\.18\.0-bookworm-slim AS/m);
+    expect(dockerfile).not.toMatch(/^FROM node:24\.22\.0-bookworm-slim AS/m);
     expect(readFileSync("deploy.sh", "utf8")).toContain(
       `NODE_TOOLING_IMAGE="${pinnedBase}"`,
     );

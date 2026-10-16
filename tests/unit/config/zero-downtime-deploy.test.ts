@@ -271,7 +271,7 @@ describe("guarded zero-downtime application rollout", () => {
   it("uses one pinned, least-privilege Node fallback for every host-side helper", () => {
     const pinnedImage = deployScript.match(/^NODE_TOOLING_IMAGE="([^"]+)"/mu)?.[1];
     expect(pinnedImage).toMatch(
-      /^node:24\.18\.0-bookworm-slim@sha256:[a-f0-9]{64}$/u,
+      /^node:24\.22\.0-bookworm-slim@sha256:[a-f0-9]{64}$/u,
     );
     for (const source of [script, nodeToolingScript]) {
       expect(source).toContain(`NODE_TOOLING_IMAGE="${pinnedImage}"`);
