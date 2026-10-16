@@ -5,6 +5,8 @@ import { pathToFileURL } from "node:url";
 
 import { describe, expect, it } from "vitest";
 
+import { NODE_CHILD_TIMEOUT } from "../../helpers/child-process";
+
 import {
   assertCheckpointProgress,
   decodeLivenessBody,
@@ -262,7 +264,7 @@ describe("disposable traffic module loading", () => {
 
     const output = execFileSync(process.execPath, ["--input-type=module", "--eval", program], {
       encoding: "utf8",
-      timeout: 5_000,
+      timeout: NODE_CHILD_TIMEOUT,
       windowsHide: true,
     });
 

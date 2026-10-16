@@ -214,7 +214,7 @@ export async function captureCharacterization(options: {
   ]);
 
   registerBaselineReconciliation(pages[0].page, async () => {
-    const consoleSidecars = await Promise.all(samples.map(async (sample, processIndex) => {
+    const consoleSidecars = await Promise.all(samples.map(async (_sample, processIndex) => {
       const normalizedStaticCspViolations = staticCspConsoleSidecarEvidence(
         pages[processIndex]?.page as Page,
       );

@@ -12,6 +12,10 @@ import {
   materializeBehavioralBaselineSource,
 } from "../../../scripts/security/behavioral-baseline-source.mjs";
 
+// Materializing extracts the full reviewed baseline tree from git; under a fully
+// parallel suite this took 20–30 s locally, so 30 s produced spurious timeouts.
+const BASELINE_MATERIALIZATION_TIMEOUT = 90_000;
+
 describe("behavioral baseline source", () => {
   it("materializes only the reviewed f5 archive and removes its exact owned root", async () => {
     const repositoryRoot = await realpath(process.cwd());
@@ -60,7 +64,7 @@ describe("behavioral baseline source", () => {
       }
       await rmdir(isolatedTemporaryRoot);
     }
-  }, 30_000);
+  }, BASELINE_MATERIALIZATION_TIMEOUT);
 
   it("requires the exact immutable receipt capability and rejects receipt extension", async () => {
     const repositoryRoot = await realpath(process.cwd());
@@ -97,7 +101,7 @@ describe("behavioral baseline source", () => {
       });
       await rmdir(isolatedTemporaryRoot);
     }
-  }, 30_000);
+  }, BASELINE_MATERIALIZATION_TIMEOUT);
 
   it("rejects a temporary directory whose dot-dot-prefixed name is inside the repository", async () => {
     const repositoryRoot = await realpath(process.cwd());

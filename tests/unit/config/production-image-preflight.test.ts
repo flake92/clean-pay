@@ -1,6 +1,5 @@
 import {
   chmodSync,
-  existsSync,
   mkdtempSync,
   readFileSync,
   rmSync,
@@ -13,28 +12,19 @@ import { spawnSync } from "node:child_process";
 import { describe, expect, it } from "vitest";
 
 import {
+  posixShell,
+  shellIntegrationTimeout,
+  shellFunctionFrom,
+} from "../../helpers/posix-shell";
+
+import {
   COMPOSE_INTERPOLATION_ENVIRONMENT_NAMES,
   ProductionEnvironmentError,
   validateDeploymentImageReferences,
   validateProductionPublicBuildConfiguration,
 } from "../../../deploy/prod/production-env-rules.mjs";
 
-const posixShell = process.platform === "win32"
-  ? ["C:/Program Files/Git/bin/sh.exe", "C:/Program Files/Git/usr/bin/sh.exe"]
-      .find((candidate) => existsSync(candidate))
-  : "sh";
-const shellIntegrationTimeout = process.platform === "win32" ? 45_000 : 15_000;
 const deployScript = readFileSync("deploy.sh", "utf8");
-
-function shellFunctionFrom(source: string, name: string) {
-  const start = source.indexOf(`${name}() {`);
-  expect(start, `${name} must exist`).toBeGreaterThanOrEqual(0);
-  const bodyStart = source.indexOf("\n", start) + 1;
-  const nextFunction = source.slice(bodyStart).search(/^\w+\(\) \{/m);
-  return nextFunction < 0
-    ? source.slice(start)
-    : source.slice(start, bodyStart + nextFunction);
-}
 
 function imageReferences(overrides: Record<string, string> = {}) {
   return {

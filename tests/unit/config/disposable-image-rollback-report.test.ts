@@ -6,6 +6,8 @@ import { pathToFileURL } from "node:url";
 
 import { afterEach, describe, expect, it } from "vitest";
 
+import { NODE_CHILD_TIMEOUT } from "../../helpers/child-process";
+
 import { validateDisposableImageRollbackReport } from
   "../../../scripts/security/disposable-image-rollback-report.mjs";
 
@@ -192,7 +194,7 @@ describe("disposable image rollback report CLI", () => {
     const file = await temporaryFile(JSON.stringify(validReport()));
     const result = spawnSync(process.execPath, [scriptPath, "validate", file], {
       encoding: "utf8",
-      timeout: 5_000,
+      timeout: NODE_CHILD_TIMEOUT,
       windowsHide: true,
     });
 
@@ -206,7 +208,7 @@ describe("disposable image rollback report CLI", () => {
     const file = await temporaryFile(JSON.stringify({ ...validReport(), sentinel }));
     const result = spawnSync(process.execPath, [scriptPath, "validate", file], {
       encoding: "utf8",
-      timeout: 5_000,
+      timeout: NODE_CHILD_TIMEOUT,
       windowsHide: true,
     });
 
@@ -229,7 +231,7 @@ describe("disposable image rollback report CLI", () => {
     ]) {
       const result = spawnSync(process.execPath, argumentsList, {
         encoding: "utf8",
-        timeout: 5_000,
+        timeout: NODE_CHILD_TIMEOUT,
         windowsHide: true,
       });
       expect(result.status).toBe(1);
@@ -261,7 +263,7 @@ describe("disposable image rollback report CLI", () => {
 
     const output = execFileSync(process.execPath, ["--input-type=module", "--eval", program], {
       encoding: "utf8",
-      timeout: 5_000,
+      timeout: NODE_CHILD_TIMEOUT,
       windowsHide: true,
     });
 

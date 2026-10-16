@@ -1,6 +1,5 @@
 import { spawnSync } from "node:child_process";
 import {
-  existsSync,
   mkdtempSync,
   readFileSync,
   rmSync,
@@ -11,6 +10,12 @@ import path from "node:path";
 
 import { describe, expect, it } from "vitest";
 
+import { NODE_CHILD_TIMEOUT } from "../../helpers/child-process";
+
+import {
+  posixShell,
+} from "../../helpers/posix-shell";
+
 const zeroDowntime = readFileSync("deploy/prod/zero-downtime-app.sh", "utf8");
 const rehearsal = readFileSync(
   "scripts/security/rehearse-zero-downtime-image-rollback.sh",
@@ -18,10 +23,6 @@ const rehearsal = readFileSync(
 );
 const probeSource = extractProbeSource(zeroDowntime);
 const providerProbeSource = extractProviderProbeSource(zeroDowntime);
-const posixShell = process.platform === "win32"
-  ? ["C:/Program Files/Git/bin/sh.exe", "C:/Program Files/Git/usr/bin/sh.exe"]
-      .find((candidate) => existsSync(candidate))
-  : "sh";
 const readyChecks = {
   database: { status: "ok", latencyMs: 1 },
   redis: { status: "ok", latencyMs: 1 },
@@ -301,7 +302,7 @@ function runNode(
       READINESS_INTERNAL_SECRET: "synthetic-readiness-secret",
       ...extraEnv,
     },
-    timeout: 5_000,
+    timeout: NODE_CHILD_TIMEOUT,
     windowsHide: true,
   });
 }
@@ -348,7 +349,7 @@ diagnose_disposable_canary_provider
     cwd: process.cwd(),
     encoding: "utf8",
     env: { NODE_ENV: "test", PATH: process.env.PATH ?? "" },
-    timeout: 5_000,
+    timeout: NODE_CHILD_TIMEOUT,
     windowsHide: true,
   });
 }
@@ -408,7 +409,7 @@ printf 'accepted\\n'
         CLEAN_PAY_TEST_EDGE_NETWORK: edgeNetwork,
         CLEAN_PAY_TEST_JWKS_URL: jwksUrl,
       },
-      timeout: 5_000,
+      timeout: NODE_CHILD_TIMEOUT,
       windowsHide: true,
     });
   } finally {

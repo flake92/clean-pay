@@ -1,6 +1,5 @@
 import {
   chmodSync,
-  existsSync,
   mkdtempSync,
   readFileSync,
   rmSync,
@@ -14,6 +13,13 @@ import path from "node:path";
 
 import { describe, expect, it } from "vitest";
 
+import {
+  posixShell,
+  shellIntegrationTimeout,
+  shellPath,
+  shellFunctionFrom,
+} from "../../helpers/posix-shell";
+
 const script = readFileSync("deploy/prod/zero-downtime-app.sh", "utf8");
 const deployScript = readFileSync("deploy.sh", "utf8");
 const nodeToolingScript = readFileSync("deploy/prod/node-tooling.sh", "utf8");
@@ -25,35 +31,6 @@ const runbook = readFileSync(
   "deploy/prod/zero-downtime-production-runbook.md",
   "utf8",
 );
-const posixShell = process.platform === "win32"
-  ? ["C:/Program Files/Git/bin/sh.exe", "C:/Program Files/Git/usr/bin/sh.exe"]
-      .find((candidate) => existsSync(candidate))
-  : "sh";
-const shellIntegrationTimeout = process.platform === "win32" ? 45_000 : 15_000;
-
-function shellPath(value: string) {
-  if (process.platform !== "win32" || !posixShell) return value;
-  const converted = spawnSync(
-    posixShell,
-    ["-c", 'cygpath -u -- "$VALUE"'],
-    {
-      encoding: "utf8",
-      env: { ...process.env, VALUE: value },
-    },
-  );
-  expect(converted.status, converted.stderr).toBe(0);
-  return converted.stdout.trim();
-}
-
-function shellFunctionFrom(source: string, name: string) {
-  const start = source.indexOf(`${name}() {`);
-  expect(start, `${name} must exist`).toBeGreaterThanOrEqual(0);
-  const bodyStart = source.indexOf("\n", start) + 1;
-  const nextFunction = source.slice(bodyStart).search(/^\w+\(\) \{/m);
-  return nextFunction < 0
-    ? source.slice(start)
-    : source.slice(start, bodyStart + nextFunction);
-}
 
 function shellFunction(name: string) {
   return shellFunctionFrom(script, name);
@@ -341,7 +318,7 @@ describe("guarded zero-downtime application rollout", () => {
     () => {
       const harness = `
 set -eu
-ROOT_DIR=$(pwd)
+ROOT_DIR='${shellPath(process.cwd())}'
 NODE_TOOLING_IMAGE="node:24.22.0-bookworm-slim@sha256:a5f4366e834695d5f363b920c104953a535d3a9864d1bdf74566a0ebe01daee5"
 OPERATION_LOCK_SCRIPT="$ROOT_DIR/deploy/prod/production-operation-lock.mjs"
 OPERATION_LOCK_PATH="$ROOT_DIR/deploy/prod/.production-operation.lock"

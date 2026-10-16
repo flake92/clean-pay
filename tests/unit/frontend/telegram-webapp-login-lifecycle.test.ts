@@ -1,6 +1,5 @@
 /** @vitest-environment jsdom */
 
-import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 
 import { act } from "react";
@@ -13,7 +12,7 @@ import {
   type TelegramWebAppLoginControllerDependencies,
 } from "@/frontend/hooks/use-telegram-webapp-login-controller";
 
-function normalizedTelegramLoginJsxHash() {
+function normalizedTelegramLoginJsx() {
   const path = "src/frontend/components/telegram-webapp-login.tsx";
   const source = readFileSync(path, "utf8");
   const sourceFile = ts.createSourceFile(
@@ -55,8 +54,9 @@ function normalizedTelegramLoginJsxHash() {
     ts.forEachChild(node, visit);
   }
   visit(component);
-  const normalized = jsx.join("\n").replace(/\s+/g, " ").trim();
-  return createHash("sha256").update(normalized).digest("hex").toUpperCase();
+  // The TypeScript printer re-emits the JSX from its AST, so the text does not
+  // depend on source formatting; the inline snapshot shows exactly what changed.
+  return jsx.join("\n\n").replace(/\r\n/g, "\n");
 }
 
 function controllerDependencies({
@@ -295,9 +295,21 @@ describe("Telegram WebApp login architecture", () => {
     )).toEqual(["TelegramWebAppLogin"]);
     expect(facade).not.toMatch(/^export (?:type|interface) /m);
     expect(facade).toContain("redirectTo?: string");
-    expect(normalizedTelegramLoginJsxHash()).toBe(
-      "C41A640CB2BD6C789BF5EE2C693305A24D0E1737835707477D556C70272FCBD2",
-    );
+    expect(normalizedTelegramLoginJsx()).toMatchInlineSnapshot(`
+      "<div className="flex flex-column align-items-center gap-4 text-center">
+            {error ? (<>
+                <Message severity="error" text={error}/>
+                <div className="flex flex-wrap justify-content-center gap-2">
+                  
+                  <LinkButton href={telegramWebAppRetryPath(redirectTo)} label="Повторить вход через Telegram" external/>
+                  <LinkButton href={\`/login?redirect_to=\${encodeURIComponent(redirectTo)}\`} label="Открыть обычный вход" outlined/>
+                </div>
+              </>) : (<>
+                <ProgressSpinner aria-label="Вход через Telegram" style={{ width: "48px", height: "48px" }}/>
+                <Message severity="info" text={telegramWebAppLoginProgressMessage(fallbackStarted)}/>
+              </>)}
+          </div>"
+    `);
   });
 
   it("keeps effects/actions out of the view and source contracts in live wiring", () => {

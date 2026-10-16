@@ -1,6 +1,11 @@
 import { spawnSync } from "node:child_process";
-import { existsSync, readFileSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
+
+import {
+  posixShell,
+  shellFunctionFrom as shellFunction,
+} from "../../helpers/posix-shell";
 import { assessReadinessResponse } from "../../../deploy/prod/readiness.mjs";
 
 const prodCommand = readFileSync("deploy/prod/prod.mjs", "utf8");
@@ -16,20 +21,6 @@ const readinessPrismaClient = readFileSync(
   "src/backend/database/readiness-prisma.ts",
   "utf8",
 );
-const posixShell = process.platform === "win32"
-  ? ["C:/Program Files/Git/bin/sh.exe", "C:/Program Files/Git/usr/bin/sh.exe"]
-      .find((candidate) => existsSync(candidate))
-  : "sh";
-
-function shellFunction(source: string, name: string) {
-  const start = source.indexOf(`${name}() {`);
-  expect(start, `${name} must exist`).toBeGreaterThanOrEqual(0);
-  const bodyStart = source.indexOf("\n", start) + 1;
-  const nextFunction = source.slice(bodyStart).search(/^\w+\(\) \{/m);
-  return nextFunction < 0
-    ? source.slice(start)
-    : source.slice(start, bodyStart + nextFunction);
-}
 
 function runExternalSecurityHeaderCheck(csp: string) {
   const harness = `

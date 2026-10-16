@@ -1,4 +1,3 @@
-import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 
 import ts from "typescript";
@@ -16,7 +15,7 @@ import {
   registerEmailResendSuccessMessage,
 } from "@/frontend/components/register-email-confirm-transitions";
 
-function normalizedRegisterEmailConfirmJsxHash() {
+function normalizedRegisterEmailConfirmJsx() {
   const path = "src/frontend/components/register-email-confirm-form.tsx";
   const source = readFileSync(path, "utf8");
   const sourceFile = ts.createSourceFile(
@@ -59,8 +58,9 @@ function normalizedRegisterEmailConfirmJsxHash() {
   }
   visit(component);
 
-  const normalized = jsx.join("\n").replace(/\s+/g, " ").trim();
-  return createHash("sha256").update(normalized).digest("hex").toUpperCase();
+  // The TypeScript printer re-emits the JSX from its AST, so the text does not
+  // depend on source formatting; the inline snapshot shows exactly what changed.
+  return jsx.join("\n\n").replace(/\r\n/g, "\n");
 }
 
 describe("register e-mail confirmation transitions", () => {
@@ -162,9 +162,25 @@ describe("register e-mail confirmation architecture", () => {
     expect(source).toContain("turnstileEnabled?: boolean;");
     expect(source).toContain("turnstileSiteKey?: string | null;");
     expect(source).toContain("verificationDeliveryFailed?: boolean;");
-    expect(normalizedRegisterEmailConfirmJsxHash()).toBe(
-      "14A0ED0B5F0C0EB1F9824337A9CBDE1C52AF7A9694E8F3CD98A9C93D04703C63",
-    );
+    expect(normalizedRegisterEmailConfirmJsx()).toMatchInlineSnapshot(`
+      "<div className="flex flex-column gap-3">
+            {verificationDeliveryFailed ? (<Message severity="warn" text="Аккаунт создан, но письмо с кодом не удалось отправить автоматически. Нажмите «Отправить код повторно»."/>) : null}
+            {turnstileEnabled ? (<TurnstileWidget action="email_verification" onReady={setTurnstile} onToken={setTurnstileToken} siteKey={turnstileSiteKey}/>) : null}
+            <form className="flex flex-column gap-3" onSubmit={onSubmit}>
+              <label className="flex flex-column gap-2">
+                <span className="text-sm font-medium text-700">Код подтверждения</span>
+                <InputText inputMode="numeric" maxLength={6} minLength={6} name="code" pattern="[0-9]{6}" placeholder="000000" required/>
+              </label>
+              {error ? <Message severity="error" text={error}/> : null}
+              {message ? <Message severity="success" text={message}/> : null}
+              <div className="flex flex-column gap-2 sm:flex-row">
+                <Button className="flex-1" disabled={loading !== null} label="Подтвердить e-mail" loading={loading === "confirm"} type="submit"/>
+                <Button className="flex-1" disabled={loading !== null} label="Отправить код повторно" loading={loading === "resend"} onClick={resendCode} outlined type="button"/>
+                <Button className="flex-1" disabled={loading !== null} label="Назад" loading={loading === "back"} onClick={goBackToRegister} outlined severity="secondary" type="button"/>
+              </div>
+            </form>
+          </div>"
+    `);
   });
 
   it("keeps the façade side-effect free and uses live composition wiring", () => {

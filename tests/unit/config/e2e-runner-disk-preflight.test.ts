@@ -3,6 +3,8 @@ import path from "node:path";
 
 import { describe, expect, it } from "vitest";
 
+import { NODE_CHILD_TIMEOUT } from "../../helpers/child-process";
+
 const rootDir = path.resolve(import.meta.dirname, "../../..");
 const runner = path.join(rootDir, "scripts", "e2e-devcontainer.mjs");
 const impossibleRequiredBytes = "9223372036854775807";
@@ -100,7 +102,7 @@ function runPreflight({
     encoding: "utf8",
     env,
     shell: false,
-    timeout: 5_000,
+    timeout: NODE_CHILD_TIMEOUT,
     windowsHide: true,
   });
 }

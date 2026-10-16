@@ -224,8 +224,8 @@ jobs:
         run: npm run typecheck
       - name: Enforce clean architecture boundaries
         run: npm run test:architecture
-      - name: Test route-handler contracts
-        run: npm run test:route-handlers
+      # Runs every unit test and the route-handler contracts (base.mts includes
+      # tests/integration/route-handlers), so they are not repeated separately.
       - name: Test with enforced coverage thresholds
         run: npm run test:coverage
       - name: Test critical frontend components with enforced coverage thresholds

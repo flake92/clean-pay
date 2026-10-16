@@ -5,7 +5,7 @@ import type {
 export class TelegramAuthStartFailure extends Error {
   constructor(
     public readonly authenticated: boolean,
-    public readonly cause: unknown,
+    public override readonly cause: unknown,
   ) {
     super("Telegram authentication start failed", { cause });
     this.name = "TelegramAuthStartFailure";

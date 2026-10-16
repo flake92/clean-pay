@@ -460,7 +460,9 @@ export async function syncExactPaymentRecordFromRemnashop(input: {
   upstreamAccountId: string;
   transaction: PaymentTransactionResponse;
 }) {
-  for (let attempt = 0; attempt < 2; attempt += 1) {
+  // Two attempts: the second one always returns or rethrows, so the loop never
+  // falls through (keeps the return type free of an impossible undefined).
+  for (let attempt = 0; ; attempt += 1) {
     try {
       return await prisma.$transaction(async (tx) => {
         await lockPaymentUpstreamOwner(
