@@ -20,12 +20,19 @@ import {
   validateProductionEnvironment,
 } from "./production-env-rules.mjs";
 
+const LEGACY_BASELINE_OMITTED_SETTINGS = Object.freeze([
+  "CLEAN_PAY_CONFIG_VERSION",
+  "CLEAN_PAY_UPGRADE_SOURCE_VERSION",
+  "PAYMENT_DATA_RETENTION_ENABLED",
+]);
+
+// 0ede176 is the historical production baseline. 6bfa135 is the same commit on
+// the rewritten main history: its runtime tree (deploy, runtime, src, prisma,
+// scripts, Dockerfile and lockfile) is byte-identical, only two unit-test
+// fixtures differ, so it needs exactly the same reviewed projection.
 export const PRODUCTION_ROLLBACK_COMPATIBILITY = Object.freeze({
-  "0ede176ad863c7a721a9fbbf43f583e838516d4b": Object.freeze([
-    "CLEAN_PAY_CONFIG_VERSION",
-    "CLEAN_PAY_UPGRADE_SOURCE_VERSION",
-    "PAYMENT_DATA_RETENTION_ENABLED",
-  ]),
+  "0ede176ad863c7a721a9fbbf43f583e838516d4b": LEGACY_BASELINE_OMITTED_SETTINGS,
+  "6bfa135c5a3bf6e8f787d603f15c8b636cb15965": LEGACY_BASELINE_OMITTED_SETTINGS,
 });
 
 const PRIVATE_FILE_OPERATIONS = Object.freeze({

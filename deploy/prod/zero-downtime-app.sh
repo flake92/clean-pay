@@ -837,7 +837,7 @@ preflight_rollback_images() {
       "$RESOLVED_ROLLBACK_REVISION" ] \
       || fail "rollback environment revision does not match the immutable images"
     case "$RESOLVED_ROLLBACK_REVISION" in
-      0ede176ad863c7a721a9fbbf43f583e838516d4b)
+      0ede176ad863c7a721a9fbbf43f583e838516d4b|6bfa135c5a3bf6e8f787d603f15c8b636cb15965)
         preflight_image_pair "$ROLLBACK_ENV_FILE" "$RESOLVED_ROLLBACK_REVISION"
         ;;
       *)

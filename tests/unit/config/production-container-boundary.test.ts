@@ -288,7 +288,8 @@ describe("production container boundary", () => {
       "bash scripts/security/rehearse-zero-downtime-image-rollback.sh",
     );
     expect(containerJob).toContain("clean-pay:ci clean-pay-migration:ci");
-    expect(containerJob).toContain("0ede176ad863c7a721a9fbbf43f583e838516d4b");
+    // Main-line equivalent of the 0ede176 production baseline (rewritten history).
+    expect(containerJob).toContain("6bfa135c5a3bf6e8f787d603f15c8b636cb15965");
     expect(containerJob).toContain(".image-rollback-rehearsal/report.json");
     expect(containerJob).toContain(".image-rollback-rehearsal/traffic/result.json");
     expect(containerJob).toContain("if-no-files-found: error");

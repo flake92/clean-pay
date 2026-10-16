@@ -19,15 +19,19 @@ import {
 } from "../../../deploy/prod/rollback-env-compat.mjs";
 
 const productionBaseline = "0ede176ad863c7a721a9fbbf43f583e838516d4b";
+// The same commit on the rewritten main history (identical runtime tree).
+const mainLineBaseline = "6bfa135c5a3bf6e8f787d603f15c8b636cb15965";
 
 describe("rollback environment compatibility", () => {
   it("removes only the three additive settings unknown to the production baseline", () => {
+    const omitted = [
+      "CLEAN_PAY_CONFIG_VERSION",
+      "CLEAN_PAY_UPGRADE_SOURCE_VERSION",
+      "PAYMENT_DATA_RETENTION_ENABLED",
+    ];
     expect(PRODUCTION_ROLLBACK_COMPATIBILITY).toEqual({
-      [productionBaseline]: [
-        "CLEAN_PAY_CONFIG_VERSION",
-        "CLEAN_PAY_UPGRADE_SOURCE_VERSION",
-        "PAYMENT_DATA_RETENTION_ENABLED",
-      ],
+      [productionBaseline]: omitted,
+      [mainLineBaseline]: omitted,
     });
     const input = [
       "# preserved comment",
