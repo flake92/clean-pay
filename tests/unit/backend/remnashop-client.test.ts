@@ -1181,25 +1181,6 @@ describe("remnashop client", () => {
     });
   });
 
-  it("blocks BOOTSTRAP sessions before token refresh or recovery", async () => {
-    const fetchSpy = vi.spyOn(globalThis, "fetch");
-    vi.mocked(getCurrentSession).mockResolvedValueOnce({
-      ...telegramSession(),
-      assuranceLevel: "BOOTSTRAP",
-      remnashopAccessTokenEncrypted: protectRemnashopToken("access"),
-      remnashopRefreshTokenEncrypted: protectRemnashopToken("refresh"),
-      remnashopAccessExpiresAt: new Date(Date.now() - 1_000),
-      remnashopRefreshExpiresAt: new Date(Date.now() + 60_000),
-    } as never);
-
-    await expect(getAuthorizedRemnashopTokens()).rejects.toMatchObject({
-      code: "PASSKEY_REQUIRED",
-      status: 403,
-    });
-    expect(lifecycleMock.acquireRemnashopTokensForSession).not.toHaveBeenCalled();
-    expect(fetchSpy).not.toHaveBeenCalled();
-  });
-
   it("rejects recovery for a missing or non-recoverable callback session", async () => {
     prismaMock.webSession.findFirst.mockResolvedValueOnce(null);
     await expect(

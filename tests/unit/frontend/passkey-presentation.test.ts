@@ -32,15 +32,13 @@ describe("passkey presentation policies", () => {
       .toBe("Не удалось войти быстрым способом.");
   });
 
-  it("keeps required and optional setup cancellation copy distinct", () => {
+  it("keeps setup cancellation copy optional", () => {
     const cancellation = Object.assign(new Error("cancel"), {
       name: "NotAllowedError",
     });
-    expect(passkeySetupErrorMessage(cancellation, true))
-      .toBe("Окно Passkey закрыто. Повторите настройку, чтобы завершить вход.");
-    expect(passkeySetupErrorMessage(cancellation, false))
+    expect(passkeySetupErrorMessage(cancellation))
       .toBe("Окно быстрого входа закрыто. Это не проблема, можно продолжить без него.");
-    expect(passkeySetupErrorMessage(new Error("other"), false))
+    expect(passkeySetupErrorMessage(new Error("other")))
       .toBe("Не удалось создать быстрый вход.");
   });
 });

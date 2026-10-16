@@ -29,12 +29,12 @@ export async function createWebSession(
   userId: string,
   {
     authMethod = WebSessionAuthMethod.EMAIL,
-    assuranceLevel = WebSessionAssuranceLevel.FULL,
   }: {
     authMethod?: WebSessionAuthMethod;
-    assuranceLevel?: WebSessionAssuranceLevel;
   } = {},
 ) {
+  // FULL is the only assurance level the application issues.
+  const assuranceLevel = WebSessionAssuranceLevel.FULL;
   const env = getEnv();
   const cookieStore = await cookies();
   const requestHeaders = await headers();
@@ -108,7 +108,6 @@ export async function createWebSessionForRemnashopUser({
   remnashopRefreshExpiresAt,
   tx,
   authMethod = WebSessionAuthMethod.EMAIL,
-  assuranceLevel = WebSessionAssuranceLevel.FULL,
   replaceExistingSessions = false,
 }: {
   userId: string;
@@ -118,9 +117,10 @@ export async function createWebSessionForRemnashopUser({
   remnashopRefreshExpiresAt: Date;
   tx?: Prisma.TransactionClient;
   authMethod?: WebSessionAuthMethod;
-  assuranceLevel?: WebSessionAssuranceLevel;
   replaceExistingSessions?: boolean;
 }) {
+  // FULL is the only assurance level the application issues.
+  const assuranceLevel = WebSessionAssuranceLevel.FULL;
   const env = getEnv();
   const immediateCookieStore = webSessionCookieEffectsAreDeferred()
     ? undefined

@@ -8,7 +8,7 @@ import {
   type RegistrationResponseJSON,
   type WebAuthnCredential as SimpleWebAuthnCredential,
 } from "@simplewebauthn/server";
-import { WebAuthnChallengeType, WebSessionAssuranceLevel, WebSessionAuthMethod } from "@prisma/client";
+import { WebAuthnChallengeType, WebSessionAuthMethod } from "@prisma/client";
 import { headers } from "next/headers";
 
 import {
@@ -27,7 +27,6 @@ import { verifyTurnstileToken } from "@/backend/security/turnstile";
 import {
   createWebSession,
   getCurrentSession,
-  upgradeCurrentSessionToFull,
 } from "@/backend/integrations/sessions/web-session-service";
 import { recordPasskeyUse } from "@/backend/integrations/auth/passkey-service";
 import { getAuthorizedRemnashopTokens } from "@/backend/integrations/remnashop/client";
@@ -117,7 +116,6 @@ export function createProductionPasskeyCommands(
     return {
       context: session,
       userId: session.userId,
-      assuranceLevel: session.assuranceLevel === WebSessionAssuranceLevel.FULL ? "FULL" : "BOOTSTRAP",
       email: session.user.email,
       emailVerified: session.user.emailVerified,
       telegramId: session.user.telegramId,
@@ -203,9 +201,8 @@ export function createProductionPasskeyCommands(
     });
   },
 
-  async upgradeRegistrationSession() { await adapt(() => upgradeCurrentSessionToFull()).then(() => undefined); },
-  async auditRegistration(actor, registration, upgraded) {
-    await adapt(() => auditLog({ action: "passkey_registered", userId: actor.userId, metadata: { credentialId: registration.credentialId, upgraded } }));
+  async auditRegistration(actor, registration) {
+    await adapt(() => auditLog({ action: "passkey_registered", userId: actor.userId, metadata: { credentialId: registration.credentialId } }));
   },
 
   async assertLoginOptionsRateLimit(email) {
@@ -279,7 +276,6 @@ export function createProductionPasskeyCommands(
   async createAuthenticatedSession(userId) {
     const session = await adapt(() => createWebSession(userId, {
       authMethod: WebSessionAuthMethod.PASSKEY,
-      assuranceLevel: WebSessionAssuranceLevel.FULL,
     }));
 
     // A passkey proves the local account but does not itself carry the

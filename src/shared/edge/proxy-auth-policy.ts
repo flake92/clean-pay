@@ -1,7 +1,4 @@
-import {
-  passkeySetupPath,
-  registrationEmailVerificationPath,
-} from "@/shared/auth/account-setup-flow";
+import { registrationEmailVerificationPath } from "@/shared/auth/account-setup-flow";
 import { safeRedirectPath } from "@/shared/auth/redirect-policy";
 
 export const accessCookieName = "clean_pay_access";
@@ -9,8 +6,6 @@ export const refreshCookieName = "clean_pay_refresh";
 
 export type AccessState = {
   authenticated: boolean;
-  fullAuthenticated: boolean;
-  bootstrapAuthenticated: boolean;
   emailVerificationRequired: boolean;
   hasRefreshToken: boolean;
 };
@@ -18,8 +13,6 @@ export type AccessState = {
 function unauthenticatedAccessState(hasRefreshToken: boolean): AccessState {
   return {
     authenticated: false,
-    fullAuthenticated: false,
-    bootstrapAuthenticated: false,
     emailVerificationRequired: false,
     hasRefreshToken,
   };
@@ -95,7 +88,13 @@ export async function getAccessState({
       al?: unknown;
     };
 
-    if (typeof parsed.exp !== "number" || parsed.exp <= nowEpochSeconds()) {
+    // FULL is the only assurance level the application issues; any other
+    // (retired) level is not a usable session.
+    if (
+      typeof parsed.exp !== "number"
+      || parsed.exp <= nowEpochSeconds()
+      || parsed.al !== "FULL"
+    ) {
       return unauthenticatedAccessState(hasRefreshToken);
     }
 
@@ -106,12 +105,9 @@ export async function getAccessState({
     }
 
     const authenticated = safeEqual(signature, await hmacSha256(payload, secret));
-    const assuranceLevel = parsed.al === "BOOTSTRAP" ? "BOOTSTRAP" : "FULL";
 
     return {
       authenticated,
-      fullAuthenticated: authenticated && assuranceLevel === "FULL",
-      bootstrapAuthenticated: authenticated && assuranceLevel === "BOOTSTRAP",
       emailVerificationRequired: authenticated && parsed.ev === false && parsed.tg !== true,
       hasRefreshToken,
     };
@@ -159,18 +155,12 @@ export function refreshSessionRedirectPolicy({
 
 export function authenticatedEntryRedirectPolicy({
   requestedRedirect,
-  bootstrapAuthenticated,
   emailVerificationRequired,
 }: {
   requestedRedirect: string | null;
-  bootstrapAuthenticated: boolean;
   emailVerificationRequired: boolean;
 }) {
   const redirectTo = safeRedirectPath(requestedRedirect) ?? "/cabinet";
-
-  if (bootstrapAuthenticated) {
-    return passkeySetupPath(redirectTo);
-  }
 
   return emailVerificationRequired
     ? registrationEmailVerificationPath(redirectTo)
@@ -178,16 +168,10 @@ export function authenticatedEntryRedirectPolicy({
 }
 
 export function authenticatedInviteRedirectPolicy({
-  bootstrapAuthenticated,
   emailVerificationRequired,
 }: {
-  bootstrapAuthenticated: boolean;
   emailVerificationRequired: boolean;
 }) {
-  if (bootstrapAuthenticated) {
-    return passkeySetupPath("/tariffs");
-  }
-
   return emailVerificationRequired
     ? registrationEmailVerificationPath("/tariffs")
     : "/tariffs";
@@ -195,8 +179,4 @@ export function authenticatedInviteRedirectPolicy({
 
 export function emailVerificationRedirectPolicy(pathname: string, search: string) {
   return registrationEmailVerificationPath(safeRedirectTarget(pathname, search));
-}
-
-export function passkeySetupRedirectPolicy(pathname: string, search: string) {
-  return passkeySetupPath(safeRedirectTarget(pathname, search));
 }

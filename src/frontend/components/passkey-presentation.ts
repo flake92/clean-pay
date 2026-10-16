@@ -54,11 +54,9 @@ export function passkeyLoginErrorMessage(error: unknown) {
   return "Не удалось войти быстрым способом.";
 }
 
-export function passkeySetupErrorMessage(error: unknown, required: boolean) {
+export function passkeySetupErrorMessage(error: unknown) {
   if (isPasskeyUserCancellation(error)) {
-    return required
-      ? "Окно Passkey закрыто. Повторите настройку, чтобы завершить вход."
-      : "Окно быстрого входа закрыто. Это не проблема, можно продолжить без него.";
+    return "Окно быстрого входа закрыто. Это не проблема, можно продолжить без него.";
   }
   if (isPasskeyTransportError(error)) {
     return "Браузер не смог связаться с ключом. Для ключа на телефоне включите Bluetooth на компьютере и телефоне, держите телефон рядом и повторите попытку.";

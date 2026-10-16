@@ -1,5 +1,3 @@
-import { WebSessionAssuranceLevel } from "@prisma/client";
-
 import { ServiceError } from "@/backend/errors/service-error";
 import {
   getJwtExpiresAt,
@@ -154,14 +152,6 @@ export async function getStoredAuthorizedRemnashopTokens({
     throw normalizeRemnashopError(401, "Not authenticated", {
       path: "/auth/session",
     });
-  }
-
-  if (localSession.assuranceLevel === WebSessionAssuranceLevel.BOOTSTRAP) {
-    throw new ServiceError(
-      "PASSKEY_REQUIRED",
-      403,
-      "Create a passkey to continue",
-    );
   }
 
   if (!allowUnverifiedEmail) {

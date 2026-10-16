@@ -76,7 +76,7 @@ describe("production Telegram account merge gateway", () => {
   });
 
   it("implements every persistence and provider primitive", async () => {
-    await expect(gateway.loadActor()).resolves.toEqual({ userId: "user-1", fullAssurance: true });
+    await expect(gateway.loadActor()).resolves.toEqual({ userId: "user-1" });
     const confirmation = await gateway.loadConfirmation("user-1");
     await gateway.assertRateLimit(confirmation.telegramId);
     await gateway.audit({ action: "merge", userId: "user-1" });
@@ -201,11 +201,9 @@ describe("production Telegram account merge gateway", () => {
     expect(mocks.prisma.accountMergeConfirmation.updateMany).not.toHaveBeenCalled();
   });
 
-  it("fails closed for missing sessions, bootstrap sessions and absent confirmations", async () => {
+  it("fails closed for missing sessions and absent confirmations", async () => {
     mocks.getCurrentSession.mockResolvedValueOnce(null);
     await expect(gateway.loadActor()).resolves.toBeNull();
-    mocks.getCurrentSession.mockResolvedValueOnce({ userId: "user-1", assuranceLevel: "BOOTSTRAP" });
-    await expect(gateway.loadActor()).resolves.toEqual({ userId: "user-1", fullAssurance: false });
     mocks.cookieGet.mockReturnValueOnce(undefined);
     await expect(gateway.loadConfirmation("user-1")).rejects.toMatchObject({ code: "NOT_FOUND" });
     mocks.prisma.webUser.findUnique.mockResolvedValueOnce(null);

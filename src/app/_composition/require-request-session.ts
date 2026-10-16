@@ -62,13 +62,3 @@ export function requestSessionHasNoEmailToConfirm(session: {
   const verified = Boolean(email && emailVerified);
   return !verified && !pendingEmail;
 }
-
-export function requestSessionRequiresPasskey(session: { context: unknown }) {
-  const context = session.context;
-  return Boolean(
-    context &&
-      typeof context === "object" &&
-      "assuranceLevel" in context &&
-      context.assuranceLevel === "BOOTSTRAP",
-  );
-}

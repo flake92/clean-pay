@@ -2,7 +2,6 @@ import type { LinkAccountPasskeyViewModel } from "@/application/models/link-acco
 
 type PasskeyManagementActor = {
   userId: string;
-  fullAssurance: boolean;
   email: string | null;
   emailVerified: boolean;
   telegramId: string | null;

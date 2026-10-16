@@ -79,7 +79,7 @@ export function createProductionLinkAccountReader(
   return {
     async loadMergeActor() {
       const session = await adapt(readSession);
-      return session ? { userId: session.userId, fullAssurance: session.assuranceLevel === "FULL" } : null;
+      return session ? { userId: session.userId } : null;
     },
     async loadTelegramMergeConfirmation(userId) {
       try {
@@ -129,7 +129,6 @@ export function createProductionLinkAccountCommands(): LinkAccountCommands {
       telegramId: session.user.telegramId,
       telegramUsername: session.user.telegramUsername,
       upstreamAccountId: session.user.remnashopUserId,
-      fullAssurance: session.assuranceLevel === "FULL",
     };
   },
 

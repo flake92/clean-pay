@@ -7,7 +7,6 @@ import {
   authenticatedInviteRedirectPolicy,
   emailVerificationRedirectPolicy,
   getAccessState,
-  passkeySetupRedirectPolicy,
   refreshSessionRedirectPolicy,
   safeRedirectTarget,
 } from "@/shared/edge/proxy-auth-policy";
@@ -22,7 +21,7 @@ function signedAccessToken(
 }
 
 describe("proxy auth and redirect policy", () => {
-  it("projects valid FULL and BOOTSTRAP access claims without promoting a refresh candidate", async () => {
+  it("accepts only FULL access claims without promoting a refresh candidate", async () => {
     const baseClaims = { exp: 2_000, ev: true };
     await expect(getAccessState({
       token: signedAccessToken({ ...baseClaims, al: "FULL" }),
@@ -31,23 +30,21 @@ describe("proxy auth and redirect policy", () => {
       nowEpochSeconds: () => 1_000,
     })).resolves.toEqual({
       authenticated: true,
-      fullAuthenticated: true,
-      bootstrapAuthenticated: false,
       emailVerificationRequired: false,
       hasRefreshToken: true,
     });
-    await expect(getAccessState({
-      token: signedAccessToken({ ...baseClaims, al: "BOOTSTRAP", ev: false }),
-      hasRefreshToken: false,
-      jwtSecret: () => "test-secret",
-      nowEpochSeconds: () => 1_000,
-    })).resolves.toEqual({
-      authenticated: true,
-      fullAuthenticated: false,
-      bootstrapAuthenticated: true,
-      emailVerificationRequired: true,
-      hasRefreshToken: false,
-    });
+    for (const al of ["BOOTSTRAP", undefined, "full"]) {
+      await expect(getAccessState({
+        token: signedAccessToken({ ...baseClaims, al, ev: false }),
+        hasRefreshToken: false,
+        jwtSecret: () => "test-secret",
+        nowEpochSeconds: () => 1_000,
+      })).resolves.toEqual({
+        authenticated: false,
+        emailVerificationRequired: false,
+        hasRefreshToken: false,
+      });
+    }
   });
 
   it("requires verification for a direct e-mail cabinet session without restricting Telegram-only access", async () => {
@@ -76,15 +73,13 @@ describe("proxy auth and redirect policy", () => {
   it("fails closed for expired, malformed, missing-secret, and invalid-signature tokens", async () => {
     const secret = vi.fn(() => "test-secret");
     const expired = await getAccessState({
-      token: signedAccessToken({ exp: 999, ev: true }),
+      token: signedAccessToken({ exp: 999, al: "FULL", ev: true }),
       hasRefreshToken: true,
       jwtSecret: secret,
       nowEpochSeconds: () => 1_000,
     });
     expect(expired).toEqual({
       authenticated: false,
-      fullAuthenticated: false,
-      bootstrapAuthenticated: false,
       emailVerificationRequired: false,
       hasRefreshToken: true,
     });
@@ -92,7 +87,7 @@ describe("proxy auth and redirect policy", () => {
 
     for (const token of [
       "malformed",
-      signedAccessToken({ exp: 2_000, ev: true }, "wrong-secret"),
+      signedAccessToken({ exp: 2_000, al: "FULL", ev: true }, "wrong-secret"),
     ]) {
       await expect(getAccessState({
         token,
@@ -102,7 +97,7 @@ describe("proxy auth and redirect policy", () => {
       })).resolves.toMatchObject({ authenticated: false });
     }
     await expect(getAccessState({
-      token: signedAccessToken({ exp: 2_000, ev: true }),
+      token: signedAccessToken({ exp: 2_000, al: "FULL", ev: true }),
       hasRefreshToken: false,
       jwtSecret: () => undefined,
       nowEpochSeconds: () => 1_000,
@@ -140,24 +135,22 @@ describe("proxy auth and redirect policy", () => {
     });
   });
 
-  it("derives the same invite, verification, and passkey destinations", () => {
+  it("derives the same invite and verification destinations", () => {
     expect(authenticatedEntryRedirectPolicy({
       requestedRedirect: "/payment?plan=pro#resume",
-      bootstrapAuthenticated: true,
       emailVerificationRequired: false,
-    })).toBe("/passkey/setup?redirect_to=%2Fpayment%3Fplan%3Dpro%23resume");
+    })).toBe("/payment?plan=pro#resume");
     expect(authenticatedEntryRedirectPolicy({
       requestedRedirect: "/payment?plan=pro",
-      bootstrapAuthenticated: false,
       emailVerificationRequired: true,
     })).toBe("/register/verify-email?redirect_to=%2Fpayment%3Fplan%3Dpro");
     expect(authenticatedInviteRedirectPolicy({
-      bootstrapAuthenticated: false,
       emailVerificationRequired: false,
     })).toBe("/tariffs");
+    expect(authenticatedInviteRedirectPolicy({
+      emailVerificationRequired: true,
+    })).toBe("/register/verify-email?redirect_to=%2Ftariffs");
     expect(emailVerificationRedirectPolicy("/profile", "?tab=email"))
       .toBe("/register/verify-email?redirect_to=%2Fprofile%3Ftab%3Demail");
-    expect(passkeySetupRedirectPolicy("/payment", "?plan=pro"))
-      .toBe("/passkey/setup?redirect_to=%2Fpayment%3Fplan%3Dpro");
   });
 });

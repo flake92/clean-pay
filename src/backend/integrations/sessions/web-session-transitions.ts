@@ -2,7 +2,7 @@ type VerifiedAccessToken = {
   sid: string;
   uid: string;
   exp: number;
-  al?: "BOOTSTRAP" | "FULL";
+  al?: string;
   ev?: boolean;
   tg?: boolean;
 };
@@ -21,7 +21,8 @@ export function resolveWebAccessCredential(
   }
 
   const payload = verify(accessToken);
-  return payload
+  // FULL is the only assurance level the application issues.
+  return payload && payload.al === "FULL"
     ? { kind: "valid", payload }
     : { kind: "invalid" };
 }

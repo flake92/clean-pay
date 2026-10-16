@@ -87,14 +87,11 @@ export async function resolveAuthProfile(gateway: AuthProfileGateway): Promise<A
   try {
     authorized = await gateway.authorizeCurrentSession();
   } catch (error) {
-    if (error instanceof AuthProfileError &&
-      (error.code === "EMAIL_REQUIRED" || error.code === "PASSKEY_REQUIRED")) {
+    if (error instanceof AuthProfileError && error.code === "EMAIL_REQUIRED") {
       gateway.debug("auth_me_local_profile_returned", {
         sessionId: session.id, userId: session.userId, authMethod: session.authMethod,
         hasUpstreamTokens: false,
-        reason: error.code === "PASSKEY_REQUIRED"
-          ? "passkey_required"
-          : "no_claimable_upstream_token_bundle",
+        reason: "no_claimable_upstream_token_bundle",
       });
       return localProfile(session);
     }

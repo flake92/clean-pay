@@ -3,7 +3,6 @@ import { describe, expect, it } from "vitest";
 import {
   accessLogRouteTemplate,
   canonicalConfusableProtectedPath,
-  isBootstrapAllowedPath,
   isEmailVerificationAllowedPath,
   isInternalServiceRequest,
   isPublicPath,
@@ -13,7 +12,7 @@ import {
 } from "@/shared/edge/proxy-route-policy";
 
 describe("proxy route classification policy", () => {
-  it("keeps the exact public, bootstrap, verification, and removed route sets", () => {
+  it("keeps the exact public, verification, and removed route sets", () => {
     expect([
       "/manifest.webmanifest",
       "/install",
@@ -34,8 +33,6 @@ describe("proxy route classification policy", () => {
       "/invite/Friend42",
     ].every(isPublicPath)).toBe(true);
     expect(isPublicPath("/auth/session/recovery-fake")).toBe(false);
-    expect(isBootstrapAllowedPath("/passkey/setup")).toBe(true);
-    expect(isBootstrapAllowedPath("/passkey/setup/extra")).toBe(false);
     expect(isEmailVerificationAllowedPath("/verify-email")).toBe(true);
     expect(isEmailVerificationAllowedPath("/register/verify-email")).toBe(true);
     expect(isRemovedBrowserTransportPath("/api/bff/payments/status")).toBe(true);

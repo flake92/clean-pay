@@ -8,7 +8,6 @@ import {
   authenticatedInviteRedirectPolicy,
   emailVerificationRedirectPolicy,
   getAccessState,
-  passkeySetupRedirectPolicy,
   refreshCookieName,
   refreshSessionRedirectPolicy,
   safeRedirectTarget,
@@ -17,7 +16,6 @@ import { browserMutationPolicy } from "@/shared/edge/proxy-mutation-policy";
 import {
   accessLogRouteTemplate,
   canonicalConfusableProtectedPath,
-  isBootstrapAllowedPath,
   isEmailVerificationAllowedPath,
   isInternalServiceRequest,
   isInvitePath,
@@ -110,7 +108,6 @@ function loginRedirect(request: NextRequest) {
 function authenticatedRedirect(request: NextRequest, emailVerificationRequired: boolean) {
   const target = authenticatedEntryRedirectPolicy({
     requestedRedirect: request.nextUrl.searchParams.get('redirect_to'),
-    bootstrapAuthenticated: false,
     emailVerificationRequired,
   });
 
@@ -152,8 +149,6 @@ function requestMetadata(
     isApi: pathname.startsWith('/api/'),
     authenticated: accessState.authenticated,
     accessAuthenticated: accessState.authenticated,
-    fullAuthenticated: accessState.fullAuthenticated,
-    bootstrapAuthenticated: accessState.bootstrapAuthenticated,
     hasRefreshToken: accessState.hasRefreshToken,
     emailVerificationRequired: accessState.emailVerificationRequired,
     requestId: security.requestId,
@@ -211,7 +206,6 @@ export async function proxy(request: NextRequest) {
   // server handler validate it. Deleting it here on ordinary navigation would
   // destroy a valid session whenever the short-lived access cookie expires.
   const isAuthenticated = accessState.authenticated || accessState.hasRefreshToken;
-  const isBootstrapAuthenticated = accessState.bootstrapAuthenticated && !accessState.fullAuthenticated;
   const metadata = requestMetadata(request, accessState, security, accessLogPathname);
   const isRoutineReadinessProbe = matchesRoutineReadinessProbe(pathname, request.method);
 
@@ -242,9 +236,8 @@ export async function proxy(request: NextRequest) {
     return secureResponse(refreshSessionRedirect(request), security);
   }
 
-  if (isInvitePath(pathname) && (accessState.authenticated || isBootstrapAuthenticated)) {
+  if (isInvitePath(pathname) && accessState.authenticated) {
     const redirectTo = authenticatedInviteRedirectPolicy({
-      bootstrapAuthenticated: isBootstrapAuthenticated,
       emailVerificationRequired: accessState.emailVerificationRequired,
     });
     const response = NextResponse.redirect(localRedirectUrl(request, redirectTo));
@@ -292,10 +285,9 @@ export async function proxy(request: NextRequest) {
   }
 
   if (isPublicPath(pathname)) {
-    if ((accessState.authenticated || isBootstrapAuthenticated) && (pathname === '/login' || pathname === '/register')) {
+    if (accessState.authenticated && (pathname === '/login' || pathname === '/register')) {
       const redirectTo = authenticatedEntryRedirectPolicy({
         requestedRedirect: request.nextUrl.searchParams.get('redirect_to'),
-        bootstrapAuthenticated: isBootstrapAuthenticated,
         emailVerificationRequired: accessState.emailVerificationRequired,
       });
       logger.info("http_request_decision", {
@@ -309,13 +301,6 @@ export async function proxy(request: NextRequest) {
         source: "http.access",
         message: `${request.method} ${accessLogPathname} -> 307 redirect authenticated user`,
       });
-      if (isBootstrapAuthenticated) {
-        return secureResponse(
-          NextResponse.redirect(localRedirectUrl(request, redirectTo)),
-          security,
-        );
-      }
-
       return secureResponse(
         authenticatedRedirect(request, accessState.emailVerificationRequired),
         security,
@@ -338,10 +323,7 @@ export async function proxy(request: NextRequest) {
     return continueRequest(security);
   }
 
-  // A BOOTSTRAP access token represents a deliberately restricted session.
-  // Its refresh cookie is only a session candidate and must not promote it to
-  // the general authenticated path before the passkey setup is completed.
-  if (isAuthenticated && !isBootstrapAuthenticated) {
+  if (isAuthenticated) {
     if (accessState.emailVerificationRequired && !isEmailVerificationAllowedPath(pathname)) {
       if (pathname.startsWith('/api/')) {
         logger.warn("http_request_decision", {
@@ -388,55 +370,6 @@ export async function proxy(request: NextRequest) {
       message: `${request.method} ${accessLogPathname} -> allow authenticated`,
     });
     return continueRequest(security);
-  }
-
-  if (isBootstrapAuthenticated) {
-    if (isBootstrapAllowedPath(pathname)) {
-      logger.info("http_request_decision", {
-        ...metadata,
-        action: "allow_bootstrap",
-        status: 200,
-      }, {
-        category: "http",
-        source: "http.access",
-        message: `${request.method} ${accessLogPathname} -> allow bootstrap`,
-      });
-      return continueRequest(security);
-    }
-
-    if (pathname.startsWith('/api/')) {
-      logger.warn("http_request_decision", {
-        ...metadata,
-        action: "block_bootstrap",
-        status: 403,
-      }, {
-        category: "http",
-        source: "http.access",
-        message: `${request.method} ${accessLogPathname} -> 403 passkey required`,
-      });
-      return secureResponse(NextResponse.json(
-        { error: { code: 'PASSKEY_REQUIRED', message: 'Создайте ключ доступа, чтобы продолжить.' } },
-        { status: 403 },
-      ), security);
-    }
-
-    const redirectTarget = passkeySetupRedirectPolicy(
-      request.nextUrl.pathname,
-      request.nextUrl.search,
-    );
-    const url = localRedirectUrl(request, redirectTarget);
-
-    logger.info("http_request_decision", {
-      ...metadata,
-      action: "redirect_passkey_setup",
-      status: 307,
-      redirectTo: accessLogRouteTemplate(redirectTarget),
-    }, {
-      category: "http",
-      source: "http.access",
-      message: `${request.method} ${accessLogPathname} -> 307 passkey setup`,
-    });
-    return secureResponse(NextResponse.redirect(url), security);
   }
 
   if (pathname.startsWith('/api/')) {

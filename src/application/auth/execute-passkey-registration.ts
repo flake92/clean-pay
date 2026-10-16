@@ -28,9 +28,7 @@ function failure(
 }
 
 function assertRegistrationPolicy(actor: PasskeyRegistrationActor) {
-  const issue = actor.assuranceLevel === "FULL"
-    ? accountAccessIssue(actor)
-    : null;
+  const issue = accountAccessIssue(actor);
   if (issue) throw new PasskeyGatewayError(issue);
 }
 
@@ -67,9 +65,7 @@ export async function verifyPasskeyRegistration(
     const registration = await commands.verifyRegistration(response, challenge);
     await commands.persistRegistration(actor, response, registration);
     await commands.markRegistrationComplete(actor);
-    const upgraded = actor.assuranceLevel !== "FULL";
-    if (upgraded) await commands.upgradeRegistrationSession();
-    await commands.auditRegistration(actor, registration, upgraded);
+    await commands.auditRegistration(actor, registration);
     return { ok: true };
   } catch (error) {
     return failure(error, "Не удалось сохранить быстрый вход.");

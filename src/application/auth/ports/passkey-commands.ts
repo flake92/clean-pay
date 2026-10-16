@@ -5,7 +5,6 @@ export class PasskeyGatewayError extends Error {
 export type PasskeyRegistrationActor = {
   context: unknown;
   userId: string;
-  assuranceLevel: "FULL" | "BOOTSTRAP";
   email: string | null;
   emailVerified: boolean;
   telegramId: string | null;
@@ -41,8 +40,7 @@ export interface PasskeyCommands {
   verifyRegistration(response: unknown, challenge: PasskeyChallenge): Promise<VerifiedRegistration>;
   persistRegistration(actor: PasskeyRegistrationActor, response: unknown, registration: VerifiedRegistration): Promise<void>;
   markRegistrationComplete(actor: PasskeyRegistrationActor): Promise<void>;
-  upgradeRegistrationSession(): Promise<void>;
-  auditRegistration(actor: PasskeyRegistrationActor, registration: VerifiedRegistration, upgraded: boolean): Promise<void>;
+  auditRegistration(actor: PasskeyRegistrationActor, registration: VerifiedRegistration): Promise<void>;
   assertLoginOptionsRateLimit(email: string): Promise<void>;
   withLoginOptionsConcurrency<T>(work: () => Promise<T>): Promise<T>;
   findLoginAccount(email: string): Promise<PasskeyLoginAccount | null>;
@@ -86,6 +84,5 @@ export type PasskeyRegistrationCommands = Pick<
   | "persistRegistration"
   | "registrationChallenge"
   | "storeRegistrationChallenge"
-  | "upgradeRegistrationSession"
   | "verifyRegistration"
 >;

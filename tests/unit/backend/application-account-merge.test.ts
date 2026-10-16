@@ -21,7 +21,7 @@ function gateway(): TelegramAccountMergeGateway {
     emailVerified: true, pendingEmail: null,
   };
   return {
-    loadActor: vi.fn(async () => ({ userId: "user-1", fullAssurance: true })),
+    loadActor: vi.fn(async () => ({ userId: "user-1" })),
     loadConfirmation: vi.fn(async () => confirmation), assertRateLimit: vi.fn(async () => undefined),
     audit: vi.fn(async () => undefined), claim: vi.fn(async () => true),
     withOwnerChangeFence: vi.fn(async (_confirmation, work) => work()),
@@ -43,7 +43,6 @@ function gateway(): TelegramAccountMergeGateway {
 describe("Telegram account merge application workflow", () => {
   it.each([
     [null, "UNAUTHORIZED"],
-    [{ userId: "user-1", fullAssurance: false }, "PASSKEY_REQUIRED"],
   ])("authorizes the actor before loading merge state", async (actor, code) => {
     const port = gateway();
     port.loadActor = vi.fn(async () => actor);

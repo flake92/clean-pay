@@ -23,7 +23,7 @@ function callbackError(status: string | null) {
 
 async function loadManagedPasskeys(gateway: PasskeyManagementGateway) {
   const actor = await gateway.loadActor();
-  if (!actor || !actor.fullAssurance) throw new LinkAccountGatewayError("UNAUTHORIZED");
+  if (!actor) throw new LinkAccountGatewayError("UNAUTHORIZED");
   const issue = accountAccessIssue(actor);
   if (issue) throw new LinkAccountGatewayError(issue);
   return gateway.loadOwned(actor.userId);
@@ -32,7 +32,6 @@ async function loadManagedPasskeys(gateway: PasskeyManagementGateway) {
 async function loadMergeConfirmation(reader: LinkAccountReader) {
   const actor = await reader.loadMergeActor();
   if (!actor) throw new LinkAccountGatewayError("UNAUTHORIZED");
-  if (!actor.fullAssurance) throw new LinkAccountGatewayError("PASSKEY_REQUIRED");
   const confirmation = await reader.loadTelegramMergeConfirmation(actor.userId);
   if (!confirmation
     || (confirmation.expiresAt <= new Date() && !confirmation.recoverableAfterExpiry)
@@ -181,7 +180,6 @@ export async function linkAccountEmail(
     const email = input.email.trim().toLowerCase();
     const actor = await commands.loadLinkActor();
     if (!actor) throw new LinkAccountGatewayError("UNAUTHORIZED");
-    if (!actor.fullAssurance) throw new LinkAccountGatewayError("PASSKEY_REQUIRED");
     await commands.assertLinkRateLimit(email);
     let providerSession: { context: unknown };
     let source: "login" | "register" = "login";
@@ -247,7 +245,7 @@ export async function cancelLinkedTelegram(gateway: TelegramAccountMergeGateway)
 export async function removeLinkedPasskey(gateway: PasskeyManagementGateway, id: string): Promise<LinkAccountCommandResult> {
   try {
     const actor = await gateway.loadActor();
-    if (!actor || !actor.fullAssurance) throw new LinkAccountGatewayError("UNAUTHORIZED");
+    if (!actor) throw new LinkAccountGatewayError("UNAUTHORIZED");
     const issue = accountAccessIssue(actor);
     if (issue) throw new LinkAccountGatewayError(issue);
     const deleted = await gateway.deleteOwned(actor.userId, id);

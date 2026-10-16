@@ -227,7 +227,6 @@ describe("provider session recovery route", () => {
   });
 
   it.each([
-    ["PASSKEY_REQUIRED", "/passkey/setup", null, null],
     ["EMAIL_REQUIRED", "/link-account", "reason", "email-required"],
     ["EMAIL_NOT_VERIFIED", "/verify-email", "flow", "telegram-email"],
   ] as const)("routes %s into its guided recovery flow", async (

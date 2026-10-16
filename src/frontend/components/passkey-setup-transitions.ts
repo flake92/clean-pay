@@ -1,14 +1,14 @@
 export type PasskeySetupState = Readonly<{
   error: string | null;
   name: string;
-  phase: "creating" | "idle" | "restarting";
+  phase: "creating" | "idle";
 }>;
 
 export type PasskeySetupEvent =
   | { type: "failed"; message: string }
   | { type: "name-changed"; value: string }
   | { type: "settled" }
-  | { type: "started"; operation: "create" | "restart" };
+  | { type: "started" };
 
 export const initialPasskeySetupState: PasskeySetupState = Object.freeze({
   error: null,
@@ -28,11 +28,7 @@ export function reducePasskeySetup(
     case "settled":
       return { ...state, phase: "idle" };
     case "started":
-      return {
-        ...state,
-        error: null,
-        phase: event.operation === "create" ? "creating" : "restarting",
-      };
+      return { ...state, error: null, phase: "creating" };
   }
 }
 
@@ -41,6 +37,5 @@ export function selectPasskeySetupView(state: PasskeySetupState) {
     error: state.error,
     loading: state.phase === "creating",
     name: state.name,
-    restarting: state.phase === "restarting",
   };
 }

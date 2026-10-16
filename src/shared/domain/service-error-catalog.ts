@@ -1,6 +1,7 @@
 export const SERVICE_ERROR_PUBLIC_MESSAGES = {
   UNAUTHORIZED: "Войдите в аккаунт, чтобы продолжить.",
   AUTH_FAILED: "Не удалось войти. Проверьте данные.",
+  // Retired: no code path raises it; kept so historical error snapshots parse.
   PASSKEY_REQUIRED: "Создайте ключ доступа, чтобы продолжить.",
   CURRENT_PASSWORD_INVALID: "Текущий пароль неверный.",
   PASSWORD_UNCHANGED: "Новый пароль должен отличаться от текущего.",

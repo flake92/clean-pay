@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const mocks = vi.hoisted(() => ({
   generateRegistrationOptions: vi.fn(), verifyRegistrationResponse: vi.fn(),
   generateAuthenticationOptions: vi.fn(), verifyAuthenticationResponse: vi.fn(),
-  getCurrentSession: vi.fn(), upgradeCurrentSessionToFull: vi.fn(), createWebSession: vi.fn(),
+  getCurrentSession: vi.fn(), createWebSession: vi.fn(),
   getAuthorizedRemnashopTokens: vi.fn(), authDebugLog: vi.fn(),
   verifyTurnstileToken: vi.fn(), assertRateLimit: vi.fn(), withAuthConcurrency: vi.fn(), auditLog: vi.fn(),
   recordPasskeyUse: vi.fn(),
@@ -23,7 +23,7 @@ vi.mock("@simplewebauthn/server", () => ({
 }));
 vi.mock("@/backend/database/prisma", () => ({ prisma: mocks.prisma }));
 vi.mock("@/backend/integrations/sessions/web-session-service", () => ({
-  getCurrentSession: mocks.getCurrentSession, upgradeCurrentSessionToFull: mocks.upgradeCurrentSessionToFull,
+  getCurrentSession: mocks.getCurrentSession,
   createWebSession: mocks.createWebSession,
 }));
 vi.mock("@/backend/integrations/remnashop/client", () => ({
@@ -116,13 +116,6 @@ describe("production passkey gateway through application workflows", () => {
     expect(mocks.auditLog).toHaveBeenCalledWith(expect.objectContaining({ action: "passkey_registered" }));
   });
 
-  it("upgrades the registration session through the production adapter", async () => {
-    mocks.upgradeCurrentSessionToFull.mockResolvedValue({ id: "session-full" });
-
-    await expect(gateway.upgradeRegistrationSession()).resolves.toBeUndefined();
-    expect(mocks.upgradeCurrentSessionToFull).toHaveBeenCalledOnce();
-  });
-
   it("generates login options under Turnstile, rate and concurrency guards", async () => {
     await expect(beginPasskeyLogin(gateway, { email: " U@Example.com ", turnstileToken: "human" })).resolves.toEqual({ ok: true, options: { challenge: "authentication" } });
     expect(mocks.verifyTurnstileToken).toHaveBeenCalledWith("human", "auth_login");
@@ -146,7 +139,7 @@ describe("production passkey gateway through application workflows", () => {
     await expect(verifyPasskeyLogin(gateway, authenticationResponse)).resolves.toEqual({ ok: true });
     expect(mocks.verifyAuthenticationResponse).toHaveBeenCalledWith(expect.objectContaining({ expectedChallenge: "authentication" }));
     expect(mocks.recordPasskeyUse).toHaveBeenCalledWith(expect.objectContaining({ oldCounter: 1n, newCounter: 2n }));
-    expect(mocks.createWebSession).toHaveBeenCalledWith("user-1", expect.objectContaining({ authMethod: "PASSKEY", assuranceLevel: "FULL" }));
+    expect(mocks.createWebSession).toHaveBeenCalledWith("user-1", { authMethod: "PASSKEY" });
     expect(mocks.getAuthorizedRemnashopTokens).toHaveBeenCalledWith({ allowUnverifiedEmail: true });
     expect(mocks.auditLog).toHaveBeenCalledWith(expect.objectContaining({ action: "passkey_login" }));
   });
@@ -195,12 +188,13 @@ describe("production passkey gateway through application workflows", () => {
 
   it("uses stable registration identity fallbacks and preserves pending merges", async () => {
     mocks.getCurrentSession.mockResolvedValueOnce({
-      ...session, assuranceLevel: "BOOTSTRAP",
+      ...session,
       user: { ...session.user, email: null, telegramUsername: null, telegramId: "777", displayName: null,
         pendingRemnashopUserId: "pending-owner", pendingRemnashopEmail: "pending@example.com" },
     });
     const actor = await gateway.loadRegistrationActor();
-    expect(actor).toMatchObject({ assuranceLevel: "BOOTSTRAP", hasPendingAccountMerge: true });
+    expect(actor).toMatchObject({ hasPendingAccountMerge: true });
+    expect(actor).not.toHaveProperty("assuranceLevel");
     await gateway.generateRegistrationOptions(actor!);
     expect(mocks.generateRegistrationOptions).toHaveBeenCalledWith(expect.objectContaining({ userName: "777", userDisplayName: "777" }));
     await gateway.markRegistrationComplete(actor!);

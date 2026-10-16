@@ -2,7 +2,7 @@ import { auditLog } from "@/backend/observability/audit";
 import { authDebugLog } from "@/backend/observability/auth-debug-log";
 import { prisma } from "@/backend/database/prisma";
 import { ServiceError } from "@/backend/errors/service-error";
-import { WebSessionAssuranceLevel, type Prisma } from "@prisma/client";
+import type { Prisma } from "@prisma/client";
 import {
   getRemnashopMe,
   getRemnashopUserIdFromAccessToken,
@@ -285,7 +285,6 @@ export async function createSessionFromRemnashopAuth({
           remnashopRefreshTokenEncrypted: protectRemnashopToken(refreshToken),
           remnashopAccessExpiresAt: new Date(auth.expires_at),
           remnashopRefreshExpiresAt: new Date(auth.refresh_expires_at),
-          assuranceLevel: WebSessionAssuranceLevel.FULL,
           replaceExistingSessions,
           tx,
         });

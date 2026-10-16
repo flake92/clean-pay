@@ -20,10 +20,8 @@ import {
   replaceWebSessionAfterPasswordChangeRecord,
   revokeActiveWebSessionIdentity,
   revokeActiveWebSessionsForUser,
-  upgradeWebSessionToFull,
 } from "@/backend/integrations/sessions/web-session-repository";
 import {
-  getWebSessionAccessExpiry,
   getWebSessionExpiryWindow,
   getWebSessionRevocationSource,
   resolveWebAccessCredential,
@@ -463,39 +461,6 @@ export async function setDurableCallbackReplayCookies(
     refreshToken: bootstrapRefreshToken,
   });
   return session;
-}
-
-export async function upgradeCurrentSessionToFull() {
-  const session = await getCurrentSession();
-
-  if (!session) {
-    return null;
-  }
-
-  const accessTokenExpiresAt = getWebSessionAccessExpiry(
-    new Date(),
-    securityPolicy.accessSessionTtlMinutes,
-  );
-  const updatedSession = await upgradeWebSessionToFull(
-    session.id,
-    accessTokenExpiresAt,
-  );
-
-  await setCurrentWebSessionAccessCookie({
-    sessionId: updatedSession.id,
-    userId: updatedSession.userId,
-    expiresAt: updatedSession.accessTokenExpiresAt,
-    assuranceLevel: updatedSession.assuranceLevel,
-    emailVerified: updatedSession.user.emailVerified,
-    telegramId: updatedSession.user.telegramId,
-  });
-
-  authDebugLog("session_upgraded_to_full", {
-    sessionId: updatedSession.id,
-    userId: updatedSession.userId,
-  });
-
-  return updatedSession;
 }
 
 export async function replaceWebSessionAfterPasswordChange({

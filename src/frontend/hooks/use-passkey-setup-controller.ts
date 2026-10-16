@@ -13,7 +13,6 @@ import {
   beginPasskeyRegistrationAction,
   verifyPasskeyRegistrationAction,
 } from "@/app/actions/passkeys";
-import { clearSessionAction } from "@/app/actions/session";
 import {
   initialPasskeySetupState,
   reducePasskeySetup,
@@ -27,7 +26,6 @@ import { safeRedirectPath } from "@/shared/auth/redirect-policy";
 
 type PasskeySetupDependencies = {
   beginRegistration: typeof beginPasskeyRegistrationAction;
-  clearSession: typeof clearSessionAction;
   navigateTo: typeof navigateTo;
   startRegistration: typeof startRegistration;
   supportsWebAuthn: typeof browserSupportsWebAuthn;
@@ -36,7 +34,6 @@ type PasskeySetupDependencies = {
 
 const productionPasskeySetupDependencies: PasskeySetupDependencies = {
   beginRegistration: beginPasskeyRegistrationAction,
-  clearSession: clearSessionAction,
   navigateTo,
   startRegistration,
   supportsWebAuthn: browserSupportsWebAuthn,
@@ -46,11 +43,9 @@ const productionPasskeySetupDependencies: PasskeySetupDependencies = {
 export function usePasskeySetupController({
   dependencies = productionPasskeySetupDependencies,
   redirectTo,
-  required,
 }: {
   dependencies?: PasskeySetupDependencies;
   redirectTo: string;
-  required: boolean;
 }) {
   const destination = safeRedirectPath(redirectTo) ?? "/cabinet";
   const supported = useWebAuthnSupport(dependencies.supportsWebAuthn);
@@ -58,7 +53,7 @@ export function usePasskeySetupController({
     reducePasskeySetup,
     initialPasskeySetupState,
   );
-  const { error, loading, name, restarting } = selectPasskeySetupView(state);
+  const { error, loading, name } = selectPasskeySetupView(state);
   const setupPendingRef = useRef(false);
 
   function continueWithoutPasskey() {
@@ -68,39 +63,12 @@ export function usePasskeySetupController({
     dependencies.navigateTo(destination);
   }
 
-  async function restartAuthentication() {
-    if (setupPendingRef.current) {
-      return;
-    }
-    setupPendingRef.current = true;
-    dispatch({ type: "started", operation: "restart" });
-
-    try {
-      const result = await dependencies.clearSession();
-      if (result.status === "error") {
-        dispatch({ type: "failed", message: result.message });
-        return;
-      }
-      dependencies.navigateTo(`/login?${new URLSearchParams({
-        redirect_to: destination,
-      }).toString()}`);
-    } catch {
-      dispatch({
-        type: "failed",
-        message: "Сеть недоступна. Не удалось начать вход заново.",
-      });
-    } finally {
-      setupPendingRef.current = false;
-      dispatch({ type: "settled" });
-    }
-  }
-
   async function createPasskey() {
     if (setupPendingRef.current) {
       return;
     }
     setupPendingRef.current = true;
-    dispatch({ type: "started", operation: "create" });
+    dispatch({ type: "started" });
 
     try {
       const result = await executePasskeyRegistration({
@@ -113,15 +81,13 @@ export function usePasskeySetupController({
         },
         destination,
         name,
-        unsupportedMessage: required
-          ? "Это устройство не поддерживает Passkey. Используйте совместимый браузер или начните вход заново."
-          : "Это устройство не поддерживает быстрый вход. Продолжите в кабинете или используйте другое устройство.",
+        unsupportedMessage: "Это устройство не поддерживает быстрый вход. Продолжите в кабинете или используйте другое устройство.",
       });
       if (!result.ok) dispatch({ type: "failed", message: result.message });
     } catch (caught) {
       dispatch({
         type: "failed",
-        message: passkeySetupErrorMessage(caught, required),
+        message: passkeySetupErrorMessage(caught),
       });
     } finally {
       setupPendingRef.current = false;
@@ -139,8 +105,6 @@ export function usePasskeySetupController({
     error,
     loading,
     name,
-    restarting,
-    restartAuthentication,
     supported,
     changeName,
   };

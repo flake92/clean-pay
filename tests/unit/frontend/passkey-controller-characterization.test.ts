@@ -13,7 +13,6 @@ const mocks = vi.hoisted(() => ({
   clearSession: vi.fn(),
   events: [] as string[],
   navigateTo: vi.fn(),
-  restartClick: null as null | (() => Promise<void>),
   startAuthentication: vi.fn(),
   startRegistration: vi.fn(),
   verifyLogin: vi.fn(),
@@ -65,9 +64,6 @@ vi.mock("primereact/button", () => ({
   Button: (props: Record<string, unknown>) => {
     const buttonProps = { ...props };
     const label = String(buttonProps.label ?? "");
-    if (label === "Начать вход заново") {
-      mocks.restartClick = buttonProps.onClick as () => Promise<void>;
-    }
     for (const name of ["icon", "label", "loading", "outlined", "severity"]) {
       delete buttonProps[name];
     }
@@ -91,7 +87,6 @@ describe("passkey controller characterization", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.events.length = 0;
-    mocks.restartClick = null;
     mocks.browserSupportsWebAuthn.mockReturnValue(true);
   });
 
@@ -339,44 +334,6 @@ describe("passkey controller characterization", () => {
     expect(mocks.navigateTo).toHaveBeenCalledOnce();
     expect(mocks.events).toEqual([
       "navigate:/cabinet?tab=devices#active",
-    ]);
-  });
-
-  it("fences duplicate restart and navigates only after session clear succeeds", async () => {
-    let resolveClear!: (value: { status: "success" }) => void;
-    mocks.browserSupportsWebAuthn.mockReturnValue(false);
-    mocks.clearSession.mockReturnValue(new Promise((resolve) => {
-      resolveClear = resolve;
-    }));
-    render(createElement(PasskeySetupPanel, {
-      redirectTo: "/payment?plan=pro#checkout",
-      required: true,
-    }));
-    await screen.findByRole("button", {
-      name: "Начать вход заново",
-    });
-
-    act(() => {
-      void mocks.restartClick?.();
-      void mocks.restartClick?.();
-    });
-
-    await waitFor(() => expect(mocks.clearSession).toHaveBeenCalledOnce());
-    expect(mocks.navigateTo).not.toHaveBeenCalled();
-    expect((screen.getByRole("button", {
-      name: "Начать вход заново",
-    }) as HTMLButtonElement).disabled).toBe(true);
-    expect(mocks.events).toEqual(["clear-session"]);
-
-    await act(async () => resolveClear({ status: "success" }));
-
-    await waitFor(() => expect(mocks.navigateTo).toHaveBeenCalledOnce());
-    expect(mocks.navigateTo).toHaveBeenCalledWith(
-      "/login?redirect_to=%2Fpayment%3Fplan%3Dpro%23checkout",
-    );
-    expect(mocks.events).toEqual([
-      "clear-session",
-      "navigate:/login?redirect_to=%2Fpayment%3Fplan%3Dpro%23checkout",
     ]);
   });
 });

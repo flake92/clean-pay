@@ -1,7 +1,7 @@
 import type { TelegramMergeViewModel } from "@/application/models/link-account";
 
 export interface LinkAccountReader {
-  loadMergeActor(): Promise<{ userId: string; fullAssurance: boolean } | null>;
+  loadMergeActor(): Promise<{ userId: string } | null>;
   loadTelegramMergeConfirmation(userId: string): Promise<(TelegramMergeViewModel & {
     status: "PENDING" | "PROCESSING" | "COMPLETED" | "FAILED";
     expiresAt: Date;
@@ -12,7 +12,6 @@ export interface LinkAccountReader {
 export type LinkAccountActor = {
     context: unknown; userId: string; email: string | null; emailVerified: boolean;
     telegramId: string | null; telegramUsername: string | null; upstreamAccountId: string | null;
-    fullAssurance: boolean;
 };
 
 export interface LinkAccountCommands {

@@ -13,8 +13,7 @@ import {
 
 function commands(overrides: Partial<PasskeyCommands> = {}): PasskeyCommands {
   const actor = {
-    context: {}, userId: "user-1", assuranceLevel: "FULL" as const,
-    email: "user@example.com", emailVerified: true, telegramId: null,
+    context: {}, userId: "user-1",     email: "user@example.com", emailVerified: true, telegramId: null,
     telegramUsername: null, displayName: "User", fullName: null, hasPendingAccountMerge: false,
   };
   return {
@@ -24,7 +23,7 @@ function commands(overrides: Partial<PasskeyCommands> = {}): PasskeyCommands {
     consumeRegistrationChallenge: vi.fn(async () => ({ context: {}, challenge: "registration", userId: "user-1" })),
     verifyRegistration: vi.fn(async () => ({ context: {}, credentialId: "credential-1" })),
     persistRegistration: vi.fn(async () => undefined), markRegistrationComplete: vi.fn(async () => undefined),
-    upgradeRegistrationSession: vi.fn(async () => undefined), auditRegistration: vi.fn(async () => undefined),
+    auditRegistration: vi.fn(async () => undefined),
     assertLoginOptionsRateLimit: vi.fn(async () => undefined), withLoginOptionsConcurrency: vi.fn(async (work) => work()),
     findLoginAccount: vi.fn(async () => ({ context: {}, userId: "user-1", credentials: [{ id: "credential-1", transports: [] }] })),
     generateLoginOptions: vi.fn(async () => ({ challenge: "authentication" })), loginChallenge: vi.fn(() => "authentication"),
@@ -114,26 +113,25 @@ describe("passkey application workflow", () => {
     expect(order).toEqual(["verify", "counter", "session", "audit"]);
   });
 
-  it("persists a verified registration before completing and upgrading a bootstrap session", async () => {
+  it("persists a verified registration before completing and auditing it", async () => {
     const order: string[] = [];
     const subject = commands({
       loadRegistrationActor: vi.fn(async () => ({
-        context: {}, userId: "user-1", assuranceLevel: "BOOTSTRAP" as const, email: null, emailVerified: false,
+        context: {}, userId: "user-1", email: null, emailVerified: false,
         telegramId: "777", telegramUsername: null, displayName: null, fullName: null, hasPendingAccountMerge: true,
       })),
       persistRegistration: vi.fn(async () => { order.push("persist"); }),
       markRegistrationComplete: vi.fn(async () => { order.push("complete"); }),
-      upgradeRegistrationSession: vi.fn(async () => { order.push("upgrade"); }),
-      auditRegistration: vi.fn(async (_actor, _registration, upgraded) => { order.push(`audit:${upgraded}`); }),
+      auditRegistration: vi.fn(async () => { order.push("audit"); }),
     });
     await expect(verifyPasskeyRegistration(subject, {})).resolves.toEqual({ ok: true });
-    expect(order).toEqual(["persist", "complete", "upgrade", "audit:true"]);
+    expect(order).toEqual(["persist", "complete", "audit"]);
   });
 
-  it("enforces verified identity policy for full sessions in the application layer", async () => {
+  it("enforces verified identity policy in the application layer", async () => {
     const subject = commands({
       loadRegistrationActor: vi.fn(async () => ({
-        context: {}, userId: "user-1", assuranceLevel: "FULL" as const, email: "u@example.com", emailVerified: false,
+        context: {}, userId: "user-1", email: "u@example.com", emailVerified: false,
         telegramId: null, telegramUsername: null, displayName: null, fullName: null, hasPendingAccountMerge: false,
       })),
     });

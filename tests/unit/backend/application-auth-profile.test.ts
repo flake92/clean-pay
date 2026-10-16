@@ -72,7 +72,7 @@ describe("application auth profile policy", () => {
     expect(port.authorizeCurrentSession).not.toHaveBeenCalled();
   });
 
-  it.each(["EMAIL_REQUIRED", "PASSKEY_REQUIRED"])("falls back locally on %s", async (code) => {
+  it.each(["EMAIL_REQUIRED"])("falls back locally on %s", async (code) => {
     const port = gateway({ authorizeCurrentSession: vi.fn(async () => { throw new AuthProfileError(code); }) });
     await expect(resolveAuthProfile(port)).resolves.toMatchObject({ email: "u@example.com", emailVerified: false });
     expect(port.loadProviderProfile).not.toHaveBeenCalled();

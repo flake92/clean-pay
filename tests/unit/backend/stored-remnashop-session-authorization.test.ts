@@ -360,13 +360,10 @@ describe("stored-only Remnashop session authorization", () => {
     expect(apiMock.getRemnashopMe).toHaveBeenCalledWith("access");
   });
 
-  it("keeps missing and bootstrap sessions fail-closed", async () => {
+  it("keeps missing sessions fail-closed", async () => {
     await expect(
       authorize(null),
     ).rejects.toMatchObject({ code: "UNAUTHORIZED", status: 401 });
-    await expect(
-      authorize(session({ assuranceLevel: "BOOTSTRAP" })),
-    ).rejects.toMatchObject({ code: "PASSKEY_REQUIRED", status: 403 });
 
     expect(tokenMock.revealRemnashopToken).not.toHaveBeenCalled();
   });

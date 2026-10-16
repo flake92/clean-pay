@@ -168,7 +168,6 @@ describe("Remnashop session reconciliation", () => {
       remnashopRefreshTokenEncrypted: "protected:refresh",
       remnashopAccessExpiresAt: new Date(auth.expires_at),
       remnashopRefreshExpiresAt: new Date(auth.refresh_expires_at),
-      assuranceLevel: "FULL",
       replaceExistingSessions: false,
       tx,
     });

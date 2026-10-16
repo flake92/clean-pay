@@ -82,7 +82,6 @@ import {
   rotateRefreshTokenFamily,
   setDurableCallbackReplayCookies,
   setDurableCallbackWebSessionCookies,
-  upgradeCurrentSessionToFull,
 } from "@/backend/integrations/sessions/web-session-service";
 import { runWithPostCommitWebSessionCookieEffects } from "@/backend/integrations/sessions/web-session-cookie-effects";
 import { cookies as requestCookies } from "next/headers";
@@ -95,7 +94,8 @@ import {
 } from "@/backend/security/crypto";
 
 function accessToken(payload: Record<string, unknown>) {
-  const encoded = jsonBase64Url(payload);
+  // Issued access tokens always carry al; keep explicit claim order intact.
+  const encoded = jsonBase64Url("al" in payload ? payload : { ...payload, al: "FULL" });
   return `${encoded}.${hmacSha256(encoded, process.env.WEB_JWT_SECRET ?? "test-web-jwt-secret")}`;
 }
 
@@ -386,6 +386,7 @@ describe("web session lifecycle", () => {
         id: "session-1",
         userId: "user-1",
         revokedAt: null,
+        assuranceLevel: "FULL",
         accessTokenExpiresAt: { gt: expect.any(Date) },
       },
       include: { user: true },
@@ -395,7 +396,6 @@ describe("web session lifecycle", () => {
   it("fails closed across missing, malformed, expired and database-missing access sessions", async () => {
     await expect(getCurrentUser()).resolves.toBeNull();
     await expect(refreshCurrentAccessCookie()).resolves.toBeNull();
-    await expect(upgradeCurrentSessionToFull()).resolves.toBeNull();
 
     state.cookies.set("clean_pay_access", "malformed");
     await expect(getCurrentUser()).resolves.toBeNull();
@@ -500,6 +500,7 @@ describe("web session lifecycle", () => {
     expect(mocks.prisma.webSession.findFirst).toHaveBeenCalledWith({
       where: {
         revokedAt: null,
+        assuranceLevel: "FULL",
         refreshExpiresAt: { gt: expect.any(Date) },
         OR: [
           { refreshTokenHash: sha256("refresh-token") },
@@ -549,6 +550,7 @@ describe("web session lifecycle", () => {
         id: "revoked-session",
         userId: "user-1",
         revokedAt: null,
+        assuranceLevel: "FULL",
         accessTokenExpiresAt: { gt: expect.any(Date) },
       },
       include: { user: true },
@@ -965,15 +967,27 @@ describe("web session lifecycle", () => {
     ]);
   });
 
-  it("upgrades partial sessions and clears only the current session by access or refresh token", async () => {
+  it("treats an access token without the FULL assurance claim as invalid", async () => {
+    state.cookies.set("clean_pay_access", accessToken({
+      sid: "session-1",
+      uid: "user-1",
+      exp: Math.floor(Date.now() / 1000) + 60,
+      al: "BOOTSTRAP",
+    }));
+    mocks.prisma.webSession.findFirst.mockResolvedValue(session);
+
+    await expect(getCurrentUser()).resolves.toBeNull();
+    expect(mocks.prisma.webSession.findFirst).not.toHaveBeenCalledWith(
+      expect.objectContaining({ where: expect.objectContaining({ id: "session-1" }) }),
+    );
+  });
+
+  it("clears only the current session by access or refresh token", async () => {
     state.cookies.set(
       "clean_pay_access",
       accessToken({ sid: "session-1", uid: "user-1", exp: Math.floor(Date.now() / 1000) + 60 }),
     );
-    mocks.prisma.webSession.findFirst.mockResolvedValue({ ...session, assuranceLevel: "PARTIAL" });
-    mocks.prisma.webSession.update.mockResolvedValue({ ...session, assuranceLevel: "FULL" });
-
-    await expect(upgradeCurrentSessionToFull()).resolves.toMatchObject({ assuranceLevel: "FULL" });
+    mocks.prisma.webSession.findFirst.mockResolvedValue(session);
 
     await clearWebSession();
     expect(mocks.prisma.webSession.updateMany).toHaveBeenCalledWith({
@@ -1063,6 +1077,7 @@ describe("web session lifecycle", () => {
         id: "revoked-session-1",
         userId: "user-1",
         revokedAt: null,
+        assuranceLevel: "FULL",
         accessTokenExpiresAt: { gt: expect.any(Date) },
       },
       select: { id: true, userId: true },

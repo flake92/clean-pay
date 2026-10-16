@@ -59,7 +59,6 @@ function assertPreflight(confirmation: AccountMergeConfirmation, result: Account
 async function loadAuthorizedConfirmation(gateway: TelegramAccountMergeGateway) {
   const actor = await gateway.loadActor();
   if (!actor) throw new AccountMergeError("UNAUTHORIZED");
-  if (!actor.fullAssurance) throw new AccountMergeError("PASSKEY_REQUIRED");
   return gateway.loadConfirmation(actor.userId);
 }
 

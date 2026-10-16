@@ -1,4 +1,4 @@
-import { Prisma } from "@prisma/client";
+import { Prisma, WebSessionAssuranceLevel } from "@prisma/client";
 
 import { getEnv } from "@/backend/config/env";
 import { prisma } from "@/backend/database/prisma";
@@ -93,7 +93,13 @@ export async function rotateRefreshTokenFamily(
       include: { user: true },
     });
 
-    if (!session || session.revokedAt || session.refreshExpiresAt <= now) return null;
+    if (
+      !session
+      || session.revokedAt
+      || session.refreshExpiresAt <= now
+      // Only FULL sessions exist; anything else is a retired legacy level.
+      || session.assuranceLevel !== WebSessionAssuranceLevel.FULL
+    ) return null;
 
     if (session.refreshTokenHash === tokenHash) {
       const successorToken = randomToken(48);

@@ -435,22 +435,6 @@ describe("critical user-flow components", () => {
     expect(mocks.navigateTo).toHaveBeenCalledWith("/cabinet");
   });
 
-  it("does not offer an impossible Passkey skip to a bootstrap session", async () => {
-    mocks.browserSupportsWebAuthn.mockReturnValue(false);
-    render(createElement(PasskeySetupPanel, {
-      redirectTo: "/cabinet",
-      required: true,
-    }));
-
-    await waitFor(() => {
-      expect(
-        screen.getByText(/Для завершения этого входа нужен Passkey/),
-      ).toBeTruthy();
-    });
-    expect(screen.queryByRole("button", { name: /Продолжить без/i })).toBeNull();
-    expect(screen.getByRole("button", { name: "Начать вход заново" })).toBeTruthy();
-  });
-
   it("recovers from a failed account-readiness transport check", async () => {
     mocks.checkAccountReadinessAction.mockRejectedValueOnce(
       new Error("private transport detail"),

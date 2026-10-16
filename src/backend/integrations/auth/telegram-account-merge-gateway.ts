@@ -89,7 +89,7 @@ export function createProductionTelegramAccountMergeGateway(): TelegramAccountMe
   return {
   async loadActor() {
     const session = await adapt(() => getCurrentSession());
-    return session ? { userId: session.userId, fullAssurance: session.assuranceLevel === "FULL" } : null;
+    return session ? { userId: session.userId } : null;
   },
   async loadConfirmation(userId) {
     const token = (await cookies()).get(telegramAccountMergeCookieName)?.value;

@@ -23,6 +23,7 @@ export function findActiveWebSession(
       id: identity.sid,
       userId: identity.uid,
       revokedAt: null,
+      assuranceLevel: WebSessionAssuranceLevel.FULL,
       accessTokenExpiresAt: { gt: now },
     },
     include: { user: true },
@@ -38,6 +39,7 @@ export function findActiveWebSessionIdentity(
       id: identity.sid,
       userId: identity.uid,
       revokedAt: null,
+      assuranceLevel: WebSessionAssuranceLevel.FULL,
       accessTokenExpiresAt: { gt: now },
     },
     select: { id: true, userId: true },
@@ -53,6 +55,7 @@ export function findRefreshSessionCandidate(
   return prisma.webSession.findFirst({
     where: {
       revokedAt: null,
+      assuranceLevel: WebSessionAssuranceLevel.FULL,
       refreshExpiresAt: { gt: now },
       OR: [
         { refreshTokenHash: tokenHash },
@@ -140,23 +143,9 @@ export function findReplayableWebSession(
       userId,
       refreshTokenHash: sha256(bootstrapRefreshToken),
       revokedAt: null,
+      assuranceLevel: WebSessionAssuranceLevel.FULL,
       accessTokenExpiresAt: { gt: now },
       refreshExpiresAt: { gt: now },
-    },
-    include: { user: true },
-  });
-}
-
-export function upgradeWebSessionToFull(
-  sessionId: string,
-  accessTokenExpiresAt: Date,
-) {
-  return prisma.webSession.update({
-    where: { id: sessionId },
-    data: {
-      authMethod: WebSessionAuthMethod.PASSKEY,
-      assuranceLevel: WebSessionAssuranceLevel.FULL,
-      accessTokenExpiresAt,
     },
     include: { user: true },
   });
@@ -212,7 +201,8 @@ export function replaceWebSessionAfterPasswordChangeRecord(
     if (
       !currentSession ||
       currentSession.userId !== input.userId ||
-      currentSession.revokedAt
+      currentSession.revokedAt ||
+      currentSession.assuranceLevel !== WebSessionAssuranceLevel.FULL
     ) {
       throw new ServiceError(
         "UNAUTHORIZED",
@@ -243,7 +233,7 @@ export function replaceWebSessionAfterPasswordChangeRecord(
         remnashopAccessExpiresAt: input.remnashopAccessExpiresAt,
         remnashopRefreshExpiresAt: input.remnashopRefreshExpiresAt,
         authMethod: currentSession.authMethod,
-        assuranceLevel: currentSession.assuranceLevel,
+        assuranceLevel: WebSessionAssuranceLevel.FULL,
         userAgent: currentSession.userAgent,
         ipHash: currentSession.ipHash,
         accessTokenExpiresAt: input.accessTokenExpiresAt,

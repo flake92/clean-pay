@@ -75,7 +75,7 @@ function authGateway(overrides: Partial<AuthProfileGateway> = {}): AuthProfileGa
 
 function passkeyGateway(overrides: Partial<PasskeyManagementGateway> = {}): PasskeyManagementGateway {
   return {
-    loadActor: vi.fn(async () => ({ userId: "user-1", fullAssurance: true, email: "u@example.com", emailVerified: true, telegramId: null })),
+    loadActor: vi.fn(async () => ({ userId: "user-1", email: "u@example.com", emailVerified: true, telegramId: null })),
     loadOwned: vi.fn(async () => []), deleteOwned: vi.fn(async () => ({ externalCredentialId: "external" })),
     auditDeleted: vi.fn(async () => undefined), ...overrides,
   };
@@ -145,7 +145,7 @@ describe("application facades", () => {
 
   it("keeps WebAuthn ceremonies behind the passkey port", async () => {
     const actor = {
-      context: {}, userId: "user-1", assuranceLevel: "FULL" as const,
+      context: {}, userId: "user-1",
       email: "user@example.com", emailVerified: true, telegramId: null,
       telegramUsername: null, displayName: null, fullName: null, hasPendingAccountMerge: false,
     };
@@ -160,7 +160,6 @@ describe("application facades", () => {
       verifyRegistration: vi.fn(async () => ({ context: {}, credentialId: "key" })),
       persistRegistration: vi.fn(async () => undefined),
       markRegistrationComplete: vi.fn(async () => undefined),
-      upgradeRegistrationSession: vi.fn(async () => undefined),
       auditRegistration: vi.fn(async () => undefined),
       assertLoginOptionsRateLimit: vi.fn(async () => undefined),
       withLoginOptionsConcurrency: vi.fn(async (work) => work()),
@@ -190,7 +189,7 @@ describe("application facades", () => {
 
   it("loads linked-account state with optional port fallbacks", async () => {
     const reader: LinkAccountReader = {
-      loadMergeActor: vi.fn(async () => ({ userId: "user-1", fullAssurance: true })),
+      loadMergeActor: vi.fn(async () => ({ userId: "user-1" })),
       loadTelegramMergeConfirmation: vi.fn(async () => null),
     };
     const passkeys = passkeyGateway({ loadOwned: vi.fn(async () => { throw new Error("optional unavailable"); }) });
@@ -207,7 +206,7 @@ describe("application facades", () => {
 
   it("presents linked-account command outcomes", async () => {
     const mergeGateway: TelegramAccountMergeGateway = {
-      loadActor: vi.fn(async () => ({ userId: "user-1", fullAssurance: true })),
+      loadActor: vi.fn(async () => ({ userId: "user-1" })),
       loadConfirmation: vi.fn(async () => ({
         context: {}, id: "merge-1", userId: "user-1", status: "COMPLETED" as const, expiresAt: new Date(Date.now() + 60_000),
         sourceAccountId: "source", targetAccountId: "target", sourceEmail: null, targetEmail: "u@example.com", targetTelegramId: null, telegramId: "777", telegramUsername: null,

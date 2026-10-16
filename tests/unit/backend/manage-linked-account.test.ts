@@ -16,7 +16,7 @@ import type { PasskeyManagementGateway } from "@/application/auth/ports/passkey-
 
 function mockCommands(overrides: Partial<LinkAccountCommands> & { confirmTelegramMerge?: () => Promise<void> } = {}): LinkAccountCommands & TelegramAccountMergeGateway & { confirmTelegramMerge: () => Promise<void> } {
   const commands = {
-    loadLinkActor: vi.fn(async () => ({ context: {}, userId: "user-1", email: null, emailVerified: false, telegramId: null, telegramUsername: null, upstreamAccountId: null, fullAssurance: true })),
+    loadLinkActor: vi.fn(async () => ({ context: {}, userId: "user-1", email: null, emailVerified: false, telegramId: null, telegramUsername: null, upstreamAccountId: null })),
     assertLinkRateLimit: vi.fn(async () => undefined),
     authenticateEmail: vi.fn(async () => ({ context: {} })),
     linkActorIsCurrent: vi.fn(async () => true),
@@ -36,7 +36,7 @@ function mockCommands(overrides: Partial<LinkAccountCommands> & { confirmTelegra
     cancelTelegramMerge: vi.fn(async () => undefined),
     ...overrides,
   } as unknown as LinkAccountCommands & TelegramAccountMergeGateway & { confirmTelegramMerge: () => Promise<void> };
-  commands.loadActor = vi.fn(async () => ({ userId: "user-1", fullAssurance: true }));
+  commands.loadActor = vi.fn(async () => ({ userId: "user-1" }));
   commands.loadConfirmation = vi.fn(async () => {
     await commands.confirmTelegramMerge();
     return {
@@ -90,14 +90,14 @@ describe("failed() error message mapping", () => {
       debug: vi.fn(),
     } as unknown as AuthProfileGateway;
     const reader = {
-      loadMergeActor: vi.fn(async () => ({ userId: "user-1", fullAssurance: true })),
+      loadMergeActor: vi.fn(async () => ({ userId: "user-1" })),
       loadTelegramMergeConfirmation: vi.fn(async () => ({
         targetEmail: "target@example.com", sourceEmailMasked: "so***@example.com", emailWillBeReplaced: true,
         telegramId: "777", status: "PENDING", expiresAt: new Date(Date.now() + 60_000),
       })),
     } as unknown as LinkAccountReader;
     const passkeys = {
-      loadActor: vi.fn(async () => ({ userId: "user-1", fullAssurance: true, email: null, emailVerified: false, telegramId: "777" })),
+      loadActor: vi.fn(async () => ({ userId: "user-1", email: null, emailVerified: false, telegramId: "777" })),
       loadOwned: vi.fn(async () => [{ id: "key-1", name: "Phone", createdAt: "2026-01-01", lastUsedAt: null }]),
     } as unknown as PasskeyManagementGateway;
     await expect(loadLinkAccount(reader, auth, passkeys, "telegram_email_replace")).resolves.toMatchObject({
@@ -116,8 +116,7 @@ describe("failed() error message mapping", () => {
 
   it.each([
     [null, "UNAUTHORIZED"],
-    [{ context: {}, userId: "user-1", email: null, emailVerified: false, telegramId: "777", telegramUsername: null, upstreamAccountId: null, fullAssurance: false }, "PASSKEY_REQUIRED"],
-  ])("rejects an absent or partial-assurance link actor", async (actor, code) => {
+  ])("rejects an absent link actor", async (actor, code) => {
     const commands = mockCommands({ loadLinkActor: vi.fn(async () => actor) });
     await expect(linkAccountEmail(commands, { email: " User@Example.com ", password: "password" })).resolves.toMatchObject({ ok: false, code });
     expect(commands.authenticateEmail).not.toHaveBeenCalled();
@@ -261,7 +260,7 @@ describe("failed() error message mapping", () => {
     });
     await expect(cancelLinkedTelegram(merge)).resolves.toEqual({ ok: true, kind: "merge-cancelled" });
     const passkeys = {
-      loadActor: vi.fn(async () => ({ userId: "user-1", fullAssurance: true, email: null, emailVerified: false, telegramId: "777" })),
+      loadActor: vi.fn(async () => ({ userId: "user-1", email: null, emailVerified: false, telegramId: "777" })),
       deleteOwned: vi.fn(async () => ({ externalCredentialId: "external-1" })),
       auditDeleted: vi.fn(async () => undefined),
     } as unknown as PasskeyManagementGateway;
@@ -272,7 +271,7 @@ describe("failed() error message mapping", () => {
 
   it("blocks passkey deletion when it would leave no usable account identity", async () => {
     const passkeys = {
-      loadActor: vi.fn(async () => ({ userId: "user-1", fullAssurance: true, email: null, emailVerified: false, telegramId: null })),
+      loadActor: vi.fn(async () => ({ userId: "user-1", email: null, emailVerified: false, telegramId: null })),
       deleteOwned: vi.fn(), auditDeleted: vi.fn(),
     } as unknown as PasskeyManagementGateway;
     await expect(removeLinkedPasskey(passkeys, "key-1")).resolves.toMatchObject({ ok: false, code: "EMAIL_NOT_VERIFIED" });
@@ -285,7 +284,7 @@ describe("failed() error message mapping", () => {
     const commands = mockCommands({
       loadLinkActor: vi.fn(async () => ({
         context: {}, userId: "user-1", email: null, emailVerified: false,
-        telegramId: "777", telegramUsername: "clean", upstreamAccountId: "telegram-account", fullAssurance: true,
+        telegramId: "777", telegramUsername: "clean", upstreamAccountId: "telegram-account",
       })),
       authenticateEmail: vi.fn(async () => emailSession),
       loadProviderProfile: vi.fn(async () => ({ email: "owner@example.com", emailVerified: true })),

@@ -14,15 +14,15 @@ import { productionPasskeyManagementGateway } from "@/app/_composition/action-ru
 describe("production passkey management gateway", () => {
   beforeEach(() => { vi.clearAllMocks(); });
 
-  it("returns null without a session and maps assurance without deciding access", async () => {
+  it("returns null without a session and maps the actor without deciding access", async () => {
     mocks.getCurrentSession.mockResolvedValueOnce(null);
     await expect(productionPasskeyManagementGateway.loadActor()).resolves.toBeNull();
     mocks.getCurrentSession.mockResolvedValueOnce({
-      userId: "user-1", assuranceLevel: "BOOTSTRAP",
+      userId: "user-1", assuranceLevel: "FULL",
       user: { email: null, emailVerified: false, telegramId: "777" },
     });
     await expect(productionPasskeyManagementGateway.loadActor()).resolves.toEqual({
-      userId: "user-1", fullAssurance: false, email: null, emailVerified: false, telegramId: "777",
+      userId: "user-1", email: null, emailVerified: false, telegramId: "777",
     });
   });
 

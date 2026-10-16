@@ -3,7 +3,6 @@ import { NextResponse } from "next/server";
 import {
   accountLinkPath,
   emailVerificationPath,
-  passkeySetupPath,
 } from "@/shared/auth/account-setup-flow";
 import { safeRedirectPath } from "@/shared/auth/redirect-policy";
 import { getEnv, ServiceError } from "@/app/_composition/platform-runtime";
@@ -171,9 +170,6 @@ export async function GET(request: Request) {
 
     if (code === "UNAUTHORIZED" || code === "AUTH_FAILED") {
       return login(returnTo);
-    }
-    if (code === "PASSKEY_REQUIRED") {
-      return redirect(passkeySetupPath(returnTo));
     }
     if (code === "EMAIL_REQUIRED") {
       return redirect(accountLinkPath(returnTo));

@@ -15,7 +15,6 @@ export function createProductionPasskeyManagementGateway(
       if (!session) return null;
       return {
         userId: session.userId,
-        fullAssurance: session.assuranceLevel === "FULL",
         email: session.user.email,
         emailVerified: session.user.emailVerified,
         telegramId: session.user.telegramId,

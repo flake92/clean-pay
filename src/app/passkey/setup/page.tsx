@@ -5,10 +5,7 @@ import {
   passkeySetupPath,
   safeAccountSetupDestination,
 } from "@/shared/auth/account-setup-flow";
-import {
-  requestSessionRequiresPasskey,
-  requireRequestSession,
-} from "@/app/_composition/require-request-session";
+import { requireRequestSession } from "@/app/_composition/require-request-session";
 
 export const dynamic = "force-dynamic";
 
@@ -22,21 +19,18 @@ export default async function PasskeySetupPage({
     ? params.redirect_to[0]
     : params.redirect_to;
   const redirectTo = safeAccountSetupDestination(rawRedirect);
-  const session = await requireRequestSession(passkeySetupPath(redirectTo));
-  const passkeyRequired = requestSessionRequiresPasskey(session);
+  await requireRequestSession(passkeySetupPath(redirectTo));
 
   return (
     <AuthShell
       description={
-        passkeyRequired
-          ? "Чтобы завершить безопасный вход, настройте Passkey через Face ID, отпечаток или PIN-код устройства."
-          : isPaymentDestination(redirectTo)
-            ? "Можно настроить вход по Face ID, отпечатку или PIN-коду. После этого вернёмся к оплате; настройку также можно пропустить."
-            : "Можно настроить вход по Face ID, отпечатку или PIN-коду. Это удобно, но не обязательно."
+        isPaymentDestination(redirectTo)
+          ? "Можно настроить вход по Face ID, отпечатку или PIN-коду. После этого вернёмся к оплате; настройку также можно пропустить."
+          : "Можно настроить вход по Face ID, отпечатку или PIN-коду. Это удобно, но не обязательно."
       }
       title="Быстрый вход"
     >
-      <PasskeySetupPanel redirectTo={redirectTo} required={passkeyRequired} />
+      <PasskeySetupPanel redirectTo={redirectTo} />
     </AuthShell>
   );
 }

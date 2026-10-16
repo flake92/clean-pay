@@ -600,7 +600,6 @@ describe("clean architecture boundaries", () => {
       "rotateRefreshTokenFamily",
       "setDurableCallbackReplayCookies",
       "setDurableCallbackWebSessionCookies",
-      "upgradeCurrentSessionToFull",
     ].sort());
   });
 
@@ -1049,9 +1048,10 @@ describe("clean architecture boundaries", () => {
     expect(setupController).toContain("beginPasskeyRegistrationAction");
     expect(setupController).toContain("verifyPasskeyRegistrationAction");
     expect(setupController).toContain("executePasskeyRegistration({");
-    expect(setupController).toContain("clearSessionAction");
     expect(setupController).toContain("continueWithoutPasskey");
-    expect(setupController).toContain("restartAuthentication");
+    // Passkey setup is always optional; there is no forced re-login branch.
+    expect(setupController).not.toContain("clearSessionAction");
+    expect(setupController).not.toContain("restartAuthentication");
   });
 
   it("keeps Passkey setup view state in pure transitions", () => {
@@ -1067,7 +1067,7 @@ describe("clean architecture boundaries", () => {
     expect(astImportedModules(transitions)).toEqual([]);
     expect(transitions).not.toMatch(/\b(?:useReducer|useRef|window|document)\b/);
     expect(transitions).toContain('phase: "creating"');
-    expect(transitions).toContain('? "creating" : "restarting"');
+    expect(transitions).not.toContain("restarting");
     expect(setupController).toContain("useReducer(");
     expect(setupController).toContain("reducePasskeySetup");
     expect(setupController).toContain("selectPasskeySetupView(state)");
@@ -1616,17 +1616,26 @@ describe("clean architecture boundaries", () => {
     expect(passkeyPersistence).not.toContain("getCurrentSession");
     expect(passkeyPersistence).not.toContain("assertEmailVerificationPolicy");
     expect(passkeyPersistence).not.toMatch(/export async function (?:listPasskeys|deletePasskey)\b/);
-    expect(linkAdapter).not.toContain("WebSessionAssuranceLevel.BOOTSTRAP");
-    expect(passkeyUseCase).toContain('new LinkAccountGatewayError("PASSKEY_REQUIRED")');
-    expect(mergeAdapter).not.toContain("WebSessionAssuranceLevel.BOOTSTRAP");
+    expect(linkAdapter).not.toContain("assuranceLevel");
+    expect(passkeyUseCase).not.toContain("PASSKEY_REQUIRED");
+    expect(mergeAdapter).not.toContain("assuranceLevel");
     expect(mergeStore).not.toContain("getCurrentSession");
     expect(readFileSync("src/application/auth/confirm-telegram-account-merge.ts", "utf8"))
-      .toContain('new AccountMergeError("PASSKEY_REQUIRED")');
+      .not.toContain("PASSKEY_REQUIRED");
     expect(passkeyAdapter).toContain("if (!session) return null");
     expect(paymentWorkflowAdapter).not.toContain('throw new ServiceError("UNAUTHORIZED"');
     expect(paymentStatusAdapter).not.toContain('throw new PaymentStatusGatewayError("UNAUTHORIZED")');
     expect(readFileSync("src/application/payments/execute-payment-workflow.ts", "utf8"))
       .toContain('workflowError("UNAUTHORIZED"');
+  });
+
+  it("issues and accepts only FULL web sessions", () => {
+    // The restricted BOOTSTRAP level was retired: nothing may issue, upgrade
+    // or route on it. The database enum keeps the value only for history.
+    const offenders = files("src/**/*.{ts,tsx}")
+      .filter(({ source }) => /\bBOOTSTRAP\b|bootstrapAuthenticated|upgrade\w*ToFull/.test(source))
+      .map(({ file }) => file.replaceAll("\\", "/"));
+    expect(offenders).toEqual([]);
   });
 
   it("keeps only ports that are consumed by an application use case", () => {

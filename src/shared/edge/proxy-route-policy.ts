@@ -64,10 +64,6 @@ export function isEmailVerificationAllowedPath(pathname: string) {
   return emailVerificationPagePaths.has(pathname);
 }
 
-export function isBootstrapAllowedPath(pathname: string) {
-  return pathname === "/passkey/setup";
-}
-
 export function isRemovedBrowserTransportPath(pathname: string) {
   return removedBrowserTransportPathSet.has(pathname);
 }

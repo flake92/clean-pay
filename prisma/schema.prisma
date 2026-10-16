@@ -64,6 +64,8 @@ enum WebSessionAuthMethod {
   PASSKEY
 }
 
+// Only FULL is issued or accepted. BOOTSTRAP is a retired level kept so the
+// existing database enum stays migration-free; sessions at it are rejected.
 enum WebSessionAssuranceLevel {
   BOOTSTRAP
   FULL

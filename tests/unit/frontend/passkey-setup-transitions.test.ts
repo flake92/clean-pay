@@ -12,28 +12,18 @@ describe("passkey setup transitions", () => {
       error: null,
       loading: false,
       name: "",
-      restarting: false,
     });
   });
 
-  it("keeps create and restart loading states mutually exclusive", () => {
+  it("shows loading only while a passkey is being created", () => {
     const creating = reducePasskeySetup(initialPasskeySetupState, {
       type: "started",
-      operation: "create",
-    });
-    const restarting = reducePasskeySetup(initialPasskeySetupState, {
-      type: "started",
-      operation: "restart",
     });
 
-    expect(selectPasskeySetupView(creating)).toMatchObject({
-      loading: true,
-      restarting: false,
-    });
-    expect(selectPasskeySetupView(restarting)).toMatchObject({
-      loading: false,
-      restarting: true,
-    });
+    expect(selectPasskeySetupView(creating)).toMatchObject({ loading: true });
+    expect(selectPasskeySetupView(
+      reducePasskeySetup(creating, { type: "settled" }),
+    )).toMatchObject({ loading: false });
   });
 
   it("preserves a changed name and error through settling", () => {
@@ -41,10 +31,7 @@ describe("passkey setup transitions", () => {
       type: "name-changed",
       value: "Рабочий ноутбук",
     });
-    const creating = reducePasskeySetup(named, {
-      type: "started",
-      operation: "create",
-    });
+    const creating = reducePasskeySetup(named, { type: "started" });
     const failed = reducePasskeySetup(creating, {
       type: "failed",
       message: "Не удалось сохранить быстрый вход.",
@@ -55,7 +42,6 @@ describe("passkey setup transitions", () => {
       error: "Не удалось сохранить быстрый вход.",
       loading: false,
       name: "Рабочий ноутбук",
-      restarting: false,
     });
     expect(named).toEqual({
       error: null,
@@ -64,7 +50,7 @@ describe("passkey setup transitions", () => {
     });
   });
 
-  it("clears only the previous error when a new operation starts", () => {
+  it("clears only the previous error when a new attempt starts", () => {
     const failed = reducePasskeySetup(initialPasskeySetupState, {
       type: "failed",
       message: "Предыдущая ошибка",
@@ -74,13 +60,10 @@ describe("passkey setup transitions", () => {
       value: "Телефон",
     });
 
-    expect(reducePasskeySetup(named, {
-      type: "started",
-      operation: "restart",
-    })).toEqual({
+    expect(reducePasskeySetup(named, { type: "started" })).toEqual({
       error: null,
       name: "Телефон",
-      phase: "restarting",
+      phase: "creating",
     });
   });
 });

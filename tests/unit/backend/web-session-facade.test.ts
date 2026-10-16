@@ -26,7 +26,6 @@ describe("web session facade", () => {
       "rotateRefreshTokenFamily",
       "setDurableCallbackReplayCookies",
       "setDurableCallbackWebSessionCookies",
-      "upgradeCurrentSessionToFull",
     ]);
   });
 });

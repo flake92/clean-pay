@@ -5,7 +5,7 @@ import type { PasskeyManagementGateway } from "@/application/auth/ports/passkey-
 
 function gateway(overrides: Partial<PasskeyManagementGateway> = {}): PasskeyManagementGateway {
   return {
-    loadActor: vi.fn(async () => ({ userId: "user-1", fullAssurance: true, email: "u@example.com", emailVerified: true, telegramId: null })),
+    loadActor: vi.fn(async () => ({ userId: "user-1", email: "u@example.com", emailVerified: true, telegramId: null })),
     loadOwned: vi.fn(async () => []),
     deleteOwned: vi.fn(async () => ({ externalCredentialId: "external-1" })),
     auditDeleted: vi.fn(async () => undefined),
@@ -16,8 +16,7 @@ function gateway(overrides: Partial<PasskeyManagementGateway> = {}): PasskeyMana
 describe("application passkey management policy", () => {
   it.each([
     [null, "UNAUTHORIZED"],
-    [{ userId: "user-1", fullAssurance: false, email: "u@example.com", emailVerified: true, telegramId: null }, "UNAUTHORIZED"],
-    [{ userId: "user-1", fullAssurance: true, email: null, emailVerified: false, telegramId: null }, "EMAIL_NOT_VERIFIED"],
+    [{ userId: "user-1", email: null, emailVerified: false, telegramId: null }, "EMAIL_NOT_VERIFIED"],
   ])("rejects an ineligible actor before deletion", async (actor, code) => {
     const port = gateway({ loadActor: vi.fn(async () => actor) });
     await expect(removeLinkedPasskey(port, "key-1")).resolves.toMatchObject({ ok: false, code });

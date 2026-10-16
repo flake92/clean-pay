@@ -74,7 +74,6 @@ const linkActor = {
   telegramId: "777",
   telegramUsername: "clean_user",
   upstreamAccountId: "telegram-account",
-  fullAssurance: true,
 };
 
 function linkCommands(overrides: Partial<LinkAccountCommands> = {}): LinkAccountCommands {

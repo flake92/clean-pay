@@ -14,7 +14,6 @@ export {
   refreshCurrentAccessCookie,
   replaceWebSessionAfterPasswordChange,
   setDurableCallbackReplayCookies,
-  upgradeCurrentSessionToFull,
 } from "@/backend/integrations/sessions/web-session-orchestrator";
 export {
   assertEmailVerificationPolicy,

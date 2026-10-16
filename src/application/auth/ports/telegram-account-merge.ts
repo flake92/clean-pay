@@ -44,7 +44,7 @@ export class AccountMergeError extends Error {
 }
 
 export interface TelegramAccountMergeGateway {
-  loadActor(): Promise<{ userId: string; fullAssurance: boolean } | null>;
+  loadActor(): Promise<{ userId: string } | null>;
   loadConfirmation(userId: string): Promise<AccountMergeConfirmation>;
   assertRateLimit(telegramId: string): Promise<void>;
   audit(input: { action: string; userId: string; severity?: "WARN"; metadata?: Record<string, unknown> }): Promise<void>;

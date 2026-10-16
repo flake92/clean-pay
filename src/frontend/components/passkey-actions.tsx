@@ -66,10 +66,8 @@ export function PasskeyLoginButton({
 
 export function PasskeySetupPanel({
   redirectTo = "/cabinet",
-  required = false,
 }: {
   redirectTo?: string;
-  required?: boolean;
 }) {
   const {
     changeName,
@@ -78,38 +76,21 @@ export function PasskeySetupPanel({
     error,
     loading,
     name,
-    restarting,
-    restartAuthentication,
     supported,
-  } = usePasskeySetupController({ redirectTo, required });
+  } = usePasskeySetupController({ redirectTo });
 
   if (supported === false) {
     return (
       <div className="flex flex-column gap-3">
         <Message
-          severity={required ? "warn" : "info"}
-          text={
-            required
-              ? "Для завершения этого входа нужен Passkey, но устройство его не поддерживает. Откройте страницу в совместимом браузере или начните вход заново."
-              : "Это устройство не поддерживает быстрый вход. Вы можете пользоваться кабинетом через e-mail, пароль или Telegram."
-          }
+          severity="info"
+          text="Это устройство не поддерживает быстрый вход. Вы можете пользоваться кабинетом через e-mail, пароль или Telegram."
         />
-        {required ? (
-          <Button
-            disabled={restarting}
-            label="Начать вход заново"
-            loading={restarting}
-            onClick={restartAuthentication}
-            outlined
-            type="button"
-          />
-        ) : (
-          <Button
-            label="Продолжить без быстрого входа"
-            onClick={continueWithoutPasskey}
-            type="button"
-          />
-        )}
+        <Button
+          label="Продолжить без быстрого входа"
+          onClick={continueWithoutPasskey}
+          type="button"
+        />
         {error ? <Message severity="warn" text={error} /> : null}
       </div>
     );
@@ -123,9 +104,7 @@ export function PasskeySetupPanel({
           <div className="font-medium text-900">Быстрый вход</div>
         </div>
         <div className="text-sm text-600 line-height-3">
-          {required
-            ? "Passkey через Face ID, отпечаток или PIN-код устройства обязателен для завершения этого безопасного входа."
-            : "Это необязательный способ входа через Face ID, отпечаток или PIN-код устройства. Если окно не открылось или вы передумали, просто продолжите в кабинет."}
+          Это необязательный способ входа через Face ID, отпечаток или PIN-код устройства. Если окно не открылось или вы передумали, просто продолжите в кабинет.
         </div>
       </div>
       {error ? <Message severity="warn" text={error} /> : null}
@@ -140,40 +119,26 @@ export function PasskeySetupPanel({
       </label>
       <div className="flex flex-column sm:flex-row gap-2">
         <Button
-          disabled={loading || restarting}
+          disabled={loading}
           icon="pi pi-lock"
           label="Настроить быстрый вход"
           loading={loading}
           onClick={createPasskey}
           type="button"
         />
-        {required ? (
-          <Button
-            disabled={loading || restarting}
-            label="Начать вход заново"
-            loading={restarting}
-            onClick={restartAuthentication}
-            outlined
-            severity="secondary"
-            type="button"
-          />
-        ) : (
-          <Button
-            disabled={loading}
-            label="Продолжить без него"
-            onClick={continueWithoutPasskey}
-            outlined
-            severity="secondary"
-            type="button"
-          />
-        )}
-      </div>
-      {required ? null : (
-        <Message
-          severity="info"
-          text="Быстрый вход можно настроить позже в профиле."
+        <Button
+          disabled={loading}
+          label="Продолжить без него"
+          onClick={continueWithoutPasskey}
+          outlined
+          severity="secondary"
+          type="button"
         />
-      )}
+      </div>
+      <Message
+        severity="info"
+        text="Быстрый вход можно настроить позже в профиле."
+      />
     </div>
   );
 }

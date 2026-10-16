@@ -41,7 +41,7 @@ function authCommands(overrides: Partial<AuthCommands> = {}): AuthCommands {
 
 function linkCommands(overrides: Partial<LinkAccountCommands> = {}): LinkAccountCommands {
   return {
-    loadLinkActor: vi.fn(async () => ({ context: {}, userId: "user-1", email: null, emailVerified: false, telegramId: null, telegramUsername: null, upstreamAccountId: null, fullAssurance: true })),
+    loadLinkActor: vi.fn(async () => ({ context: {}, userId: "user-1", email: null, emailVerified: false, telegramId: null, telegramUsername: null, upstreamAccountId: null })),
     assertLinkRateLimit: vi.fn(async () => undefined), authenticateEmail: vi.fn(async () => ({ context: {} })),
     linkActorIsCurrent: vi.fn(async () => true), loadProviderProfile: vi.fn(async () => ({ email: null, emailVerified: false })),
     providerAccountId: vi.fn(() => "upstream-1"), telegramProviderSession: vi.fn(async () => ({ context: {} })),
@@ -565,7 +565,7 @@ describe("server application flows", () => {
     await expect(linkAccountEmail(commands, { email: " U@Example.com ", password: "secret123" })).resolves.toEqual({ ok: true, kind: "verification-required" });
     expect(commands.authenticateEmail).toHaveBeenCalledWith({ operation: "login", email: "u@example.com", password: "secret123" });
     const passkeys: PasskeyManagementGateway = {
-      loadActor: vi.fn(async () => ({ userId: "user-1", fullAssurance: true, email: "u@example.com", emailVerified: true, telegramId: null })),
+      loadActor: vi.fn(async () => ({ userId: "user-1", email: "u@example.com", emailVerified: true, telegramId: null })),
       loadOwned: vi.fn(async () => []), deleteOwned: vi.fn(async () => ({ externalCredentialId: "external-id" })), auditDeleted: vi.fn(async () => undefined),
     };
     await expect(removeLinkedPasskey(passkeys, "credential-id")).resolves.toEqual({ ok: true, kind: "passkey-deleted" });

@@ -496,7 +496,7 @@ describe("production auth and profile adapters", () => {
   it("loads linked-account merge confirmation from its store", async () => {
     mocks.getTelegramAccountMergeConfirmation.mockResolvedValue({ emailWillBeReplaced: true });
     mocks.getCurrentSession.mockResolvedValueOnce({ userId: "user-1", assuranceLevel: "FULL" });
-    await expect(productionLinkAccountReader.loadMergeActor()).resolves.toEqual({ userId: "user-1", fullAssurance: true });
+    await expect(productionLinkAccountReader.loadMergeActor()).resolves.toEqual({ userId: "user-1" });
     mocks.getCurrentSession.mockResolvedValueOnce(null);
     await expect(productionLinkAccountReader.loadMergeActor()).resolves.toBeNull();
 
@@ -560,8 +560,8 @@ describe("production auth and profile adapters", () => {
   it("covers linked-account authorization fences and provider error translations", async () => {
     mocks.getCurrentSession.mockResolvedValueOnce(null);
     await expect(productionLinkAccountCommands.loadLinkActor()).resolves.toBeNull();
-    mocks.getCurrentSession.mockResolvedValueOnce({ assuranceLevel: "BOOTSTRAP", userId: "user-1", user: {} });
-    await expect(productionLinkAccountCommands.loadLinkActor()).resolves.toMatchObject({ fullAssurance: false });
+    mocks.getCurrentSession.mockResolvedValueOnce({ assuranceLevel: "FULL", userId: "user-1", user: {} });
+    await expect(productionLinkAccountCommands.loadLinkActor()).resolves.not.toHaveProperty("fullAssurance");
     mocks.assertRateLimit.mockRejectedValueOnce(new ServiceError("RATE_LIMITED", 429));
     await expect(productionLinkAccountCommands.assertLinkRateLimit("u@example.com"))
       .rejects.toMatchObject({ code: "RATE_LIMITED" });
