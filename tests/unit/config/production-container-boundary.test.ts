@@ -312,6 +312,14 @@ describe("production container boundary", () => {
     expect(compatibilityGuardEnd).toBeGreaterThan(compatibilityGuardStart);
     expect(unchangedCompatibilityInputs).toContain("prisma");
     expect(unchangedCompatibilityInputs).not.toContain("deploy/prod/role-env.mjs");
+    expect(unchangedCompatibilityInputs).not.toContain("deploy/prod/validate-env.mjs");
+    expect(imageRollbackRehearsal).toContain(
+      "readonly EXPECTED_VALIDATOR_COMPATIBILITY_DELTA="
+        + "'+  \"CLEAN_PAY_BAKED_APP_ALIAS_ORIGINS\",'",
+    );
+    expect(imageRollbackRehearsal).toContain(
+      '|| fail "baseline and candidate validator delta is not the reviewed additive change"',
+    );
     expect(imageRollbackRehearsal).toContain(
       "--no-ext-diff --summary \"$PREVIOUS_REVISION\" HEAD --",
     );
@@ -320,7 +328,8 @@ describe("production container boundary", () => {
     );
     expect(imageRollbackRehearsal).toContain(
       "readonly EXPECTED_ROLE_ENV_COMPATIBILITY_DELTA="
-        + "'+    \"PAYMENT_DATA_RETENTION_ENABLED\",'",
+        + "'+    \"NEXT_PUBLIC_APP_ALIAS_ORIGINS\",\n"
+        + "+    \"PAYMENT_DATA_RETENTION_ENABLED\",'",
     );
     expect(imageRollbackRehearsal).toContain(
       '[[ "$ROLE_ENV_COMPATIBILITY_DELTA" == '

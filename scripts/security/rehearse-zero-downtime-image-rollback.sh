@@ -63,7 +63,6 @@ readonly CANDIDATE_SOURCE_REVISION
   || fail "candidate source revision is invalid"
 git -C "$ROOT_DIR" diff --quiet "$PREVIOUS_REVISION" HEAD -- \
   prisma \
-  deploy/prod/validate-env.mjs \
   deploy/prod/image-preflight.sh \
   deploy/prod/zero-downtime-env.mjs \
   tests/fixtures/write-synthetic-production-env.mjs \
@@ -87,9 +86,33 @@ ROLE_ENV_COMPATIBILITY_DELTA=$(
       '
 ) || fail "baseline and candidate role environment delta could not be compared"
 readonly ROLE_ENV_COMPATIBILITY_DELTA
-readonly EXPECTED_ROLE_ENV_COMPATIBILITY_DELTA='+    "PAYMENT_DATA_RETENTION_ENABLED",'
+readonly EXPECTED_ROLE_ENV_COMPATIBILITY_DELTA='+    "NEXT_PUBLIC_APP_ALIAS_ORIGINS",
++    "PAYMENT_DATA_RETENTION_ENABLED",'
 [[ "$ROLE_ENV_COMPATIBILITY_DELTA" == "$EXPECTED_ROLE_ENV_COMPATIBILITY_DELTA" ]] \
   || fail "baseline and candidate role environment delta is not the reviewed additive change"
+# The validator gained exactly one optional image metadata name (the baked public
+# origin aliases).  Any other validator change still blocks the rehearsal.
+VALIDATOR_COMPATIBILITY_SUMMARY=$(
+  git -C "$ROOT_DIR" -c color.ui=false --no-pager diff \
+    --no-ext-diff --summary "$PREVIOUS_REVISION" HEAD -- \
+    deploy/prod/validate-env.mjs
+) || fail "baseline and candidate validator metadata could not be compared"
+readonly VALIDATOR_COMPATIBILITY_SUMMARY
+[[ -z "$VALIDATOR_COMPATIBILITY_SUMMARY" ]] \
+  || fail "baseline and candidate validator metadata differ"
+VALIDATOR_COMPATIBILITY_DELTA=$(
+  git -C "$ROOT_DIR" -c color.ui=false --no-pager diff \
+    --no-ext-diff --unified=0 "$PREVIOUS_REVISION" HEAD -- \
+    deploy/prod/validate-env.mjs \
+    | awk '
+        /^\+\+\+ / || /^--- / { next }
+        /^[+-]/ { print }
+      '
+) || fail "baseline and candidate validator delta could not be compared"
+readonly VALIDATOR_COMPATIBILITY_DELTA
+readonly EXPECTED_VALIDATOR_COMPATIBILITY_DELTA='+  "CLEAN_PAY_BAKED_APP_ALIAS_ORIGINS",'
+[[ "$VALIDATOR_COMPATIBILITY_DELTA" == "$EXPECTED_VALIDATOR_COMPATIBILITY_DELTA" ]] \
+  || fail "baseline and candidate validator delta is not the reviewed additive change"
 [[ ! -e "$OPERATION_LOCK_PATH" && ! -L "$OPERATION_LOCK_PATH" ]] \
   || fail "the production operation lock is already present"
 

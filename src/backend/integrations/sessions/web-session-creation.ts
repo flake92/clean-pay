@@ -33,7 +33,8 @@ export async function createWebSession(
     authMethod?: WebSessionAuthMethod;
   } = {},
 ) {
-  // FULL is the only assurance level the application issues.
+  // FULL is the only assurance level the application issues or accepts; the
+  // other database enum value is retired and kept only so no migration is needed.
   const assuranceLevel = WebSessionAssuranceLevel.FULL;
   const env = getEnv();
   const cookieStore = await cookies();
