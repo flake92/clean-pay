@@ -279,6 +279,8 @@ describe("production image source selection", () => {
     expect(workflow).toContain("Candidate %s child metadata for linux/%s");
     expect(workflow).toContain('.annotations["io.clean-pay.public-build-contract-sha256"]');
     expect(workflow).toContain('."io.clean-pay.baked-public-app-url" == $app_url');
+    expect(workflow).toContain('(."io.clean-pay.baked-app-alias-origins" // "") == $app_alias_origins');
+    expect(workflow).toContain('--build-arg NEXT_PUBLIC_APP_ALIAS_ORIGINS="$NEXT_PUBLIC_APP_ALIAS_ORIGINS"');
     expect(workflow).toContain('."io.clean-pay.baked-brand-name" == $brand_name');
     expect(workflow).toContain('."io.clean-pay.baked-brand-logo-url" == $brand_logo_url');
     expect(workflow).toContain('."io.clean-pay.baked-turnstile-site-key" == $turnstile_site_key');

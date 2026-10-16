@@ -11,6 +11,11 @@ on:
         description: Public HTTPS origin baked into the application
         required: true
         type: string
+      app_alias_origins:
+        description: Optional comma-separated extra public HTTPS origins of the same installation
+        required: false
+        default: ""
+        type: string
       brand_name:
         description: Public brand name baked into the application
         required: true
@@ -75,6 +80,7 @@ jobs:
     env:
       CLEAN_PAY_RELEASE: ${{ inputs.release }}
       NEXT_PUBLIC_APP_URL: ${{ inputs.public_app_url }}
+      NEXT_PUBLIC_APP_ALIAS_ORIGINS: ${{ inputs.app_alias_origins }}
       NEXT_PUBLIC_BRAND_NAME: ${{ inputs.brand_name }}
       NEXT_PUBLIC_BRAND_LOGO_URL: ${{ inputs.brand_logo_url }}
       TURNSTILE_ENABLED: "true"
@@ -362,6 +368,7 @@ jobs:
             --build-arg CLEAN_PAY_PUBLIC_BUILD_CONTRACT_VERSION="$CLEAN_PAY_PUBLIC_BUILD_CONTRACT_VERSION" \
             --build-arg CLEAN_PAY_PUBLIC_BUILD_CONTRACT_SHA256="$PUBLIC_BUILD_CONTRACT_SHA256" \
             --build-arg NEXT_PUBLIC_APP_URL="$NEXT_PUBLIC_APP_URL" \
+            --build-arg NEXT_PUBLIC_APP_ALIAS_ORIGINS="$NEXT_PUBLIC_APP_ALIAS_ORIGINS" \
             --build-arg TURNSTILE_ENABLED=true \
             --build-arg TURNSTILE_WIDGET_ID="$TURNSTILE_SITE_KEY" \
             --build-arg NEXT_PUBLIC_BRAND_NAME="$NEXT_PUBLIC_BRAND_NAME" \
@@ -469,6 +476,7 @@ jobs:
                 --arg contract_version "$CLEAN_PAY_PUBLIC_BUILD_CONTRACT_VERSION" \
                 --arg contract_sha256 "$PUBLIC_BUILD_CONTRACT_SHA256" \
                 --arg app_url "$NEXT_PUBLIC_APP_URL" \
+                --arg app_alias_origins "$NEXT_PUBLIC_APP_ALIAS_ORIGINS" \
                 --arg brand_name "$NEXT_PUBLIC_BRAND_NAME" \
                 --arg brand_logo_url "$NEXT_PUBLIC_BRAND_LOGO_URL" \
                 --arg turnstile_site_key "$TURNSTILE_SITE_KEY" \
@@ -480,6 +488,7 @@ jobs:
                   and ."io.clean-pay.public-build-contract-sha256" == $contract_sha256
                   and ($role != "app" or (
                     ."io.clean-pay.baked-public-app-url" == $app_url
+                    and (."io.clean-pay.baked-app-alias-origins" // "") == $app_alias_origins
                     and ."io.clean-pay.baked-brand-name" == $brand_name
                     and ."io.clean-pay.baked-brand-logo-url" == $brand_logo_url
                     and ."io.clean-pay.baked-turnstile-site-key" == $turnstile_site_key
