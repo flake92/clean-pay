@@ -159,7 +159,11 @@ export async function confirmEmailVerificationCode(
     const profile = await commands.loadProviderProfile(actor);
     const targetEmail = input.email ?? profile.pendingEmail ?? profile.email ?? actor.email ?? undefined;
     assertPasswordBackedEmail(actor, targetEmail);
-    await commands.assertConfirmationLimit({ email: targetEmail ?? null, telegramId: actor.telegramId });
+    await commands.assertConfirmationLimit({
+      userId: actor.userId,
+      email: targetEmail ?? null,
+      telegramId: actor.telegramId,
+    });
     const alreadyVerified = Boolean(
       profile.email && profile.emailVerified
       && (!targetEmail || profile.email.toLowerCase() === targetEmail.toLowerCase()),

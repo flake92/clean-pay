@@ -419,7 +419,13 @@ describe("production auth and profile adapters", () => {
     });
     mocks.getRemnashopUserIdFromAccessToken.mockReturnValue("upstream-1");
     const actor = await productionEmailVerificationCommands.loadActor();
-    await productionEmailVerificationCommands.assertConfirmationLimit({ email: "u@example.com", telegramId: null });
+    await productionEmailVerificationCommands.assertConfirmationLimit({ userId: "user-1", email: "u@example.com", telegramId: null });
+    expect(mocks.assertTargetRateLimit).toHaveBeenCalledWith({
+      action: "email_verification_confirm_user",
+      sessionId: "user:user-1",
+      limit: 5,
+      windowSeconds: 900,
+    });
     await expect(productionEmailVerificationCommands.confirmProviderCode(actor, { email: "u@example.com", code: "123456", alreadyVerified: true }))
       .resolves.toEqual({ email: "u@example.com" });
     mocks.prisma.webUser.findUnique.mockResolvedValueOnce({ id: "other-user" });
@@ -521,6 +527,12 @@ describe("production auth and profile adapters", () => {
     const actor = await productionLinkAccountCommands.loadLinkActor();
     if (!actor) throw new Error("expected actor");
     await productionLinkAccountCommands.assertLinkRateLimit("u@example.com");
+    expect(mocks.assertTargetRateLimit).toHaveBeenCalledWith({
+      action: "auth_login",
+      email: "u@example.com",
+      limit: 5,
+      windowSeconds: 900,
+    });
     const emailSession = await productionLinkAccountCommands.authenticateEmail({ operation: "login", email: "u@example.com", password: "secret123" });
     await expect(productionLinkAccountCommands.linkActorIsCurrent(actor)).resolves.toBe(true);
     await expect(productionLinkAccountCommands.loadProviderProfile(emailSession)).resolves.toMatchObject({ email: "u@example.com", emailVerified: true });

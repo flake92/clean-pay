@@ -168,6 +168,18 @@ describe("application authentication policy", () => {
     expect(commands.markAccountSyncPending).toHaveBeenCalledWith("user-1", expect.any(Error));
   });
 
+  it("bounds code guesses by the authenticated user, not only the client-supplied e-mail", async () => {
+    const commands = emailCommands();
+
+    await confirmEmailVerificationCode(commands, { code: "123456", email: "other@example.com" });
+
+    expect(commands.assertConfirmationLimit).toHaveBeenCalledWith({
+      userId: "user-1",
+      email: "other@example.com",
+      telegramId: null,
+    });
+  });
+
   it("owns verified-email change ordering through code delivery and audit", async () => {
     const order: string[] = [];
     const commands = emailCommands({

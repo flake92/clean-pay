@@ -30,7 +30,7 @@ export interface EmailVerificationCommands {
   requestProviderCode(actor: EmailVerificationActor, email?: string): Promise<{ targetEmail: string }>;
   auditCodeRequested(input: { userId: string; targetEmail: string }): Promise<void>;
   loadProviderProfile(actor: EmailVerificationActor): Promise<{ email: string | null; pendingEmail: string | null; emailVerified: boolean }>;
-  assertConfirmationLimit(input: { email: string | null; telegramId: string | null }): Promise<void>;
+  assertConfirmationLimit(input: { userId: string; email: string | null; telegramId: string | null }): Promise<void>;
   confirmProviderCode(actor: EmailVerificationActor, input: { email?: string; code: string; alreadyVerified: boolean }): Promise<{ email: string }>;
   persistConfirmedEmail(actor: EmailVerificationActor, email: string): Promise<{ existingOwnerId: string | null; upstreamAccountId: string; localVerificationChanged: boolean }>;
   currentProviderSession(actor: EmailVerificationActor): EmailProviderSession;

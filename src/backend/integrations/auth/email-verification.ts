@@ -23,7 +23,7 @@ import {
   withPaymentOwnerChangeFence,
 } from "@/backend/integrations/payments/payment-user-merge-service";
 import { synchronizeProviderAccountIdentity } from "@/backend/integrations/auth/provider-account-identity-sync";
-import { assertCooldown, assertRateLimit } from "@/backend/limits/rate-limit";
+import { assertCooldown, assertRateLimit, assertTargetRateLimit } from "@/backend/limits/rate-limit";
 import { auditLog } from "@/backend/observability/audit";
 import { logger } from "@/backend/observability/logger";
 import { verifyTurnstileToken } from "@/backend/security/turnstile";
@@ -137,13 +137,23 @@ export function createProductionEmailVerificationCommands(
   },
 
   async assertConfirmationLimit(input) {
-    await adapt(() => assertRateLimit({
-      action: "email_verification_confirm",
-      email: input.email,
-      tgId: input.telegramId,
-      limit: 5,
-      windowSeconds: 15 * 60,
-    }));
+    await adapt(async () => {
+      // The target e-mail is client-supplied, so it cannot be the only key:
+      // a changing value would open a fresh code-guessing budget each time.
+      await assertTargetRateLimit({
+        action: "email_verification_confirm_user",
+        sessionId: `user:${input.userId}`,
+        limit: 5,
+        windowSeconds: 15 * 60,
+      });
+      await assertRateLimit({
+        action: "email_verification_confirm",
+        email: input.email,
+        tgId: input.telegramId,
+        limit: 5,
+        windowSeconds: 15 * 60,
+      });
+    });
   },
 
   async confirmProviderCode(actor, input) {

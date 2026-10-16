@@ -7,6 +7,11 @@ const mocks = vi.hoisted(() => ({
   auditedMutation: vi.fn(),
   clearWebSession: vi.fn(),
   getWebSessionUserIdFromAccessCookie: vi.fn(),
+  assertTargetRateLimit: vi.fn(),
+}));
+
+vi.mock("@/backend/limits/rate-limit", () => ({
+  assertTargetRateLimit: mocks.assertTargetRateLimit,
 }));
 
 vi.mock("@/backend/integrations/remnashop/client", () => ({
@@ -70,6 +75,24 @@ describe("cabinet command adapter", () => {
     expect(mocks.remnashopRequest).toHaveBeenNthCalledWith(4, "/subscription/promocode", {
       method: "POST", accessToken: "access-token", body: { code: " CLEAN " },
     });
+    expect(mocks.assertTargetRateLimit).toHaveBeenCalledOnce();
+    expect(mocks.assertTargetRateLimit).toHaveBeenCalledWith({
+      action: "promocode_activation",
+      sessionId: "user:user-1",
+      limit: 10,
+      windowSeconds: 900,
+    });
+  });
+
+  it("rejects promocode enumeration before calling the provider", async () => {
+    mocks.assertTargetRateLimit.mockRejectedValueOnce(
+      new ServiceError("RATE_LIMITED", 429, "Too many attempts. Try again later."),
+    );
+
+    await expect(productionCabinetCommands.activatePromocode("GUESS"))
+      .rejects.toBeInstanceOf(CabinetCommandError);
+    expect(mocks.auditedMutation).not.toHaveBeenCalled();
+    expect(mocks.remnashopRequest).not.toHaveBeenCalled();
   });
 
   it.each([

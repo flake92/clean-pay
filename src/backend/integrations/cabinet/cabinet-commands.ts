@@ -5,6 +5,7 @@ import {
 import { ServiceError } from "@/backend/errors/service-error";
 import { remnashopValidatedRequest } from "@/backend/integrations/remnashop/api-client-runtime";
 import { getAuthorizedRemnashopTokens } from "@/backend/integrations/remnashop/client";
+import { assertTargetRateLimit } from "@/backend/limits/rate-limit";
 import { auditLog } from "@/backend/observability/audit";
 import { auditedMutation } from "@/backend/observability/mutation-audit";
 import {
@@ -24,9 +25,20 @@ type CabinetAuthorizer = typeof getAuthorizedRemnashopTokens;
 export function createProductionCabinetCommands(
   authorize: CabinetAuthorizer = getAuthorizedRemnashopTokens,
 ): CabinetCommands {
-  async function authorizedMutation<T>(action: string, mutate: (accessToken: string) => Promise<T>) {
+  async function authorizedMutation<T>(
+    action: string,
+    mutate: (accessToken: string) => Promise<T>,
+    limit?: { limit: number; windowSeconds: number },
+  ) {
     try {
       const { accessToken, session } = await authorize();
+      if (limit) {
+        await assertTargetRateLimit({
+          action,
+          sessionId: `user:${session.userId}`,
+          ...limit,
+        });
+      }
       await auditedMutation({ action, userId: session.userId, mutate: () => mutate(accessToken) });
     } catch (error) {
       if (error instanceof ServiceError) {
@@ -51,10 +63,11 @@ export function createProductionCabinetCommands(
     remnashopValidatedRequest<DevicesDeleteAllResponse>("/subscription/devices", { method: "DELETE", accessToken })),
   reissueSubscription: () => authorizedMutation("subscription_reissue", (accessToken) =>
     remnashopValidatedRequest<ReissueResponse>("/subscription/reissue", { method: "POST", accessToken })),
+  // Bounded per user so promo codes cannot be enumerated from one account.
   activatePromocode: (code) => authorizedMutation("promocode_activation", (accessToken) =>
     remnashopValidatedRequest<PromocodeActivateResponse>("/subscription/promocode", {
       method: "POST", accessToken, body: { code },
-    })),
+    }), { limit: 10, windowSeconds: 15 * 60 }),
   async logout() {
     const userId = await getWebSessionUserIdFromAccessCookie();
     await auditLog({ action: "auth_logout", userId });
