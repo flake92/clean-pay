@@ -32,7 +32,7 @@ export type PaymentWorkflowInput =
 
 export interface PaymentWorkflowGateway {
   loadActor(): Promise<{ userId: string; email: string | null; emailVerified: boolean; telegramId: string | number | bigint | null } | null>;
-  rateLimit(input: { kind: PaymentWorkflowInput["kind"]; email: string; telegramId: string | number | bigint | null }): Promise<void>;
+  rateLimit(input: { kind: PaymentWorkflowInput["kind"]; userId: string }): Promise<void>;
   beginOperation(input: {
     userId: string;
     idempotencyKey: string;

@@ -223,17 +223,43 @@ describe("rate limiting", () => {
     });
   });
 
-  it("uses rate-limit for cooldown checks", async () => {
-    mocks.redisCommand.mockResolvedValueOnce([1, 1]);
+  it("keeps cooldowns strictly per key without consuming shared capacity", async () => {
+    mocks.redisCommand.mockResolvedValueOnce([1]);
 
     await assertCooldown({ key: "email:user-1", action: "email_verification", windowSeconds: 60 });
     expect(mocks.redisCommand).toHaveBeenCalledWith([
       "EVAL",
       expect.any(String),
-      2,
+      1,
       expect.stringMatching(/^clean-pay:rate-limit:v4:auth:email_verification:email:[a-f0-9]{64}$/),
-      "clean-pay:rate-limit:v4:auth:email_verification:capacity",
       60,
+    ]);
+  });
+
+  it("applies an identity-less action's own limit per client, not only the shared capacity", async () => {
+    mocks.redisCommand.mockResolvedValueOnce([1]);
+
+    // Outside a request there is no client address: only capacity is charged.
+    await assertRateLimit({ action: "passkey_login_verify", limit: 50, windowSeconds: 60 });
+    expect(mocks.redisCommand).toHaveBeenCalledWith([
+      "EVAL",
+      expect.any(String),
+      1,
+      "clean-pay:rate-limit:v4:auth:passkey_login_verify:capacity",
+      60,
+    ]);
+
+    mocks.redisCommand.mockResolvedValueOnce([51, 0]).mockResolvedValueOnce(30);
+    await expect(assertRateLimitCapacity("passkey_login_verify", 60, "203.0.113.7", 50))
+      .rejects.toMatchObject({ code: "RATE_LIMITED" });
+    expect(mocks.redisCommand).toHaveBeenCalledWith([
+      "EVAL",
+      expect.stringContaining("return {client, 0}"),
+      2,
+      rateLimitClientKey("passkey_login_verify", "203.0.113.7"),
+      "clean-pay:rate-limit:v4:auth:passkey_login_verify:capacity",
+      60,
+      50,
     ]);
   });
 

@@ -16,7 +16,7 @@ export type LinkAccountActor = {
 
 export interface LinkAccountCommands {
   loadLinkActor(): Promise<LinkAccountActor | null>;
-  assertLinkRateLimit(email: string): Promise<void>;
+  assertLinkRateLimit(input: { userId: string; email: string }): Promise<void>;
   authenticateEmail(input: { operation: "login" | "register"; email: string; password: string }): Promise<{ context: unknown }>;
   linkActorIsCurrent(actor: { context: unknown }): Promise<boolean>;
   loadProviderProfile(session: { context: unknown }): Promise<{

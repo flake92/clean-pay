@@ -7,7 +7,7 @@ import { executePaymentWorkflow } from "@/application/payments/execute-payment-w
 const mocks = vi.hoisted(() => ({
   getCurrentSession: vi.fn(),
   assertEmailVerificationPolicy: vi.fn(),
-  assertRateLimit: vi.fn(),
+  assertTargetRateLimit: vi.fn(),
   getAuthorizedRemnashopTokens: vi.fn(),
   getRemnashopUserIdFromAccessToken: vi.fn(),
   remnashopRequest: vi.fn(),
@@ -30,7 +30,7 @@ vi.mock("@/backend/integrations/sessions/web-session-service", () => ({
   getCurrentSession: mocks.getCurrentSession,
   assertEmailVerificationPolicy: mocks.assertEmailVerificationPolicy,
 }));
-vi.mock("@/backend/limits/rate-limit", () => ({ assertRateLimit: mocks.assertRateLimit }));
+vi.mock("@/backend/limits/rate-limit", () => ({ assertTargetRateLimit: mocks.assertTargetRateLimit }));
 vi.mock("@/backend/integrations/remnashop/client", () => ({
   getAuthorizedRemnashopTokens: mocks.getAuthorizedRemnashopTokens,
   getRemnashopUserIdFromAccessToken: mocks.getRemnashopUserIdFromAccessToken,
@@ -141,9 +141,9 @@ describe("production payment adapter", () => {
       .resolves.toEqual({ status: "completed", operationId: "operation-1", payment });
 
     expect(mocks.assertEmailVerificationPolicy).not.toHaveBeenCalled();
-    expect(mocks.assertRateLimit).toHaveBeenCalledWith(expect.objectContaining({
+    expect(mocks.assertTargetRateLimit).toHaveBeenCalledWith(expect.objectContaining({
       action: "subscription_purchase",
-      email: "u@example.com",
+      sessionId: expect.stringMatching(/^user:/),
     }));
     expect(mocks.remnashopRequest).toHaveBeenNthCalledWith(2, "/subscription/purchase", expect.objectContaining({
       method: "POST",

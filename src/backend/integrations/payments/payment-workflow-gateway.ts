@@ -11,7 +11,7 @@ import {
 import { remnashopValidatedRequest } from "@/backend/integrations/remnashop/api-client-runtime";
 import { bindRemnashopResponseContract } from "@/backend/integrations/remnashop/request-transport";
 import { parsePaymentInit } from "@/backend/integrations/remnashop/payment-recovery";
-import { assertRateLimit } from "@/backend/limits/rate-limit";
+import { assertTargetRateLimit } from "@/backend/limits/rate-limit";
 import { auditLog, logTechnicalError } from "@/backend/observability/audit";
 import {
   beginPaymentOperation,
@@ -78,10 +78,11 @@ export function createProductionPaymentWorkflowGateway(
   },
 
   async rateLimit(input) {
-    await assertRateLimit({
+    // Per user only: legitimate purchases across many users are never capped
+    // by a shared service-wide budget.
+    await assertTargetRateLimit({
       action: input.kind === "PURCHASE" ? "subscription_purchase" : "subscription_extend",
-      email: input.email,
-      tgId: input.telegramId,
+      sessionId: `user:${input.userId}`,
       limit: 10,
       windowSeconds: 15 * 60,
     });

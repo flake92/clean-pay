@@ -72,11 +72,7 @@ export async function executePaymentWorkflow(
 
   if (operation.state === "missing") {
     assertPaymentActorReady(actor);
-    await gateway.rateLimit({
-      kind: input.kind,
-      email: actor.email ?? `user:${actor.userId}`,
-      telegramId: actor.telegramId,
-    });
+    await gateway.rateLimit({ kind: input.kind, userId: actor.userId });
     authorization = await gateway.authorize();
     assertSameActor(actor.userId, authorization);
     operation = await gateway.beginOperation({
@@ -99,11 +95,7 @@ export async function executePaymentWorkflow(
   try {
     if (!authorization) {
       assertPaymentActorReady(actor);
-      await gateway.rateLimit({
-        kind: input.kind,
-        email: actor.email ?? `user:${actor.userId}`,
-        telegramId: actor.telegramId,
-      });
+      await gateway.rateLimit({ kind: input.kind, userId: actor.userId });
       authorization = await gateway.authorize();
     }
     assertSameActor(actor.userId, authorization);

@@ -6,7 +6,7 @@ const mocks = vi.hoisted(() => ({
   getRemnashopUserIdFromAccessToken: vi.fn(),
   remnashopRequest: vi.fn(),
   parsePaymentInit: vi.fn(),
-  assertRateLimit: vi.fn(),
+  assertTargetRateLimit: vi.fn(),
   auditLog: vi.fn(),
   logTechnicalError: vi.fn(),
   beginPaymentOperation: vi.fn(),
@@ -34,7 +34,7 @@ vi.mock("@/backend/integrations/remnashop/api-client-runtime", () => ({
   remnashopValidatedRequest: mocks.remnashopRequest,
 }));
 vi.mock("@/backend/integrations/remnashop/payment-recovery", () => ({ parsePaymentInit: mocks.parsePaymentInit }));
-vi.mock("@/backend/limits/rate-limit", () => ({ assertRateLimit: mocks.assertRateLimit }));
+vi.mock("@/backend/limits/rate-limit", () => ({ assertTargetRateLimit: mocks.assertTargetRateLimit }));
 vi.mock("@/backend/observability/audit", () => ({
   auditLog: mocks.auditLog,
   logTechnicalError: mocks.logTechnicalError,
@@ -83,12 +83,16 @@ describe("productionPaymentWorkflowGateway", () => {
     });
   });
 
-  it("applies distinct purchase and extension rate-limit actions", async () => {
-    await gateway.rateLimit({ kind: "PURCHASE", email: "u@example.com", telegramId: "777" });
-    await gateway.rateLimit({ kind: "EXTEND", email: "", telegramId: null });
+  it("applies distinct per-user purchase and extension rate limits", async () => {
+    await gateway.rateLimit({ kind: "PURCHASE", userId: "user-1" });
+    await gateway.rateLimit({ kind: "EXTEND", userId: "user-1" });
 
-    expect(mocks.assertRateLimit).toHaveBeenNthCalledWith(1, expect.objectContaining({ action: "subscription_purchase" }));
-    expect(mocks.assertRateLimit).toHaveBeenNthCalledWith(2, expect.objectContaining({ action: "subscription_extend" }));
+    expect(mocks.assertTargetRateLimit).toHaveBeenNthCalledWith(1, {
+      action: "subscription_purchase", sessionId: "user:user-1", limit: 10, windowSeconds: 900,
+    });
+    expect(mocks.assertTargetRateLimit).toHaveBeenNthCalledWith(2, {
+      action: "subscription_extend", sessionId: "user:user-1", limit: 10, windowSeconds: 900,
+    });
   });
 
   it("authorizes and loads offers with the provider access token", async () => {

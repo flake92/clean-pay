@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   cookieGet: vi.fn(), getCurrentSession: vi.fn(), refreshCurrentAccessCookie: vi.fn(),
-  assertRateLimit: vi.fn(), auditLog: vi.fn(), withPaymentOwnerChangeFence: vi.fn(),
+  assertTargetRateLimit: vi.fn(), auditLog: vi.fn(), withPaymentOwnerChangeFence: vi.fn(),
   markPaymentOwnerChangeUpstreamMutationStarted: vi.fn(),
   reconcileCompletedPaymentOwnerChange: vi.fn(),
   remnashopAuthTelegramIdentity: vi.fn(), getRemnashopMe: vi.fn(), getRemnashopUserIdFromAccessToken: vi.fn(),
@@ -19,7 +19,7 @@ vi.mock("@/backend/database/prisma", () => ({ prisma: mocks.prisma }));
 vi.mock("@/backend/integrations/sessions/web-session-service", () => ({
   getCurrentSession: mocks.getCurrentSession, refreshCurrentAccessCookie: mocks.refreshCurrentAccessCookie,
 }));
-vi.mock("@/backend/limits/rate-limit", () => ({ assertRateLimit: mocks.assertRateLimit }));
+vi.mock("@/backend/limits/rate-limit", () => ({ assertTargetRateLimit: mocks.assertTargetRateLimit }));
 vi.mock("@/backend/observability/audit", () => ({ auditLog: mocks.auditLog }));
 vi.mock("@/backend/integrations/payments/payment-user-merge-service", () => ({
   withPaymentOwnerChangeFence: mocks.withPaymentOwnerChangeFence,
@@ -102,7 +102,7 @@ describe("production Telegram account merge gateway", () => {
     await gateway.refreshLocalSession();
     await gateway.reconcileCompletedOwnerChange(confirmation);
 
-    expect(mocks.assertRateLimit).toHaveBeenCalledWith(expect.objectContaining({ action: "telegram_account_merge_confirm" }));
+    expect(mocks.assertTargetRateLimit).toHaveBeenCalledWith(expect.objectContaining({ action: "telegram_account_merge_confirm" }));
     expect(mocks.withPaymentOwnerChangeFence).toHaveBeenCalled();
     expect(mocks.synchronizeProviderAccountIdentity).toHaveBeenCalledWith("provider-access", expect.objectContaining({ accountId: "target" }));
     expect(mocks.linkCurrentUserToRemnashopAuth).toHaveBeenCalledWith(expect.objectContaining({ paymentOwnerFenceHeld: true }));
@@ -214,7 +214,7 @@ describe("production Telegram account merge gateway", () => {
     const { ServiceError } = await import("@/backend/errors/service-error");
     const { AccountMergeError } = await import("@/application/auth/ports/telegram-account-merge");
     const applicationError = new AccountMergeError("RATE_LIMITED");
-    mocks.assertRateLimit.mockRejectedValueOnce(applicationError);
+    mocks.assertTargetRateLimit.mockRejectedValueOnce(applicationError);
     await expect(gateway.assertRateLimit("777")).rejects.toBe(applicationError);
     mocks.getCurrentSession.mockRejectedValueOnce(new ServiceError("UNAUTHORIZED", 401));
     await expect(gateway.loadActor()).rejects.toMatchObject({

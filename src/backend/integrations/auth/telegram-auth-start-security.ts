@@ -2,7 +2,7 @@ import type {
   TelegramAuthStartSecurity,
 } from "@/application/auth/ports/telegram-auth-start";
 import { getCurrentUser } from "@/backend/integrations/sessions/web-session-service";
-import { assertRateLimit } from "@/backend/limits/rate-limit";
+import { assertTargetRateLimit } from "@/backend/limits/rate-limit";
 import { verifyTurnstileToken } from "@/backend/security/turnstile";
 
 export function createProductionTelegramAuthStartSecurity(): TelegramAuthStartSecurity {
@@ -10,10 +10,9 @@ export function createProductionTelegramAuthStartSecurity(): TelegramAuthStartSe
     loadCurrentUser: getCurrentUser,
     verifyHuman: verifyTurnstileToken,
     assertLinkRateLimit(user) {
-      return assertRateLimit({
+      return assertTargetRateLimit({
         action: "telegram_link_start",
-        email: user.email,
-        tgId: user.telegramId,
+        sessionId: `user:${user.id}`,
         limit: 10,
         windowSeconds: 15 * 60,
       });

@@ -10,7 +10,7 @@ import {
 import { acquireRemnashopTokensForSession } from "@/backend/integrations/remnashop/session-token-lifecycle";
 import { replaceWebSessionAfterPasswordChange } from "@/backend/integrations/sessions/web-session-service";
 import { auditLog } from "@/backend/observability/audit";
-import { assertRateLimit } from "@/backend/limits/rate-limit";
+import { assertTargetRateLimit } from "@/backend/limits/rate-limit";
 
 type PasswordSessionContext = Awaited<ReturnType<typeof getAuthorizedRemnashopTokens>>;
 type PasswordProviderContext = Awaited<ReturnType<typeof remnashopChangePassword>>;
@@ -29,9 +29,11 @@ export function createProductionProfileCommands(
     return { context: authorized, userId: authorized.session.userId };
   },
   async assertPasswordChangeRateLimit(session) {
-    await assertRateLimit({
+    await assertTargetRateLimit({
       action: "password_change",
-      sessionId: passwordSession(session).session.id,
+      // Per user, so opening another session does not reset the budget for
+      // guessing the current password.
+      sessionId: `user:${passwordSession(session).session.userId}`,
       limit: 5,
       windowSeconds: 15 * 60,
     });

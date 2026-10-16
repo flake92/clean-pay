@@ -12,7 +12,7 @@ import {
 } from "@/backend/integrations/remnashop/api-client";
 import { getAuthorizedRemnashopTokens } from "@/backend/integrations/remnashop/session-authorization";
 import { getStoredAuthorizedRemnashopTokens } from "@/backend/integrations/remnashop/stored-session-authorization";
-import { assertRateLimit } from "@/backend/limits/rate-limit";
+import { assertTargetRateLimit } from "@/backend/limits/rate-limit";
 import { auditedMutation } from "@/backend/observability/mutation-audit";
 
 type AuthorizedPreferenceSession = {
@@ -127,7 +127,7 @@ export function createEmailReminderPreferenceCommands(
     },
     async assertRateLimit(actor) {
       try {
-        await assertRateLimit({
+        await assertTargetRateLimit({
           action: "email_reminder_preference",
           sessionId: actorContext(actor).session.id,
           limit: 10,

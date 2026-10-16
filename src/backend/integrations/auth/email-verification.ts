@@ -23,7 +23,7 @@ import {
   withPaymentOwnerChangeFence,
 } from "@/backend/integrations/payments/payment-user-merge-service";
 import { synchronizeProviderAccountIdentity } from "@/backend/integrations/auth/provider-account-identity-sync";
-import { assertCooldown, assertRateLimit, assertTargetRateLimit } from "@/backend/limits/rate-limit";
+import { assertCooldown, assertTargetRateLimit } from "@/backend/limits/rate-limit";
 import { auditLog } from "@/backend/observability/audit";
 import { logger } from "@/backend/observability/logger";
 import { verifyTurnstileToken } from "@/backend/security/turnstile";
@@ -100,7 +100,7 @@ export function createProductionEmailVerificationCommands(
   async assertRequestLimits(input) {
     await adapt(async () => {
       await assertCooldown({ key: `email-verification:${input.userId}`, action: "email_verification_request", windowSeconds: 60 });
-      await assertRateLimit({
+      await assertTargetRateLimit({
         action: "email_verification_request",
         email: input.email,
         tgId: input.telegramId,
@@ -146,7 +146,7 @@ export function createProductionEmailVerificationCommands(
         limit: 5,
         windowSeconds: 15 * 60,
       });
-      await assertRateLimit({
+      await assertTargetRateLimit({
         action: "email_verification_confirm",
         email: input.email,
         tgId: input.telegramId,
@@ -291,9 +291,9 @@ export function createProductionEmailVerificationCommands(
 
   async assertChangeLimits(input) {
     await adapt(async () => {
-      await assertRateLimit({
+      await assertTargetRateLimit({
         action: "email_change_attempt",
-        sessionId: input.userId,
+        sessionId: `user:${input.userId}`,
         limit: 5,
         windowSeconds: 15 * 60,
       });

@@ -29,7 +29,7 @@ import {
   markPaymentOwnerChangeUpstreamMutationStarted,
   withPaymentOwnerChangeFence,
 } from "@/backend/integrations/payments/payment-user-merge-service";
-import { assertRateLimit, assertTargetRateLimit } from "@/backend/limits/rate-limit";
+import { assertTargetRateLimit } from "@/backend/limits/rate-limit";
 import { auditLog } from "@/backend/observability/audit";
 import { synchronizeProviderAccountIdentity } from "@/backend/integrations/auth/provider-account-identity-sync";
 
@@ -132,9 +132,11 @@ export function createProductionLinkAccountCommands(): LinkAccountCommands {
     };
   },
 
-  async assertLinkRateLimit(email) {
+  async assertLinkRateLimit({ userId, email }) {
     await adapt(async () => {
-      await assertRateLimit({ action: "remnashop_link", email, limit: 10, windowSeconds: 15 * 60 });
+      // Bounded per actor first: the target e-mail is chosen by the caller.
+      await assertTargetRateLimit({ action: "remnashop_link_actor", sessionId: `user:${userId}`, limit: 10, windowSeconds: 15 * 60 });
+      await assertTargetRateLimit({ action: "remnashop_link", email, limit: 10, windowSeconds: 15 * 60 });
       // Linking verifies the e-mail password like a login does; share the
       // login budget so it cannot serve as a second password-guessing oracle.
       await assertTargetRateLimit({ action: "auth_login", email, limit: 5, windowSeconds: 15 * 60 });

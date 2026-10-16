@@ -85,11 +85,7 @@ describe("application payment workflow", () => {
     await expect(executePaymentWorkflow(port, { kind: "PURCHASE", request }, "key-1"))
       .resolves.toEqual({ status: "completed", operationId: "operation-1", payment });
 
-    expect(port.rateLimit).toHaveBeenCalledWith({
-      kind: "PURCHASE",
-      email: "u@example.com",
-      telegramId: null,
-    });
+    expect(port.rateLimit).toHaveBeenCalledWith({ kind: "PURCHASE", userId: "user-1" });
     expect(port.beginOperation).toHaveBeenNthCalledWith(2, expect.objectContaining({
       createIfMissing: true,
       expectedUpstreamAccountId: "upstream-user-1",
@@ -109,7 +105,7 @@ describe("application payment workflow", () => {
 
     await expect(executePaymentWorkflow(port, { kind: "PURCHASE", request }, "key-1"))
       .resolves.toMatchObject({ status: "completed" });
-    expect(port.rateLimit).toHaveBeenCalledWith({ kind: "PURCHASE", email: "u@example.com", telegramId: "777" });
+    expect(port.rateLimit).toHaveBeenCalledWith({ kind: "PURCHASE", userId: "user-1" });
     expect(port.authorize).toHaveBeenCalledOnce();
   });
 

@@ -107,10 +107,62 @@ async function incrementRateLimits(keys: string[], windowSeconds: number) {
   return count as number[];
 }
 
+async function assertSharedCapacity(
+  capacityKey: string,
+  action: string,
+  windowSeconds: number,
+) {
+  let counts: number[];
+  try {
+    counts = await incrementRateLimits([capacityKey], windowSeconds);
+  } catch (error) {
+    logger.error("auth_rate_limit_unavailable", {
+      action,
+      errorName: error instanceof Error ? error.name : "UnknownError",
+    });
+    if (error instanceof ServiceError) throw error;
+    throw new ServiceError("UPSTREAM_UNAVAILABLE", 503, "Authentication protection is temporarily unavailable", {
+      retryAfterSeconds: Math.min(windowSeconds, 30),
+    });
+  }
+  if ((counts[0] ?? 0) <= getEnv().authRateLimitCapacity) return;
+
+  let retryAfterSeconds: number;
+  try {
+    retryAfterSeconds = await getRetryAfterSeconds(capacityKey, windowSeconds);
+  } catch {
+    retryAfterSeconds = Math.min(windowSeconds, 30);
+  }
+  recordOperationalEvent("rate_limit_capacity_rejected", action);
+  throw new ServiceError(
+    "RATE_LIMITED",
+    429,
+    "Too many attempts. Try again later.",
+    { retryAfterSeconds },
+  );
+}
+
+/**
+ * Anonymous authentication guard: charges the proven target (or, without one,
+ * the trusted client address) together with the action's shared capacity.
+ * Authenticated per-user actions must use assertTargetRateLimit instead, so
+ * legitimate load across many users is never capped globally.
+ */
 export async function assertRateLimit(options: RateLimitOptions) {
   const targetKey = rateLimitKey(options);
   const capacityKey = rateLimitCapacityKey(options.action);
-  const keys = targetKey === capacityKey ? [capacityKey] : [targetKey, capacityKey];
+  if (targetKey === capacityKey) {
+    // Without a stable identity the per-target limit applies per client
+    // address instead of silently degrading to the global capacity only.
+    await assertRateLimitCapacity(
+      options.action,
+      options.windowSeconds,
+      undefined,
+      options.limit,
+    );
+    return;
+  }
+  const keys = [targetKey, capacityKey];
   let counts: number[];
   try {
     counts = await incrementRateLimits(keys, options.windowSeconds);
@@ -126,9 +178,7 @@ export async function assertRateLimit(options: RateLimitOptions) {
       retryAfterSeconds: Math.min(options.windowSeconds, 30),
     });
   }
-  const targetExceeded = keys.length === 2 && (counts[0] ?? 0) > options.limit;
-  // Actions without a stable identity only have the shared capacity bucket.
-  // Their per-target limit must not accidentally become a tiny global limit.
+  const targetExceeded = (counts[0] ?? 0) > options.limit;
   const capacityLimit = getEnv().authRateLimitCapacity;
   const capacityExceeded = (counts.at(-1) ?? 0) > capacityLimit;
 
@@ -162,17 +212,14 @@ export async function assertRateLimitCapacity(
   action: string,
   windowSeconds = 15 * 60,
   clientIp?: string | null,
+  clientLimit = AUTH_CLIENT_PREFLIGHT_LIMIT,
 ) {
   const resolvedClientIp = clientIp === undefined
     ? await currentTrustedClientIp()
     : clientIp;
   const capacityKey = rateLimitCapacityKey(action);
   if (!resolvedClientIp) {
-    await assertRateLimit({
-      action,
-      limit: getEnv().authRateLimitCapacity,
-      windowSeconds,
-    });
+    await assertSharedCapacity(capacityKey, action, windowSeconds);
     return;
   }
 
@@ -188,7 +235,7 @@ export async function assertRateLimitCapacity(
       clientKey,
       capacityKey,
       windowSeconds,
-      AUTH_CLIENT_PREFLIGHT_LIMIT,
+      clientLimit,
     ]);
   } catch (error) {
     logger.error("auth_rate_limit_unavailable", {
@@ -211,7 +258,7 @@ export async function assertRateLimitCapacity(
   }
 
   const [clientCount, capacityCount] = counts as [number, number];
-  const clientExceeded = clientCount > AUTH_CLIENT_PREFLIGHT_LIMIT;
+  const clientExceeded = clientCount > clientLimit;
   const capacityExceeded = capacityCount > getEnv().authRateLimitCapacity;
   if (!clientExceeded && !capacityExceeded) return;
 
@@ -350,7 +397,8 @@ export async function assertCooldown({
   action: string;
   windowSeconds: number;
 }) {
-  await assertRateLimit({
+  // A cooldown is strictly per key; it must not consume any shared budget.
+  await assertTargetRateLimit({
     action,
     email: key,
     limit: 1,

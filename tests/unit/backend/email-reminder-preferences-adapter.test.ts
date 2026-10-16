@@ -20,7 +20,7 @@ vi.mock("@/backend/integrations/remnashop/stored-session-authorization", () => (
   getStoredAuthorizedRemnashopTokens: mocks.storedAuthorize,
 }));
 vi.mock("@/backend/limits/rate-limit", () => ({
-  assertRateLimit: mocks.rateLimit,
+  assertTargetRateLimit: mocks.rateLimit,
 }));
 vi.mock("@/backend/observability/mutation-audit", () => ({
   auditedMutation: mocks.auditedMutation,

@@ -23,7 +23,7 @@ import {
   reconcileCompletedPaymentOwnerChange,
   withPaymentOwnerChangeFence,
 } from "@/backend/integrations/payments/payment-user-merge-service";
-import { assertRateLimit } from "@/backend/limits/rate-limit";
+import { assertTargetRateLimit } from "@/backend/limits/rate-limit";
 import { auditLog } from "@/backend/observability/audit";
 import { sha256 } from "@/backend/security/crypto";
 import { synchronizeProviderAccountIdentity } from "@/backend/integrations/auth/provider-account-identity-sync";
@@ -138,7 +138,7 @@ export function createProductionTelegramAccountMergeGateway(): TelegramAccountMe
   },
 
   async assertRateLimit(telegramId) {
-    await adapt(() => assertRateLimit({
+    await adapt(() => assertTargetRateLimit({
       action: "telegram_account_merge_confirm",
       tgId: telegramId,
       limit: 5,

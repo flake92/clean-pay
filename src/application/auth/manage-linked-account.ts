@@ -180,7 +180,7 @@ export async function linkAccountEmail(
     const email = input.email.trim().toLowerCase();
     const actor = await commands.loadLinkActor();
     if (!actor) throw new LinkAccountGatewayError("UNAUTHORIZED");
-    await commands.assertLinkRateLimit(email);
+    await commands.assertLinkRateLimit({ userId: actor.userId, email });
     let providerSession: { context: unknown };
     let source: "login" | "register" = "login";
     let loginFailure: unknown;

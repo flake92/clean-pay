@@ -399,9 +399,9 @@ describe("production auth and profile adapters", () => {
     expect(mocks.linkCurrentUserToRemnashopAuth).toHaveBeenCalledWith(expect.objectContaining({ paymentOwnerFenceHeld: true }));
     expect(mocks.refreshCurrentAccessCookie).toHaveBeenCalled();
     expect(mocks.loggerWarn).toHaveBeenCalled();
-    expect(mocks.assertRateLimit).toHaveBeenCalledWith({
+    expect(mocks.assertTargetRateLimit).toHaveBeenCalledWith({
       action: "email_change_attempt",
-      sessionId: "user-1",
+      sessionId: "user:user-1",
       limit: 5,
       windowSeconds: 15 * 60,
     });
@@ -468,9 +468,9 @@ describe("production auth and profile adapters", () => {
       refresh: mocks.remnashopRefreshTokens,
       forceRefresh: true,
     });
-    expect(mocks.assertRateLimit).toHaveBeenCalledWith({
+    expect(mocks.assertTargetRateLimit).toHaveBeenCalledWith({
       action: "password_change",
-      sessionId: "session-1",
+      sessionId: "user:user-1",
       limit: 5,
       windowSeconds: 15 * 60,
     });
@@ -526,7 +526,13 @@ describe("production auth and profile adapters", () => {
 
     const actor = await productionLinkAccountCommands.loadLinkActor();
     if (!actor) throw new Error("expected actor");
-    await productionLinkAccountCommands.assertLinkRateLimit("u@example.com");
+    await productionLinkAccountCommands.assertLinkRateLimit({ userId: "user-1", email: "u@example.com" });
+    expect(mocks.assertTargetRateLimit).toHaveBeenCalledWith({
+      action: "remnashop_link_actor",
+      sessionId: "user:user-1",
+      limit: 10,
+      windowSeconds: 900,
+    });
     expect(mocks.assertTargetRateLimit).toHaveBeenCalledWith({
       action: "auth_login",
       email: "u@example.com",
@@ -562,8 +568,8 @@ describe("production auth and profile adapters", () => {
     await expect(productionLinkAccountCommands.loadLinkActor()).resolves.toBeNull();
     mocks.getCurrentSession.mockResolvedValueOnce({ assuranceLevel: "FULL", userId: "user-1", user: {} });
     await expect(productionLinkAccountCommands.loadLinkActor()).resolves.not.toHaveProperty("fullAssurance");
-    mocks.assertRateLimit.mockRejectedValueOnce(new ServiceError("RATE_LIMITED", 429));
-    await expect(productionLinkAccountCommands.assertLinkRateLimit("u@example.com"))
+    mocks.assertTargetRateLimit.mockRejectedValueOnce(new ServiceError("RATE_LIMITED", 429));
+    await expect(productionLinkAccountCommands.assertLinkRateLimit({ userId: "user-1", email: "u@example.com" }))
       .rejects.toMatchObject({ code: "RATE_LIMITED" });
 
     for (const [message, code] of [
@@ -663,8 +669,10 @@ describe("production auth and profile adapters", () => {
       message: "Неверный e-mail или пароль.",
     });
 
-    expect(mocks.assertRateLimit).toHaveBeenCalledOnce();
-    expect(mocks.assertRateLimit).toHaveBeenCalledWith({
+    // Actor, target e-mail and the shared login budget; no global capacity.
+    expect(mocks.assertTargetRateLimit).toHaveBeenCalledTimes(3);
+    expect(mocks.assertRateLimit).not.toHaveBeenCalled();
+    expect(mocks.assertTargetRateLimit).toHaveBeenCalledWith({
       action: "remnashop_link",
       email: "existing@example.com",
       limit: 10,
@@ -698,12 +706,12 @@ describe("production auth and profile adapters", () => {
         remnashopUserId: "telegram-account",
       },
     });
-    mocks.assertRateLimit.mockRejectedValue(
+    mocks.assertTargetRateLimit.mockRejectedValue(
       new ServiceError("RATE_LIMITED", 429, "too many attempts"),
     );
 
     await expect(productionLinkAccountCommands.assertLinkRateLimit(
-      "existing@example.com",
+      { userId: "user-1", email: "existing@example.com" },
     )).rejects.toMatchObject({
       code: "RATE_LIMITED",
     });
