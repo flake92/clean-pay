@@ -65,7 +65,7 @@ describe("supply-chain boundary", () => {
   it("copies the builder inputs explicitly while preserving both targets", () => {
     const builder = dockerfile.slice(
       dockerfile.indexOf("FROM dependencies AS builder"),
-      dockerfile.indexOf("FROM node:24.18.0-bookworm-slim", dockerfile.indexOf("FROM dependencies AS builder")),
+      dockerfile.indexOf("FROM node:24.22.0-bookworm-slim", dockerfile.indexOf("FROM dependencies AS builder")),
     );
 
     expect(dockerfile).not.toMatch(/^COPY \. \.$/mu);

@@ -120,7 +120,7 @@ describe("production image source selection", () => {
 
   it("pins both build roots to one multi-platform Node index digest", () => {
     const pinnedBase =
-      "node:24.18.0-bookworm-slim@sha256:6f7b03f7c2c8e2e784dcf9295400527b9b1270fd37b7e9a7285cf83b6951452d";
+      "node:24.22.0-bookworm-slim@sha256:a5f4366e834695d5f363b920c104953a535d3a9864d1bdf74566a0ebe01daee5";
 
     expect(dockerfile.match(new RegExp(pinnedBase, "g"))).toHaveLength(2);
     expect(dockerfile).not.toMatch(/^FROM node:24\.18\.0-bookworm-slim AS/m);
