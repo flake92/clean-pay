@@ -1,6 +1,11 @@
-import { readFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 import { describe, expect, it } from "vitest";
+
+import { posixShell, shellFunctionFrom, shellIntegrationTimeout, shellPath } from "../../helpers/posix-shell";
 
 const menu = readFileSync("menu.sh", "utf8");
 const readme = readFileSync("README.md", "utf8");
@@ -58,6 +63,107 @@ describe("operator menu", () => {
     expectBefore(update, "rs_compose stop", "remnashop-migration");
     expect(update).toContain("rs_rollback");
     expect(update).toContain("Прежний образ сохранён");
+  });
+
+  it.skipIf(!posixShell)(
+    "carries Remnashop health checks from the new release into an existing compose",
+    () => {
+      const block = (indent: string, kind: string, lines: string[]) =>
+        [`${indent}healthcheck:`, `${indent}  test: ["CMD", "python", "-m", "src.infrastructure.healthcheck", "${kind}"]`,
+          ...lines.map((line) => `${indent}  ${line}`)].join("\n");
+      const current = [
+        "services:",
+        "  remnashop-db:",
+        "    healthcheck:",
+        '      test: ["CMD-SHELL", "pg_isready"]',
+        "      interval: 3s",
+        "  remnashop:",
+        "    image: remnashop:clean-pay-prod-new",
+        block("    ", "web", ["interval: 30s", "timeout: 10s", "retries: 3", "start_period: 1m"]),
+        "    restart: always",
+        "  remnashop-taskiq-worker:",
+        block("    ", "taskiq", ["interval: 30s", "timeout: 10s", "retries: 3", "start_period: 3m"]),
+        "  remnashop-taskiq-scheduler:",
+        block("    ", "taskiq", ["interval: 30s", "timeout: 10s", "retries: 3", "start_period: 3m"]),
+        "",
+      ].join("\n");
+      // the release template uses a different indentation and an extra comment line
+      const template = [
+        "services:",
+        "  remnashop:",
+        "      healthcheck:",
+        '        test: ["CMD", "python", "-m", "src.infrastructure.healthcheck", "web"]',
+        "        # Each probe is a new process",
+        "        interval: 120s",
+        "        timeout: 10s",
+        "        retries: 3",
+        "        start_period: 1m",
+        "        start_interval: 10s",
+        "  remnashop-taskiq-worker:",
+        "      healthcheck:",
+        '        test: ["CMD", "python", "-m", "src.infrastructure.healthcheck", "taskiq"]',
+        "        interval: 300s",
+        "        timeout: 10s",
+        "        retries: 3",
+        "        start_period: 3m",
+        "        start_interval: 10s",
+        "",
+      ].join("\n");
+      const dir = mkdtempSync(join(tmpdir(), "clean-pay-rs-hc-"));
+      try {
+        const write = (name: string, text: string) => {
+          writeFileSync(join(dir, name), text);
+          return shellPath(join(dir, name));
+        };
+        const run = (templateText: string, composeText: string, drop: string) => {
+          const result = spawnSync(
+            posixShell!,
+            ["-c", `${shellFunctionFrom(menu, "rs_sync_healthchecks")}\nrs_sync_healthchecks "$T" "$C" "$D"`],
+            {
+              encoding: "utf8",
+              env: { ...process.env, T: write("t.yml", templateText), C: write("c.yml", composeText), D: drop },
+            },
+          );
+          expect(result.status, result.stderr).toBe(0);
+          return result.stdout;
+        };
+
+        const updated = run(template, current, "0");
+        expect(updated).toBe([
+          "services:",
+          "  remnashop-db:",
+          "    healthcheck:",
+          '      test: ["CMD-SHELL", "pg_isready"]',
+          "      interval: 3s",
+          "  remnashop:",
+          "    image: remnashop:clean-pay-prod-new",
+          block("    ", "web", ["interval: 120s", "timeout: 10s", "retries: 3", "start_period: 1m", "start_interval: 10s"]),
+          "    restart: always",
+          "  remnashop-taskiq-worker:",
+          block("    ", "taskiq", ["interval: 300s", "timeout: 10s", "retries: 3", "start_period: 3m", "start_interval: 10s"]),
+          "  remnashop-taskiq-scheduler:",
+          block("    ", "taskiq", ["interval: 300s", "timeout: 10s", "retries: 3", "start_period: 3m", "start_interval: 10s"]),
+          "",
+        ].join("\n"));
+        // idempotent on an already updated compose
+        expect(run(template, updated, "0")).toBe(updated);
+        // Docker Engine < 25 does not know start_interval
+        expect(run(template, current, "1")).not.toContain("start_interval");
+        expect(run(template, current, "1")).toContain("interval: 300s");
+        // releases without these health checks leave compose untouched
+        expect(run("services:\n  remnashop:\n    image: x\n", current, "0")).toBe(current);
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    },
+    shellIntegrationTimeout,
+  );
+
+  it("syncs Remnashop health checks inside the guarded compose switch", () => {
+    const update = functionBody("rs_update");
+    expectBefore(update, "require_backup", "rs_sync_healthchecks");
+    expectBefore(update, "rs_sync_healthchecks", "rs_compose config --quiet");
+    expect(update).toContain('git --git-dir="$REMNASHOP_SOURCES" show "$target:docker-compose.prod.internal.yml"');
   });
 
   it("never runs destructive cleanup or restores data on its own", () => {

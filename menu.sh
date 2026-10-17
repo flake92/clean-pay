@@ -1003,6 +1003,52 @@ rs_prepare_sources() {
 }
 
 # Builds the image for a commit and prints its local reference.
+# Copies the Remnashop container health checks (web / taskiq) from the compose template
+# of the release being installed into an existing compose file. Only the healthcheck
+# timing keys that follow those test lines are replaced, at the existing indentation; the
+# rest of the file is printed unchanged. Templates without these blocks change nothing.
+# $1 template compose, $2 current compose, $3 = 1 to drop start_interval (Engine < 25).
+rs_sync_healthchecks() {
+  awk -v drop_start_interval="${3:-0}" '
+    function kind(line) {
+      if (index(line, "src.infrastructure.healthcheck\", \"web\"]")) return "web"
+      if (index(line, "src.infrastructure.healthcheck\", \"taskiq\"]")) return "taskiq"
+      return ""
+    }
+    function indent(line) { match(line, /^ */); return RLENGTH }
+    function timing_key(line, ind,   rest) {
+      if (indent(line) != ind) return 0
+      rest = substr(line, ind + 1)
+      return rest ~ /^(interval|timeout|retries|start_period|start_interval):/
+    }
+    function block_comment(line, ind) { return indent(line) == ind && substr(line, ind + 1) ~ /^#/ }
+    FNR == NR {
+      if (cur != "" && block_comment($0, curind)) next
+      if (cur != "" && timing_key($0, curind)) {
+        if (!(drop_start_interval == 1 && substr($0, curind + 1) ~ /^start_interval:/)) {
+          n[cur]++; blk[cur, n[cur]] = substr($0, curind + 1)
+        }
+        next
+      }
+      cur = ""
+      k = kind($0)
+      if (k != "" && !(k in n)) { cur = k; curind = indent($0); n[k] = 0 }
+      next
+    }
+    {
+      if (skip && (timing_key($0, skipind) || block_comment($0, skipind))) next
+      skip = 0
+      print
+      k = kind($0)
+      if (k != "" && (k in n) && n[k] > 0) {
+        ind = indent($0); pad = sprintf("%" ind "s", "")
+        for (i = 1; i <= n[k]; i++) print pad blk[k, i]
+        skip = 1; skipind = ind
+      }
+    }
+  ' "$1" "$2"
+}
+
 rs_build_image() {
   local target=$1 staging image revision free
   image="$REMNASHOP_IMAGE:$REMNASHOP_TAG_PREFIX$target"
@@ -1114,6 +1160,26 @@ rs_update() {
     "$compose_before" > "$RS_COMPOSE.new"
   chmod --reference="$compose_before" "$RS_COMPOSE.new" 2>/dev/null || true
   mv -f -- "$RS_COMPOSE.new" "$RS_COMPOSE"
+  # health checks follow the new release (e.g. intervals), the rest of compose stays as is
+  local hc_template engine_major drop_start_interval=0
+  hc_template=$(mktemp)
+  if git --git-dir="$REMNASHOP_SOURCES" show "$target:docker-compose.prod.internal.yml" > "$hc_template" 2>/dev/null \
+    && [ -s "$hc_template" ]; then
+    engine_major=$(docker version --format '{{.Server.Version}}' 2>/dev/null | cut -d. -f1)
+    case "$engine_major" in ''|*[!0-9]*) drop_start_interval=1 ;; *) [ "$engine_major" -ge 25 ] || drop_start_interval=1 ;; esac
+    if ! rs_sync_healthchecks "$hc_template" "$RS_COMPOSE" "$drop_start_interval" > "$RS_COMPOSE.new"; then
+      rm -f -- "$RS_COMPOSE.new" "$hc_template"; cp -p -- "$compose_before" "$RS_COMPOSE"
+      die 'Не удалось перенести проверки здоровья — возвращён прежний compose.'
+    fi
+    chmod --reference="$compose_before" "$RS_COMPOSE.new" 2>/dev/null || true
+    if cmp -s -- "$RS_COMPOSE" "$RS_COMPOSE.new"; then
+      rm -f -- "$RS_COMPOSE.new"
+    else
+      mv -f -- "$RS_COMPOSE.new" "$RS_COMPOSE"
+      ok "Проверки здоровья обновлены по версии $(short "$target")"
+    fi
+  fi
+  rm -f -- "$hc_template"
   if ! rs_compose config --quiet; then cp -p -- "$compose_before" "$RS_COMPOSE"; die 'Новый compose не прошёл проверку — возвращён прежний.'; fi
   ok "compose указывает на $image"
 
