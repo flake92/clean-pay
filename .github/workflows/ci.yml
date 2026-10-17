@@ -531,12 +531,16 @@ jobs:
           image: clean-pay:ci
           artifact-name: clean-pay-application-image.spdx.json
           format: spdx-json
+          # The job has contents: read; release assets are not attached from CI.
+          upload-release-assets: false
       - name: Generate migration image SBOM
         uses: anchore/sbom-action@e22c389904149dbc22b58101806040fa8d37a610 # v0.24.0
         with:
           image: clean-pay-migration:ci
           artifact-name: clean-pay-migration-image.spdx.json
           format: spdx-json
+          # The job has contents: read; release assets are not attached from CI.
+          upload-release-assets: false
       - name: Inventory application image High and Critical findings
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
