@@ -22,3 +22,6 @@ Caddyfile text eol=lf
 
 deploy/prod/start.sh text eol=lf
 start.sh text eol=lf
+
+# Exact v0.1.0 (47aadf6) migration bytes with mixed CRLF/LF; must not be normalized.
+tests/fixtures/legacy-crlf-migrations/** -text

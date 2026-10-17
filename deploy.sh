@@ -1145,8 +1145,13 @@ if [ "$#" -eq 0 ] && is_interactive; then
 else
   command=${1:-help}
 fi
+# The lock accepts only [a-z0-9-] operation names, so the dotted command name is
+# mapped to its lock name explicitly.
 case "$command" in
-  setup|configure|config|init|prepare-v0.1.1-upgrade|authorize-existing-database|compose|check|build|migrate|resolve-rolled-back|install|up|restart|down)
+  prepare-v0.1.1-upgrade)
+    enter_production_operation_lock prepare-v011-upgrade
+    ;;
+  setup|configure|config|init|authorize-existing-database|compose|check|build|migrate|resolve-rolled-back|install|up|restart|down)
     enter_production_operation_lock "$command"
     ;;
 esac

@@ -564,8 +564,13 @@ case "$MODE" in
   *) fail "CLEAN_PAY_MODE must be standalone or remnashop" ;;
 esac
 
+# The lock accepts only [a-z0-9-] operation names, so the dotted command name is
+# mapped to its lock name explicitly.
 case "$COMMAND" in
-  start|up|stop|down|restart|build|prepare-v0.1.1-upgrade)
+  prepare-v0.1.1-upgrade)
+    acquire_production_operation_lock prepare-v011-upgrade
+    ;;
+  start|up|stop|down|restart|build)
     acquire_production_operation_lock "$COMMAND"
     ;;
 esac

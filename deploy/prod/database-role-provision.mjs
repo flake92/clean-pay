@@ -67,9 +67,14 @@ const REVIEWED_ALTERNATE_MIGRATION_CHECKSUMS = Object.freeze({
   ]),
   "20260619153000_add_auth_cache_models": Object.freeze([
     "51bd33df188c6434ab7d57f0de9b050fe2da22424b6b3180b350af85d0b40625",
+    // v0.1.0 (47aadf6) shipped this file with CRLF line endings; LF-normalized it
+    // is byte-identical to the packaged migration.
+    "8e9457a600a35e1018068757616a19c9e7aaa24309369ae5aaf31d2fb73d9709",
   ]),
   "20260619154500_add_telegram_oidc": Object.freeze([
     "63e11f0d035511b1fb738f8ceba4615df364c4c525105b20b62405afb539d599",
+    // v0.1.0 (47aadf6) CRLF copy, identical after LF normalization.
+    "f9ea7b8602cf5472a0ec89c580607e04fe30a9963338ceea1896750ef7d0f3b2",
   ]),
   "20260619161000_add_remnashop_session_tokens": Object.freeze([
     "7b95bddb17aaf5215f69fc36a97432071fe537d553e766676fb22cf33c2686ca",
@@ -656,7 +661,11 @@ export async function buildCanonicalCatalogSnapshot(client, schema) {
            catalog_index.indisclustered AS clustered,
            catalog_index.indisreplident AS replica_identity,
            catalog_index.indnullsnotdistinct AS nulls_not_distinct,
-           catalog_index.indcheckxmin AS check_xmin,
+           -- pg_index.indcheckxmin is runtime state, not schema: PostgreSQL sets it when
+           -- an index is built over rows changed in the same transaction (the 20260825*
+           -- retention migrations on populated PaymentRecord tables) and clears it on
+           -- REINDEX. Pinned as false, the value every reviewed fingerprint was taken with.
+           false AS check_xmin,
            ARRAY(
              SELECT option::text
                FROM unnest(COALESCE(index_relation.reloptions, ARRAY[]::text[])) option

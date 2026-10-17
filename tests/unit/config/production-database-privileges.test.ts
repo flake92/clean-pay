@@ -478,6 +478,41 @@ describe("production database least-privilege contract", () => {
     );
   });
 
+  it("admits the v0.1.0 CRLF ledger checksums only for byte-identical LF files", () => {
+    const provisioner = readFileSync("deploy/prod/database-role-provision.mjs", "utf8");
+    const alternates = provisioner.slice(
+      provisioner.indexOf("const REVIEWED_ALTERNATE_MIGRATION_CHECKSUMS"),
+      provisioner.indexOf("});", provisioner.indexOf("const REVIEWED_ALTERNATE_MIGRATION_CHECKSUMS")),
+    );
+    for (const migration of [
+      "20260619153000_add_auth_cache_models",
+      "20260619154500_add_telegram_oidc",
+    ]) {
+      const packaged = readFileSync(`prisma/migrations/${migration}/migration.sql`, "utf8");
+      // Exact bytes shipped in v0.1.0 (mixed CRLF/LF), kept unnormalized via .gitattributes.
+      const legacy = readFileSync(`tests/fixtures/legacy-crlf-migrations/${migration}.sql`);
+      expect(packaged).not.toContain("\r");
+      expect(legacy.includes("\r\n")).toBe(true);
+      expect(legacy.toString("utf8").replace(/\r\n/gu, "\n")).toBe(packaged);
+      const crlfChecksum = createHash("sha256").update(legacy).digest("hex");
+      const entry = alternates.slice(
+        alternates.indexOf(`"${migration}"`),
+        alternates.indexOf("]),", alternates.indexOf(`"${migration}"`)),
+      );
+      expect(entry).toContain(`"${crlfChecksum}"`);
+    }
+  });
+
+  it("keeps pg_index.indcheckxmin out of the reviewed catalog fingerprint", () => {
+    const provisioner = readFileSync("deploy/prod/database-role-provision.mjs", "utf8");
+    const indexQuery = provisioner.slice(
+      provisioner.indexOf("const indexes = await queryRows(`"),
+      provisioner.indexOf("const types = await queryRows(`"),
+    );
+    expect(indexQuery).toContain("false AS check_xmin");
+    expect(indexQuery).not.toMatch(/catalog_index\.indcheckxmin/u);
+  });
+
   it("rolls back every provisioning mutation after a late failure", async () => {
     const query = vi.fn(async (statement: string) => {
       void statement;

@@ -523,6 +523,41 @@ process.exit(originalExitCode);
     shellIntegrationTimeout,
   );
 
+  it("accepts every operation name that deploy.sh and start.sh pass to the lock", () => {
+    const lockNames = (source: string, lockFunction: string, commandVariable: string) => {
+      const dispatch = new RegExp(`case "\\$${commandVariable}" in\\n([\\s\\S]*?)\\nesac`, "g");
+      const names = new Set<string>();
+      for (const block of source.matchAll(dispatch)) {
+        if (!block[1].includes(lockFunction)) continue;
+        for (const branch of block[1].matchAll(/^\s+([a-z0-9.|-]+)\)\s*\n\s+(\S+) (\S+)\n\s+;;/gm)) {
+          if (branch[2] !== lockFunction) continue;
+          const argument = branch[3];
+          if (argument === `"$${commandVariable}"`) {
+            for (const label of branch[1].split("|")) names.add(label);
+          } else {
+            names.add(argument);
+          }
+        }
+      }
+      return [...names];
+    };
+    const deployNames = lockNames(readFileSync("deploy.sh", "utf8"), "enter_production_operation_lock", "command");
+    const startNames = lockNames(readFileSync("start.sh", "utf8"), "acquire_production_operation_lock", "COMMAND");
+
+    expect(deployNames).toContain("prepare-v011-upgrade");
+    expect(deployNames).toContain("install");
+    expect(startNames).toContain("prepare-v011-upgrade");
+    expect(startNames).toContain("build");
+    for (const name of [...deployNames, ...startNames]) {
+      const path = operationLockPath();
+      const token = acquireProductionOperationLock(path, name);
+      releaseProductionOperationLock(path, token);
+      expect(existsSync(path)).toBe(false);
+    }
+    expect(() => acquireProductionOperationLock(operationLockPath(), "prepare-v0.1.1-upgrade"))
+      .toThrow("production operation name is invalid");
+  });
+
   it("shares one guarded lock path across every production role-env materializer", () => {
     const deploy = readFileSync("deploy.sh", "utf8");
     const start = readFileSync("start.sh", "utf8");
@@ -538,10 +573,16 @@ process.exit(originalExitCode);
     expect(deploy).toContain("deploy/prod/node-tooling.sh");
     expect(start).toContain("production-operation-lock.mjs");
     expect(deploy).toMatch(
-      /setup\|configure\|config\|init\|prepare-v0\.1\.1-upgrade\|authorize-existing-database\|compose\|check\|build\|migrate\|resolve-rolled-back\|install\|up\|restart\|down\)[\s\S]{0,100}enter_production_operation_lock/,
+      /setup\|configure\|config\|init\|authorize-existing-database\|compose\|check\|build\|migrate\|resolve-rolled-back\|install\|up\|restart\|down\)[\s\S]{0,100}enter_production_operation_lock "\$command"/,
+    );
+    expect(deploy).toMatch(
+      /prepare-v0\.1\.1-upgrade\)\s+enter_production_operation_lock prepare-v011-upgrade/,
     );
     expect(start).toMatch(
-      /start\|up\|stop\|down\|restart\|build\|prepare-v0\.1\.1-upgrade\)[\s\S]{0,100}acquire_production_operation_lock/,
+      /start\|up\|stop\|down\|restart\|build\)[\s\S]{0,100}acquire_production_operation_lock "\$COMMAND"/,
+    );
+    expect(start).toMatch(
+      /prepare-v0\.1\.1-upgrade\)\s+acquire_production_operation_lock prepare-v011-upgrade/,
     );
     expect(prod).toContain('./production-operation-lock.mjs');
     expect(prod).toContain('path.join(prodDir, ".production-operation.lock")');
