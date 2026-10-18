@@ -60,7 +60,7 @@ describe("operator menu", () => {
   it("runs Remnashop migrations explicitly and keeps the previous image", () => {
     const update = functionBody("rs_update");
     expectBefore(update, "alembic_head", "require_backup");
-    expectBefore(update, "rs_compose stop", "remnashop-migration");
+    expectBefore(update, "rs_compose stop", "rs_compose run --rm --no-deps remnashop-migration");
     expect(update).toContain("rs_rollback");
     expect(update).toContain("Прежний образ сохранён");
   });
@@ -162,8 +162,37 @@ describe("operator menu", () => {
   it("syncs Remnashop health checks inside the guarded compose switch", () => {
     const update = functionBody("rs_update");
     expectBefore(update, "require_backup", "rs_sync_healthchecks");
-    expectBefore(update, "rs_sync_healthchecks", "rs_compose config --quiet");
+    expectBefore(update, "rs_sync_healthchecks \"$hc_template\"", "if ! rs_compose config --quiet; then cp -p");
     expect(update).toContain('git --git-dir="$REMNASHOP_SOURCES" show "$target:docker-compose.prod.internal.yml"');
+  });
+
+  it("moves an upstream Remnashop compose to this build without touching it before the backup", () => {
+    const update = functionBody("rs_update");
+    // the layout is decided from the existing compose before anything else
+    expectBefore(update, "rs_has_service remnashop-migration || layout=upstream", "step 1 6");
+    // new compose and .env are written to side files and validated while the old stack runs
+    expectBefore(update, "require_backup", 'rs_adopt_files "$target" "$image" "$RS_COMPOSE.new"');
+    expectBefore(update, 'rs_adopt_files "$target" "$image" "$RS_COMPOSE.new"', '--env-file "$REMNASHOP_DIR/.env.new" config --quiet');
+    expectBefore(update, '--env-file "$REMNASHOP_DIR/.env.new" config --quiet', 'mv -f -- "$REMNASHOP_DIR/.env.new" "$REMNASHOP_DIR/.env"');
+    expectBefore(update, 'mv -f -- "$RS_COMPOSE.new" "$RS_COMPOSE"', "rs_compose up -d --wait --wait-timeout 180 remnashop-db remnashop-redis");
+    // the rollback restores the previous .env as well as the compose file
+    expect(update).toContain('cp -p -- "$env_before" "$REMNASHOP_DIR/.env"');
+    // a build compose without a migration service is refused before any service stops
+    expectBefore(update, "миграции применить нечем", "rs_compose stop");
+
+    const adopt = functionBody("rs_adopt_files");
+    expect(adopt).toContain('cp -p -- "$REMNASHOP_DIR/.env" "$env_out"');
+    for (const key of ["TASKIQ_DEPLOYMENT_ID", "REDIS_PASSWORD", "APP_JWT_SECRET", "APP_API_KEY", "APP_AUTH_SERVICE_KEY"]) {
+      expect(adopt).toContain(key);
+    }
+    // existing values are kept: keys are generated only when missing or placeholders
+    expect(adopt).toContain('rs_env_placeholder "$env_out"');
+  });
+
+  it("does not wait forever for health checks the upstream compose does not have", () => {
+    const wait = functionBody("rs_wait_healthy");
+    expect(wait).toContain("'running/none '");
+    expect(wait).toContain("RestartCount");
   });
 
   it("refuses Remnashop versions without the Clean Pay integration before building", () => {

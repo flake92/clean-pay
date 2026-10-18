@@ -27,6 +27,7 @@ import {
 } from "../../../deploy/prod/database-privilege-manifest.mjs";
 import {
   canonicalCatalogFingerprint,
+  catalogFingerprintCandidates,
   parseDatabaseRoleConfiguration,
   quoteLiteral,
   runProvisioningTransaction,
@@ -503,14 +504,49 @@ describe("production database least-privilege contract", () => {
     }
   });
 
-  it("keeps pg_index.indcheckxmin out of the reviewed catalog fingerprint", () => {
+  it("matches a reviewed catalog whether pg_index.indcheckxmin is set or cleared", () => {
     const provisioner = readFileSync("deploy/prod/database-role-provision.mjs", "utf8");
     const indexQuery = provisioner.slice(
       provisioner.indexOf("const indexes = await queryRows(`"),
       provisioner.indexOf("const types = await queryRows(`"),
     );
-    expect(indexQuery).toContain("false AS check_xmin");
-    expect(indexQuery).not.toMatch(/catalog_index\.indcheckxmin/u);
+    // the real flag is read; the comparison decides how to treat it
+    expect(indexQuery).toContain("catalog_index.indcheckxmin AS check_xmin");
+    for (const name of ["assertReviewedCatalogState", "assertReviewedRecoveryPredecessor"]) {
+      const start = provisioner.indexOf(`function ${name}(`);
+      const body = provisioner.slice(start, provisioner.indexOf("\n}\n", start));
+      expect(body).toContain("catalogFingerprintCandidates(");
+      expect(body).not.toContain("canonicalCatalogFingerprint(");
+    }
+
+    const index = (name: string, checkXmin: boolean) => ({
+      table_name: "PaymentRecord",
+      name,
+      definition: `CREATE INDEX "${name}" ON <target>."PaymentRecord" USING btree ("retentionHoldAt")`,
+      check_xmin: checkXmin,
+    });
+    const cleared = {
+      columns: [],
+      indexes: [index("PaymentRecord_pkey", false), index("PaymentRecord_retentionHoldAt_idx", false)],
+    };
+    // production after the 20260825* retention migrations: the flag is set on populated tables
+    const flagged = {
+      ...cleared,
+      indexes: [index("PaymentRecord_pkey", false), index("PaymentRecord_retentionHoldAt_idx", true)],
+    };
+    const reviewedWithFlag = canonicalCatalogFingerprint(flagged);
+    const reviewedCleared = canonicalCatalogFingerprint(cleared);
+    expect(reviewedWithFlag).not.toBe(reviewedCleared);
+
+    // a flagged catalog matches a fingerprint reviewed with the flag (v0.2.1 prod) or without it
+    expect(catalogFingerprintCandidates(flagged)).toEqual([reviewedWithFlag, reviewedCleared]);
+    // a cleared catalog (for example after REINDEX) has exactly one candidate
+    expect(catalogFingerprintCandidates(cleared)).toEqual([reviewedCleared]);
+    // genuine schema differences still never match
+    const changed = { ...flagged, indexes: [...flagged.indexes, index("PaymentRecord_extra_idx", false)] };
+    for (const candidate of catalogFingerprintCandidates(changed)) {
+      expect([reviewedWithFlag, reviewedCleared]).not.toContain(candidate);
+    }
   });
 
   it("rolls back every provisioning mutation after a late failure", async () => {

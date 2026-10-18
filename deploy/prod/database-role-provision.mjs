@@ -509,6 +509,23 @@ export function canonicalCatalogFingerprint(snapshot) {
     .digest("hex");
 }
 
+// pg_index.indcheckxmin is runtime state, not schema: PostgreSQL sets it when an
+// index is built over rows changed in the same transaction (the 20260825*
+// retention migrations on populated PaymentRecord tables) and clears it on
+// REINDEX. Reviewed fingerprints were taken both ways, so a catalog matches when
+// either its exact snapshot or the snapshot with every flag cleared is reviewed.
+export function catalogFingerprintCandidates(snapshot) {
+  const candidates = [canonicalCatalogFingerprint(snapshot)];
+  if (snapshot && Array.isArray(snapshot.indexes)
+    && snapshot.indexes.some((index) => index.check_xmin === true)) {
+    candidates.push(canonicalCatalogFingerprint({
+      ...snapshot,
+      indexes: snapshot.indexes.map((index) => ({ ...index, check_xmin: false })),
+    }));
+  }
+  return candidates;
+}
+
 export async function buildCanonicalCatalogSnapshot(client, schema) {
   const queryRows = async (sql) => (await client.query(sql, [schema])).rows;
   const relations = await queryRows(`
@@ -661,11 +678,8 @@ export async function buildCanonicalCatalogSnapshot(client, schema) {
            catalog_index.indisclustered AS clustered,
            catalog_index.indisreplident AS replica_identity,
            catalog_index.indnullsnotdistinct AS nulls_not_distinct,
-           -- pg_index.indcheckxmin is runtime state, not schema: PostgreSQL sets it when
-           -- an index is built over rows changed in the same transaction (the 20260825*
-           -- retention migrations on populated PaymentRecord tables) and clears it on
-           -- REINDEX. Pinned as false, the value every reviewed fingerprint was taken with.
-           false AS check_xmin,
+           -- Runtime state rather than schema; see catalogFingerprintCandidates.
+           catalog_index.indcheckxmin AS check_xmin,
            ARRAY(
              SELECT option::text
                FROM unnest(COALESCE(index_relation.reloptions, ARRAY[]::text[])) option
@@ -1109,11 +1123,11 @@ async function assertReviewedCatalogState(client, configuration, { postOnly = fa
     client,
     configuration.bootstrap.schema,
   );
-  const fingerprint = canonicalCatalogFingerprint(snapshot);
-  if (!expectedFingerprints.has(fingerprint)) {
+  const fingerprints = catalogFingerprintCandidates(snapshot);
+  if (!fingerprints.some((fingerprint) => expectedFingerprints.has(fingerprint))) {
     const expected = [...expectedFingerprints].join(" or ");
     throw new Error(
-      `database catalog does not match reviewed ${ledgerState} state for privilege manifest ${DATABASE_PRIVILEGE_MANIFEST_VERSION}: expected ${expected}, received ${fingerprint}`,
+      `database catalog does not match reviewed ${ledgerState} state for privilege manifest ${DATABASE_PRIVILEGE_MANIFEST_VERSION}: expected ${expected}, received ${fingerprints.join(" / ")}`,
     );
   }
   return ledgerState;
@@ -1168,10 +1182,10 @@ export async function assertReviewedRecoveryPredecessor(
   ) {
     throw new Error("Prisma recovery ledger is not the exact reviewed predecessor prefix");
   }
-  const fingerprint = canonicalCatalogFingerprint(
+  const fingerprints = catalogFingerprintCandidates(
     await buildCanonicalCatalogSnapshot(client, configuration.bootstrap.schema),
   );
-  if (!expectedFingerprints.has(fingerprint)) {
+  if (!fingerprints.some((fingerprint) => expectedFingerprints.has(fingerprint))) {
     throw new Error(`database catalog does not match recovery predecessor ${recoveryState.predecessor}`);
   }
 }

@@ -1167,19 +1167,64 @@ rs_build_image() {
   printf '%s' "$image"
 }
 
+# Containers without a health check (the upstream compose) count as ready once
+# they have kept running, without a restart, for three polls in a row.
 rs_wait_healthy() {
-  local i states
+  local i states restarts last_restarts='' running_polls=0
   for i in $(seq 1 60); do
     states=$({ docker inspect "$RS_API" "$RS_WORKER" "$RS_SCHEDULER" \
       --format '{{.State.Status}}/{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' 2>/dev/null || true; } \
       | sort -u | tr '\n' ' ')
+    restarts=$({ docker inspect "$RS_API" "$RS_WORKER" "$RS_SCHEDULER" --format '{{.RestartCount}}' 2>/dev/null || true; } | tr '\n' ' ')
     printf '\r  Ожидание готовности (%s/60): %s   ' "$i" "$states"
     if [ "$states" = 'running/healthy ' ]; then printf '\n'; return 0; fi
     case "$states" in *exited*|*unhealthy*|*dead*) printf '\n'; return 1 ;; esac
+    case "$states" in
+      'running/none '|'running/healthy running/none ')
+        if [ "$restarts" = "$last_restarts" ]; then running_polls=$((running_polls + 1)); else running_polls=1; fi
+        if [ "$running_polls" -ge 3 ]; then printf '\n'; return 0; fi ;;
+      *) running_polls=0 ;;
+    esac
+    last_restarts=$restarts
     sleep 10
   done
   printf '\n'
   return 1
+}
+
+# 1 when the Docker Engine predates healthcheck start_interval (Engine 25).
+rs_drop_start_interval() {
+  local major
+  major=$(docker version --format '{{.Server.Version}}' 2>/dev/null | cut -d. -f1)
+  case "$major" in ''|*[!0-9]*) printf 1 ;; *) if [ "$major" -ge 25 ]; then printf 0; else printf 1; fi ;; esac
+}
+
+# An install made from the upstream snoups compose (image ghcr.io/snoups/remnashop,
+# migrations inside the app container) has no remnashop-migration service. Moving it
+# to this build writes the release compose and adds the keys it requires to a copy
+# of the existing .env; the database and Redis volumes keep their names.
+rs_adopt_files() {
+  local target=$1 image=$2 compose_out=$3 env_out=$4 web=$5 key template
+  template=$(mktemp)
+  git --git-dir="$REMNASHOP_SOURCES" show "$target:docker-compose.prod.internal.yml" > "$template" \
+    || { rm -f -- "$template"; return 1; }
+  [ "$(grep -c '^  image: ghcr.io/' "$template")" = 1 ] \
+    || { rm -f -- "$template"; err 'Шаблон compose изменился: не найдена единственная строка образа ghcr.io.'; return 1; }
+  awk -v image="$image" '/^  image: ghcr.io\// { print "  image: " image; next } { print }' "$template" > "$compose_out"
+  if [ "$(rs_drop_start_interval)" = 1 ]; then
+    rs_sync_healthchecks "$template" "$compose_out" 1 > "$template.synced" && mv -f -- "$template.synced" "$compose_out"
+  fi
+  rm -f -- "$template" "$template.synced"
+  chmod 600 "$compose_out"
+  cp -p -- "$REMNASHOP_DIR/.env" "$env_out"
+  chmod 600 "$env_out"
+  rs_env_placeholder "$env_out" TASKIQ_DEPLOYMENT_ID && rs_env_set "$env_out" TASKIQ_DEPLOYMENT_ID "$(openssl rand -hex 12)"
+  rs_env_placeholder "$env_out" REDIS_PASSWORD && rs_env_set "$env_out" REDIS_PASSWORD "$(openssl rand -hex 24)"
+  for key in APP_JWT_SECRET APP_API_KEY APP_AUTH_SERVICE_KEY; do
+    rs_env_placeholder "$env_out" "$key" && rs_env_set "$env_out" "$key" "$(openssl rand -hex 32)"
+  done
+  [ -z "$web" ] || rs_env_set "$env_out" WEB_ENABLED "$web"
+  return 0
 }
 
 rs_update() {
@@ -1195,9 +1240,20 @@ rs_update() {
   api_svc=$(rs_service_of "$RS_API" remnashop)
   worker_svc=$(rs_service_of "$RS_WORKER" remnashop-taskiq-worker)
   scheduler_svc=$(rs_service_of "$RS_SCHEDULER" remnashop-taskiq-scheduler)
+  local layout=build env_before='' web=''
+  rs_compose config --quiet || die "$RS_COMPOSE не проходит docker compose config — исправьте его, ничего не изменено."
+  rs_has_service remnashop-migration || layout=upstream
 
   step 1 6 'Выбор версии'
   kv 'Сейчас работает' "$current_image"
+  if [ "$layout" = upstream ]; then
+    warn 'Remnashop установлен по compose апстрима snoups (нет сервиса remnashop-migration).'
+    note 'Обновление переведёт его на сборку Clean Pay: новый compose из выбранной версии,'
+    note 'в .env добавятся недостающие ключи (старые значения сохраняются), база и Redis'
+    note 'остаются в тех же томах. Пока не начались миграции, всё возвращается как было.'
+    have openssl || die 'Нужен openssl для генерации недостающих ключей.'
+    [ "$(id -u)" -eq 0 ] || die 'Перевод на сборку Clean Pay нужно запускать от root (права на каталоги для uid 10001).'
+  fi
   rs_prepare_sources
   show_remote_refs "$REMNASHOP_SOURCES" origin branches
   ref=$(ask_value 'Тег, ветка или полный SHA' main)
@@ -1226,22 +1282,68 @@ rs_update() {
   else
     ok 'Новых миграций нет — перезапуск займёт ~30 секунд'
   fi
-  ask_yes_no "Обновить Remnashop до $(short "$target")?" no || { note 'Отменено. Работающие сервисы не затронуты.'; return 0; }
+  if [ "$pending" = yes ] && [ "$layout" = build ] && ! rs_has_service remnashop-migration; then
+    die "В $RS_COMPOSE нет сервиса remnashop-migration — миграции применить нечем. Ничего не изменено."
+  fi
+  if [ "$layout" = upstream ] && [ -z "$(env_get "$REMNASHOP_DIR/.env" WEB_ENABLED)" ]; then
+    if ask_yes_no 'Включить HTTP API для Clean Pay (WEB_ENABLED=true)?' yes; then web=true; else web=false; fi
+  fi
+  if [ "$layout" = upstream ]; then
+    ask_yes_no "Перевести Remnashop на сборку Clean Pay $(short "$target")?" no || { note 'Отменено. Работающие сервисы не затронуты.'; return 0; }
+  else
+    ask_yes_no "Обновить Remnashop до $(short "$target")?" no || { note 'Отменено. Работающие сервисы не затронуты.'; return 0; }
+  fi
 
   step 4 6 'Резервная копия'
   require_backup "before-remnashop-$(short "$target")"
   compose_before="$LAST_BACKUP_DIR/config/remnashop/docker-compose.yml"
   [ -f "$compose_before" ] || die 'В копии нет compose-файла Remnashop — откат был бы невозможен.'
+  if [ "$layout" = upstream ]; then
+    env_before="$LAST_BACKUP_DIR/config/remnashop/.env"
+    [ -f "$env_before" ] || die 'В копии нет .env Remnashop — откат был бы невозможен.'
+  fi
 
   rs_rollback() {
-    warn 'Возвращаю предыдущий образ…'
+    warn 'Возвращаю предыдущую версию…'
     cp -p -- "$compose_before" "$RS_COMPOSE"
-    rs_compose up -d --no-deps --force-recreate "$api_svc" "$worker_svc" "$scheduler_svc" || true
+    if [ -n "$env_before" ]; then
+      cp -p -- "$env_before" "$REMNASHOP_DIR/.env"
+      rs_compose up -d --force-recreate --remove-orphans || true
+    else
+      rs_compose up -d --no-deps --force-recreate "$api_svc" "$worker_svc" "$scheduler_svc" || true
+    fi
     if rs_wait_healthy; then warn "Предыдущая версия ($current_image) снова работает."
     else err 'Предыдущая версия не стала healthy — нужна ручная проверка.'
     fi
   }
 
+  if [ "$layout" = upstream ]; then
+    step 5 6 'Новый compose и .env (сервисы ещё работают)'
+    if ! rs_adopt_files "$target" "$image" "$RS_COMPOSE.new" "$REMNASHOP_DIR/.env.new" "$web" \
+      || ! docker compose --project-directory "$REMNASHOP_DIR" -f "$RS_COMPOSE.new" \
+        --env-file "$REMNASHOP_DIR/.env.new" config --quiet; then
+      rm -f -- "$RS_COMPOSE.new" "$REMNASHOP_DIR/.env.new"
+      die 'Новый compose или .env не прошли проверку. Ничего не изменено.'
+    fi
+    mkdir -p "$REMNASHOP_DIR/logs" "$REMNASHOP_DIR/assets" "$REMNASHOP_DIR/backups"
+    chown -R 10001:10001 "$REMNASHOP_DIR/logs" "$REMNASHOP_DIR/assets" "$REMNASHOP_DIR/backups"
+    mv -f -- "$REMNASHOP_DIR/.env.new" "$REMNASHOP_DIR/.env"
+    mv -f -- "$RS_COMPOSE.new" "$RS_COMPOSE"
+    api_svc=remnashop; worker_svc=remnashop-taskiq-worker; scheduler_svc=remnashop-taskiq-scheduler
+    ok "compose и .env переведены на сборку Clean Pay (прежние — в $LAST_BACKUP_DIR/config/remnashop)"
+
+    step 6 6 'Перезапуск: база и Redis → миграции → сервисы'
+    note 'Остановка API, worker и scheduler…'
+    rs_compose stop "$api_svc" "$worker_svc" "$scheduler_svc"
+    if ! rs_compose up -d --wait --wait-timeout 180 remnashop-db remnashop-redis; then
+      err 'База или Redis не запустились в новой конфигурации.'
+      rs_rollback
+      journal remnashop-update-failed "adopt db/redis $(short "$target")"
+      return 1
+    fi
+    rs_compose run --rm --no-deps remnashop-storage-init
+    pending=yes
+  else
   step 5 6 'Переключение compose на новый образ'
   replaced=$(grep -cF "image: $current_image" "$RS_COMPOSE" || true)
   [ "$replaced" = 1 ] || die "В $RS_COMPOSE ожидалась ровно одна строка «image: $current_image» (найдено: $replaced). Обновите вручную."
@@ -1278,6 +1380,9 @@ rs_update() {
     note 'Остановка API, worker и scheduler…'
     rs_compose stop "$api_svc" "$worker_svc" "$scheduler_svc"
     if rs_has_service remnashop-storage-init; then rs_compose run --rm --no-deps remnashop-storage-init; fi
+  fi
+  fi
+  if [ "$pending" = yes ]; then
     note 'Применение миграций Alembic…'
     migrated=1
     if ! rs_compose run --rm --no-deps remnashop-migration; then
