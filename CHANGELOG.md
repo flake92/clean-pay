@@ -7,6 +7,47 @@
 
 ## [Unreleased]
 
+## [0.3.1] - 2026-10-18
+
+Исправления установки и меню. Код приложения, миграции и формат конфигурации
+не меняются (`CLEAN_PAY_CONFIG_VERSION=0.2.0`). Всё ниже проверено на
+сервере с 1 vCPU и 2 ГБ памяти.
+
+### Исправлено
+
+- `install` в 0.2.2–0.3.0 останавливался на `database-role-provision` с
+  ошибкой «database catalog does not match reviewed
+  20260825230000_guard_retention_mutations» на базах, где у индексов
+  `PaymentRecord_retentionHoldAt_idx` и
+  `PaymentRecord_retention_scrub_candidates_idx` стоит флаг
+  `pg_index.indcheckxmin`: в 0.2.2 этот флаг принудительно считался `false`,
+  а часть эталонных отпечатков снята с ним. Теперь каталог подходит, если
+  проверенному отпечатку соответствует либо его точный снимок, либо снимок со
+  сброшенным флагом. Проверено чтением на рабочей базе: 0.2.1 и 0.3.1
+  совпадают с эталоном, 0.3.0 — нет.
+- «Обновить Remnashop» на установке по compose апстрима snoups (образ
+  `ghcr.io/snoups/remnashop`) менял образ, останавливал бота и падал на
+  `no such service: remnashop-migration`, оставляя бот остановленным. Теперь
+  такая установка определяется заранее и переводится на сборку Clean Pay:
+  compose из выбранной версии Remnashop и копия `.env` с недостающими ключами
+  (`TASKIQ_DEPLOYMENT_ID`, `REDIS_PASSWORD`, `APP_JWT_SECRET`, `APP_API_KEY`,
+  `APP_AUTH_SERVICE_KEY`, `WEB_ENABLED`; прежние значения не меняются)
+  проверяются через `docker compose config`, пока старый стек работает, и
+  подменяются только после резервной копии. База и Redis остаются в тех же
+  томах. Сбой до миграций возвращает прежние compose и `.env` и поднимает
+  прежний стек. Compose без сервиса миграций при новых миграциях отклоняется
+  до остановки сервисов.
+- Ожидание готовности Remnashop больше не ждёт 10 минут проверок здоровья,
+  которых нет в compose апстрима: такие контейнеры считаются готовыми после
+  минуты работы без перезапусков.
+
+### Требуется Remnashop из `main` форка
+
+- В Remnashop (`flake92/remnashop` `1b982a3`) проверка здоровья taskiq больше
+  не загружает приложение: на 1 vCPU она занимала ~5,4 с и при запуске
+  превышала таймаут 10 с, worker и scheduler не становились healthy, и меню
+  сообщало об ошибке обновления. Теперь ~0,6 с, таймаут — 30 с.
+
 ## [0.3.0] - 2026-10-18
 
 Изменения в меню управления `menu.sh`, документации, мастере установки и
@@ -450,7 +491,8 @@
 - Если внешняя интеграция неофициально вызывала `/api/bff/*`, её нужно перевести на
   поддерживаемые внешние controllers; браузерные BFF-контракты больше не существуют.
 
-[Unreleased]: https://github.com/flake92/clean-pay/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/flake92/clean-pay/compare/v0.3.1...HEAD
+[0.3.1]: https://github.com/flake92/clean-pay/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/flake92/clean-pay/compare/v0.2.3...v0.3.0
 [0.2.3]: https://github.com/flake92/clean-pay/compare/v0.2.2...v0.2.3
 [0.2.2]: https://github.com/flake92/clean-pay/compare/v0.2.1...v0.2.2
