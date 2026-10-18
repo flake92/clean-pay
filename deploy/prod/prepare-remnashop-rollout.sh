@@ -9,6 +9,11 @@ fail() {
   exit 1
 }
 
+# The upstream snoups releases (tags v0.x) lack the Clean Pay integration.
+incompatible() {
+  fail "$*. Remnashop must run the flake92/remnashop main branch: ./menu.sh -> update Remnashop -> main (the v0.x tags are upstream releases without the Clean Pay integration)"
+}
+
 info() {
   printf '%s\n' "Remnashop rollout: $*"
 }
@@ -143,7 +148,7 @@ print(*statuses)
   ) || fail "could not probe the Remnashop notification-preferences API"
 
   [ "$contract_statuses" = "422 405" ] \
-    || fail "Remnashop auth/API contract returned $contract_statuses; expected 422 405"
+    || incompatible "Remnashop auth/API contract returned $contract_statuses; expected 422 405"
 }
 
 api_container=$(env_value REMNASHOP_API_CONTAINER remnashop)
@@ -177,14 +182,14 @@ schema_ready=$(database_query -c "
         )
     ) = 2;
 ")
-[ "$schema_ready" = "t" ] || fail "required payment and subscription-email rollout schema is missing"
+[ "$schema_ready" = "t" ] || incompatible "required payment and subscription-email rollout schema is missing"
 
 current_revision=$(database_query -c "SELECT version_num FROM alembic_version;")
 case "$current_revision:$minimum_revision" in
   *[!0-9:]*|:*|*:) fail "Alembic revisions must be numeric (current=$current_revision minimum=$minimum_revision)" ;;
 esac
 [ "$current_revision" -ge "$minimum_revision" ] \
-  || fail "Alembic revision $current_revision is older than required revision $minimum_revision"
+  || incompatible "Alembic revision $current_revision is older than required revision $minimum_revision"
 
 probe_notification_preferences_contract
 

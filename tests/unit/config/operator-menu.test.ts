@@ -166,6 +166,17 @@ describe("operator menu", () => {
     expect(update).toContain('git --git-dir="$REMNASHOP_SOURCES" show "$target:docker-compose.prod.internal.yml"');
   });
 
+  it("refuses Remnashop versions without the Clean Pay integration before building", () => {
+    expectBefore(functionBody("rs_update"), 'rs_check_compatible "$target"', "rs_build_image");
+    expectBefore(functionBody("rs_install"), 'rs_check_compatible "$target"', "rs_build_image");
+    // the floor is the one deploy.sh enforces through the rollout preflight
+    expect(functionBody("rs_check_compatible")).toContain("prepare-remnashop-rollout.sh");
+    expect(functionBody("rs_check_compatible")).toContain("notification-preferences");
+    // the fork only carries upstream tags, so the Remnashop prompts list branches only
+    expect(menu).not.toContain('show_remote_refs "$REMNASHOP_SOURCES" origin\n');
+    expect(menu.match(/show_remote_refs "\$REMNASHOP_SOURCES" origin branches/g)).toHaveLength(2);
+  });
+
   it("never runs destructive cleanup or restores data on its own", () => {
     expect(menu).not.toMatch(/down\s+-v/);
     expect(menu).not.toContain("system prune");

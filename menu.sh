@@ -793,12 +793,16 @@ cp_install() {
 
 # ─── Clean Pay: обновление ──────────────────────────────────────────────────
 
+# "branches" skips the tag list: the Remnashop fork only carries the upstream tags.
 show_remote_refs() {
-  local git_dir=$1 remote=$2
-  printf '  %sПоследние теги:%s ' "$C_DIM" "$C_RESET" >&2
-  { git --git-dir="$git_dir" ls-remote --tags --refs "$remote" 2>/dev/null || true; } \
-    | awk '{sub("refs/tags/", "", $2); print $2}' | sort -V | tail -n 5 | tr '\n' ' ' >&2
-  printf '\n  %sВетки:%s ' "$C_DIM" "$C_RESET" >&2
+  local git_dir=$1 remote=$2 only=${3:-}
+  if [ "$only" != branches ]; then
+    printf '  %sПоследние теги:%s ' "$C_DIM" "$C_RESET" >&2
+    { git --git-dir="$git_dir" ls-remote --tags --refs "$remote" 2>/dev/null || true; } \
+      | awk '{sub("refs/tags/", "", $2); print $2}' | sort -V | tail -n 5 | tr '\n' ' ' >&2
+    printf '\n' >&2
+  fi
+  printf '  %sВетки:%s ' "$C_DIM" "$C_RESET" >&2
   { git --git-dir="$git_dir" ls-remote --heads "$remote" 2>/dev/null || true; } \
     | awk '{sub("refs/heads/", "", $2); print $2}' | head -n 8 | tr '\n' ' ' >&2
   printf '\n' >&2
@@ -1002,6 +1006,25 @@ rs_prepare_sources() {
   fi
 }
 
+# Rejects a Remnashop commit without the Clean Pay integration before anything is built.
+# The upstream tags (v0.8.x) predate it, and deploy.sh would then fail its compatibility
+# preflight; the floor is the one prepare-remnashop-rollout.sh enforces.
+rs_check_compatible() {
+  local target=$1 floor head
+  floor=$(sed -n 's/^repository_minimum_revision=\([0-9][0-9]*\)$/\1/p' \
+    "$ROOT_DIR/deploy/prod/prepare-remnashop-rollout.sh")
+  [ -n "$floor" ] || die 'Не удалось прочитать минимальную ревизию Remnashop из prepare-remnashop-rollout.sh.'
+  head=$(git --git-dir="$REMNASHOP_SOURCES" ls-tree --name-only "$target" \
+      src/infrastructure/database/migrations/versions/ \
+    | sed -n 's#.*/\([0-9][0-9]*\)_[^/]*\.py$#\1#p' | sort -n | tail -n 1)
+  if [ -z "$head" ] || [ "$((10#$head))" -lt "$((10#$floor))" ] \
+    || ! git --git-dir="$REMNASHOP_SOURCES" grep -q 'notification-preferences' "$target" -- src; then
+    err "Версия $(short "$target") не совместима с Clean Pay: миграции до ${head:-?}, нужна $floor и API notification-preferences."
+    note 'Теги v0.x — это релизы апстрима snoups без интеграции с Clean Pay. Выберите ветку main.'
+    return 1
+  fi
+}
+
 # Builds the image for a commit and prints its local reference.
 # Copies the Remnashop container health checks (web / taskiq) from the compose template
 # of the release being installed into an existing compose file. Only the healthcheck
@@ -1110,11 +1133,12 @@ rs_update() {
   step 1 6 'Выбор версии'
   kv 'Сейчас работает' "$current_image"
   rs_prepare_sources
-  show_remote_refs "$REMNASHOP_SOURCES" origin
+  show_remote_refs "$REMNASHOP_SOURCES" origin branches
   ref=$(ask_value 'Тег, ветка или полный SHA' main)
   target=$(fetch_ref "$REMNASHOP_SOURCES" origin "$ref") || die "Версия «$ref» не найдена."
   [ "$target" != "$current_rev" ] || { ok 'Эта версия уже работает.'; return 0; }
   kv 'Новая версия' "$(short "$target") $(git --git-dir="$REMNASHOP_SOURCES" log -1 --format='%cs %s' "$target" | cut -c1-60)"
+  rs_check_compatible "$target" || die 'Обновление отменено, ничего не изменено.'
   if [ -n "$current_rev" ] && git --git-dir="$REMNASHOP_SOURCES" cat-file -e "$current_rev^{commit}" 2>/dev/null; then
     note 'Изменения:'
     git --git-dir="$REMNASHOP_SOURCES" log --oneline --no-merges "$current_rev..$target" | head -n 15 | sed 's/^/      /'
@@ -1255,10 +1279,11 @@ rs_install() {
 
   step 2 7 'Исходники и версия'
   rs_prepare_sources
-  show_remote_refs "$REMNASHOP_SOURCES" origin
+  show_remote_refs "$REMNASHOP_SOURCES" origin branches
   ref=$(ask_value 'Тег, ветка или полный SHA' main)
   target=$(fetch_ref "$REMNASHOP_SOURCES" origin "$ref") || die "Версия «$ref» не найдена."
   kv 'Версия' "$(short "$target") $(git --git-dir="$REMNASHOP_SOURCES" log -1 --format='%cs %s' "$target" | cut -c1-60)"
+  rs_check_compatible "$target" || die 'Установка отменена: сборка не начиналась.'
 
   step 3 7 'Сборка образа'
   image=$(rs_build_image "$target")
