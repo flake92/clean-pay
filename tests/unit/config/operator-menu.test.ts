@@ -177,6 +177,45 @@ describe("operator menu", () => {
     expect(menu.match(/show_remote_refs "\$REMNASHOP_SOURCES" origin branches/g)).toHaveLength(2);
   });
 
+  it("updates Remnawave only within the required version after a full backup", () => {
+    expect(menu).toContain("REMNAWAVE_MIN_VERSION=2.8.0");
+    expect(menu).toContain("REMNANODE_MIN_VERSION=2.8.0");
+    const update = functionBody("rw_update");
+    // the pull happens while the panel works; the switch only after the backup and the typed word
+    expectBefore(update, 'docker pull "$image"', "require_backup before-remnawave-update");
+    expectBefore(update, 'version_ge "$target" "$REMNAWAVE_MIN_VERSION"', "require_backup before-remnawave-update");
+    expectBefore(update, "require_backup before-remnawave-update", "type_to_confirm ОБНОВИТЬ");
+    expectBefore(update, "type_to_confirm ОБНОВИТЬ", 'rw_compose up -d --no-deps --pull never "$service"');
+    // any exit before the switch puts the tag back on the running image
+    expectBefore(update, "trap \"docker tag $old_id $image", "require_backup before-remnawave-update");
+    expectBefore(update, "trap - EXIT", 'rw_compose up -d --no-deps --pull never "$service"');
+    expect(update).toContain("Смена мажорной версии");
+    expect(update).toContain("rw_wait_healthy");
+    // the backup covers the panel database when it runs on this server
+    expect(functionBody("backup_create")).toContain('dump_database "$RW_DB" "$dir/remnawave.dump"');
+  });
+
+  it.skipIf(!posixShell)(
+    "compares Remnawave versions numerically",
+    () => {
+      const check = (a: string, b: string) =>
+        spawnSync(posixShell!, ["-c", `${shellFunctionFrom(menu, "version_ge")}\nversion_ge "$A" "$B"`], {
+          env: { ...process.env, A: a, B: b },
+        }).status;
+      expect(check("2.8.0", "2.8.0")).toBe(0);
+      expect(check("2.10.1", "2.8.0")).toBe(0);
+      expect(check("2.7.12", "2.8.0")).toBe(1);
+      expect(check("1.9.9", "2.8.0")).toBe(1);
+    },
+    shellIntegrationTimeout,
+  );
+
+  it("documents the Remnawave and remnanode requirement", () => {
+    expect(readme).toContain("Remnawave **2.8.0** или новее");
+    expect(readme).toContain("remnanode 2.8.0");
+    expect(readme).toContain("Обновить Remnawave");
+  });
+
   it("never runs destructive cleanup or restores data on its own", () => {
     expect(menu).not.toMatch(/down\s+-v/);
     expect(menu).not.toContain("system prune");

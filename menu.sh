@@ -2,7 +2,7 @@
 # Clean Pay: interactive menu for installation, updates and backups.
 #
 #   ./menu.sh                 open the interactive menu
-#   ./menu.sh status          print the status of Clean Pay and Remnashop
+#   ./menu.sh status          print the status of Clean Pay, Remnashop and Remnawave
 #   ./menu.sh backup [REASON] create a full verified backup (suitable for cron)
 #   ./menu.sh verify DIR      verify an existing backup
 #
@@ -43,6 +43,9 @@ REMNASHOP_CHECK_SCRIPT="$ROOT_DIR/deploy/prod/prepare-remnashop-rollout.sh"
 NODE_TOOLING_SCRIPT="$ROOT_DIR/deploy/prod/node-tooling.sh"
 CREDENTIAL_GUARD_SCRIPT="$ROOT_DIR/deploy/prod/credential-file-guard.mjs"
 SCREEN_SESSION=clean-pay-menu
+# Clean Pay and Remnashop use the panel API of this version; the nodes must match it.
+REMNAWAVE_MIN_VERSION=2.8.0
+REMNANODE_MIN_VERSION=2.8.0
 LAST_BACKUP_DIR=''
 
 # ─── Оформление ─────────────────────────────────────────────────────────────
@@ -188,6 +191,8 @@ load_settings() {
   RS_SCHEDULER=$(cp_env REMNASHOP_SCHEDULER_CONTAINER remnashop-taskiq-scheduler)
   RS_DB=$(cp_env REMNASHOP_POSTGRES_CONTAINER remnashop-db)
   RS_COMPOSE="$REMNASHOP_DIR/docker-compose.yml"
+  RW_CONTAINER=$(env_get "$MENU_CONF" REMNAWAVE_CONTAINER remnawave)
+  RW_DB=$(env_get "$MENU_CONF" REMNAWAVE_DB_CONTAINER remnawave-db)
 }
 
 save_settings() {
@@ -203,6 +208,8 @@ save_settings() {
     printf 'REMNASHOP_IMAGE=%s\n' "$REMNASHOP_IMAGE"
     printf 'REMNASHOP_TAG_PREFIX=%s\n' "$REMNASHOP_TAG_PREFIX"
     printf 'CADDYFILE=%s\n' "$CADDYFILE"
+    printf 'REMNAWAVE_CONTAINER=%s\n' "$RW_CONTAINER"
+    printf 'REMNAWAVE_DB_CONTAINER=%s\n' "$RW_DB"
   } > "$tmp" && chmod 600 "$tmp" && mv -f -- "$tmp" "$MENU_CONF"
 }
 
@@ -329,14 +336,18 @@ summary_component() {
 }
 
 print_summary() {
-  local app='' rev='' rs_rev='' backup free
+  local app='' rev='' rs_rev='' rw_ver='' backup free
   if docker_ok; then
     app=$(cp_container app)
     [ -z "$app" ] || rev=$(short "$(container_revision "$app")")
     rs_rev=$(short "$(container_revision "$RS_API")")
+    ! container_running "$RW_CONTAINER" || rw_ver=$(rw_version "$RW_CONTAINER")
   fi
   summary_component 'Clean Pay' "$app" "${rev:+версия $rev}"
   summary_component 'Remnashop' "$RS_API" "${rs_rev:+версия $rs_rev}"
+  if docker_ok && container_exists "$RW_CONTAINER"; then
+    summary_component 'Remnawave' "$RW_CONTAINER" "$(rw_version_text "$rw_ver")"
+  fi
   free=$(free_mb "$ROOT_DIR")
   backup=$(last_backup)
   if [ -n "$backup" ]; then backup=$(age_of_backup "$backup"); else backup='нет'; fi
@@ -394,6 +405,17 @@ show_status() {
       kv 'Схема БД (Alembic)' "${alembic:-?}${image_head:+ (в образе: $image_head)}"
     fi
   fi
+
+  printf '\n  %sRemnawave%s\n' "$C_BOLD" "$C_RESET"
+  kv 'Требуется' "панель ≥ $REMNAWAVE_MIN_VERSION, ноды (remnanode) ≥ $REMNANODE_MIN_VERSION"
+  if docker_ok && container_exists "$RW_CONTAINER"; then
+    status_line "$RW_CONTAINER" "$RW_CONTAINER" "образ $(container_field "$RW_CONTAINER" '{{.Config.Image}}')"
+    status_line "$RW_DB" "$RW_DB"
+    kv 'Версия панели' "$(rw_version_text "$(rw_version "$RW_CONTAINER")")"
+  else
+    kv 'Панель' "не на этом сервере (контейнер $RW_CONTAINER не найден) — проверьте версию в самой панели"
+  fi
+  note 'Версии нод видны в панели (раздел «Ноды»); обновляются на серверах нод.'
 
   printf '\n  %sСервер%s\n' "$C_BOLD" "$C_RESET"
   kv 'Хост' "$(hostname 2>/dev/null)"
@@ -457,6 +479,16 @@ check_server() {
   else
     note 'Clean Pay ещё не настроен — проверка Remnashop будет выполнена мастером установки.'
   fi
+  local rw_ver
+  if docker_ok && container_running "$RW_CONTAINER"; then
+    rw_ver=$(rw_version "$RW_CONTAINER")
+    if [ -n "$rw_ver" ] && version_ge "$rw_ver" "$REMNAWAVE_MIN_VERSION"; then ok "Remnawave $rw_ver (нужно ≥ $REMNAWAVE_MIN_VERSION)"
+    else err "Remnawave ${rw_ver:-?}: нужна $REMNAWAVE_MIN_VERSION или новее (пункт «Обновить Remnawave»)"; problems=$((problems + 1))
+    fi
+  else
+    note "Remnawave не на этом сервере: убедитесь, что панель ≥ $REMNAWAVE_MIN_VERSION."
+  fi
+  note "Ноды (remnanode) должны быть ≥ $REMNANODE_MIN_VERSION — проверьте в панели, раздел «Ноды»."
   if [ "$problems" -eq 0 ]; then say ''; ok 'Сервер готов.'; else say ''; err "Найдено проблем: $problems"; return 1; fi
 }
 
@@ -555,6 +587,11 @@ write_manifest() {
     [ -z "$rs_image" ] || printf 'remnashop_image=%s\n' "$rs_image"
     [ -z "$rs_image" ] || printf 'remnashop_image_id=%s\n' "$(container_field "$RS_API" '{{.Image}}')"
     [ -z "$rs_image" ] || printf 'remnashop_revision=%s\n' "$(container_revision "$RS_API")"
+    if container_running "$RW_CONTAINER"; then
+      printf 'remnawave_image=%s\n' "$(container_field "$RW_CONTAINER" '{{.Config.Image}}')"
+      printf 'remnawave_image_id=%s\n' "$(container_field "$RW_CONTAINER" '{{.Image}}')"
+      printf 'remnawave_version=%s\n' "$(rw_version "$RW_CONTAINER")"
+    fi
     if container_running "$RS_DB"; then
       printf 'remnashop_alembic=%s\n' "$(db_query "$RS_DB" 'SELECT version_num FROM alembic_version' 2>/dev/null)"
     fi
@@ -563,7 +600,7 @@ write_manifest() {
 
 # Creates a complete, verified backup. Sets LAST_BACKUP_DIR on success.
 backup_create() {
-  local reason=${1:-manual} stamp dir cp_pg rs_db need free entries caddyfile checksums items=0
+  local reason=${1:-manual} stamp dir cp_pg rs_db rw_dir need free entries caddyfile checksums items=0
   need_docker
   reason=$(printf '%s' "$reason" | tr -c 'A-Za-z0-9._-' '-' | cut -c1-48)
   stamp=$(date +%Y%m%d-%H%M%S)
@@ -576,6 +613,7 @@ backup_create() {
   need=512
   if container_running "$cp_pg"; then need=$(( need + $(database_size_mb "$cp_pg") )); fi
   if [ -n "$rs_db" ]; then need=$(( need + $(database_size_mb "$rs_db") )); fi
+  if container_running "$RW_DB"; then need=$(( need + $(database_size_mb "$RW_DB") )); fi
   if ! mkdir -p "$BACKUP_DIR" || ! chmod 700 "$BACKUP_DIR"; then die "Не удалось создать $BACKUP_DIR"; fi
   free=$(free_mb "$BACKUP_DIR")
   [ "${free:-0}" -ge "$need" ] \
@@ -615,6 +653,20 @@ backup_create() {
     items=$((items + 1))
   fi
 
+  if container_running "$RW_DB"; then
+    say '  Remnawave: база данных панели…'
+    dump_database "$RW_DB" "$dir/remnawave.dump" || { mv -- "$dir" "$dir.FAILED"; die 'pg_dump Remnawave завершился ошибкой.'; }
+    entries=$(verify_dump "$RW_DB" "$dir/remnawave.dump") \
+      || { mv -- "$dir" "$dir.FAILED"; die 'Дамп Remnawave не читается (pg_restore --list).'; }
+    ok "remnawave.dump — $(human_size "$dir/remnawave.dump"), объектов: $entries"
+    rw_dir=$(container_field "$RW_CONTAINER" '{{index .Config.Labels "com.docker.compose.project.working_dir"}}')
+    if [ -n "$rw_dir" ]; then
+      say '  Remnawave: настройки…'
+      copy_config "$dir/config/remnawave" "$rw_dir/.env" "$rw_dir/docker-compose.yml"
+    fi
+    items=$((items + 1))
+  fi
+
   caddyfile=$(detect_caddyfile)
   if [ -n "$caddyfile" ] && [ -f "$caddyfile" ]; then
     say '  Caddy: конфигурация reverse proxy…'
@@ -623,7 +675,7 @@ backup_create() {
 
   write_manifest "$dir" "$reason"
   if [ "$items" -eq 0 ]; then
-    note 'Сохранять пока нечего: Clean Pay и Remnashop не найдены. Записан только manifest.'
+    note 'Сохранять пока нечего: Clean Pay, Remnashop и Remnawave не найдены. Записан только manifest.'
   fi
   checksums=$(cd "$dir" && find . -type f -print0 | sort -z | xargs -0 sha256sum) \
     || { mv -- "$dir" "$dir.FAILED"; die 'Не удалось посчитать контрольные суммы.'; }
@@ -643,7 +695,7 @@ require_backup() {
   local reason=$1
   say ''
   printf '  %sПеред этим действием обязательна полная резервная копия.%s\n' "$C_BOLD" "$C_RESET"
-  note 'Базы Clean Pay и Remnashop, все .env, compose-файлы и Caddyfile.'
+  note 'Базы Clean Pay, Remnashop и Remnawave (если она на этом сервере), все .env, compose-файлы и Caddyfile.'
   backup_create "$reason" || die 'Резервная копия не создана — действие отменено, ничего не изменено.'
 }
 
@@ -659,6 +711,7 @@ backup_verify() {
     case "$(basename -- "$dump")" in
       clean-pay.dump) container=$(cp_container postgres) ;;
       remnashop.dump) container=$RS_DB ;;
+      remnawave.dump) container=$RW_DB ;;
       *) continue ;;
     esac
     if container_running "$container"; then
@@ -746,6 +799,19 @@ EOF
   3. Верните настройки и образ из копии:
      cp -p $dir/config/remnashop/.env $dir/config/remnashop/docker-compose.yml $REMNASHOP_DIR/
   4. Запустите: cd $REMNASHOP_DIR && docker compose up -d
+EOF
+  fi
+  if [ -f "$dir/remnawave.dump" ]; then
+    cat <<EOF
+
+  ${C_CYAN}Remnawave${C_RESET} (версия в копии: $(env_get "$dir/manifest.txt" remnawave_version '?'))
+  1. Остановите панель (база продолжает работать):
+     docker stop $RW_CONTAINER
+  2. Восстановите базу:
+     docker exec -i $RW_DB sh -c 'exec pg_restore -U "\$POSTGRES_USER" -d "\$POSTGRES_DB" --clean --if-exists --single-transaction' < $dir/remnawave.dump
+  3. Верните ту же версию панели: тег образа в docker-compose.yml панели —
+     $(env_get "$dir/manifest.txt" remnawave_version '<версия из manifest.txt>'); прежние настройки — $dir/config/remnawave/
+  4. Запустите: docker compose up -d в каталоге панели
 EOF
   fi
   say ''
@@ -1356,6 +1422,129 @@ EOF
 
 # ─── Справка и настройки ────────────────────────────────────────────────────
 
+# ─── Remnawave ──────────────────────────────────────────────────────────────
+
+version_ge() { [ "$(printf '%s\n%s\n' "$2" "$1" | sort -V | head -n 1)" = "$2" ]; }
+
+# Version from the backend package; works for a running container or an image.
+rw_version() {
+  docker exec "$1" node -p "require('/opt/app/package.json').version" 2>/dev/null || true
+}
+
+rw_image_version() {
+  docker run --rm --network none --entrypoint node "$1" \
+    -p "require('/opt/app/package.json').version" 2>/dev/null || true
+}
+
+# "2.8.0 (нужно ≥ 2.8.0)" in the colour of the verdict.
+rw_version_text() {
+  local version=$1
+  if [ -z "$version" ]; then printf '%s?%s' "$C_YELLOW" "$C_RESET"
+  elif version_ge "$version" "$REMNAWAVE_MIN_VERSION"; then printf '%s' "$version"
+  else printf '%s%s — нужна %s или новее%s' "$C_RED" "$version" "$REMNAWAVE_MIN_VERSION" "$C_RESET"
+  fi
+}
+
+rw_compose() {
+  local dir files args=() file list
+  dir=$(container_field "$RW_CONTAINER" '{{index .Config.Labels "com.docker.compose.project.working_dir"}}')
+  files=$(container_field "$RW_CONTAINER" '{{index .Config.Labels "com.docker.compose.project.config_files"}}')
+  [ -n "$dir" ] && [ -n "$files" ] || die "Контейнер $RW_CONTAINER запущен не через docker compose — обновите Remnawave вручную."
+  IFS=',' read -r -a list <<< "$files"
+  for file in "${list[@]}"; do args+=(-f "$file"); done
+  docker compose --project-directory "$dir" "${args[@]}" "$@"
+}
+
+rw_wait_healthy() {
+  local i state
+  for i in $(seq 1 60); do
+    state=$(container_field "$RW_CONTAINER" '{{.State.Status}}/{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}')
+    printf '\r  Ожидание готовности (%s/60): %s   ' "$i" "$state"
+    case "$state" in
+      running/healthy|running/none) printf '\n'; return 0 ;;
+      exited/*|dead/*|*/unhealthy) printf '\n'; return 1 ;;
+    esac
+    sleep 5
+  done
+  printf '\n'
+  return 1
+}
+
+rw_update() {
+  title 'Обновление Remnawave' "Панель (backend) в рамках тега из compose · нужна версия ≥ $REMNAWAVE_MIN_VERSION"
+  need_docker
+  container_exists "$RW_CONTAINER" \
+    || die "Контейнер $RW_CONTAINER не найден: Remnawave не на этом сервере. Обновите панель там, где она установлена."
+  local image old_id new_id current target service backup_dump
+
+  step 1 5 'Текущая версия'
+  image=$(container_field "$RW_CONTAINER" '{{.Config.Image}}')
+  old_id=$(container_field "$RW_CONTAINER" '{{.Image}}')
+  service=$(container_field "$RW_CONTAINER" '{{index .Config.Labels "com.docker.compose.service"}}')
+  current=$(rw_version "$RW_CONTAINER")
+  kv 'Образ' "$image"
+  kv 'Работает версия' "$(rw_version_text "$current")"
+  rw_compose config --quiet || die 'compose-файл Remnawave не прошёл проверку.'
+
+  step 2 5 'Загрузка образа (панель продолжает работать)'
+  docker pull "$image" || die "Не удалось скачать $image."
+  new_id=$(docker image inspect -f '{{.Id}}' "$image")
+  if [ "$new_id" = "$old_id" ]; then
+    ok "Новее $current для тега ${image##*:} нет — обновлять нечего."
+    case "${image##*:}" in [0-9]*.[0-9]*.[0-9]*)
+      note "Тег закреплён на версии. Для перехода на другую версию измените тег образа в compose-файле." ;;
+    esac
+    return 0
+  fi
+  target=$(rw_image_version "$image")
+  kv 'Новая версия' "${target:-?}"
+  # until the switch the tag keeps pointing at the running image, whatever ends the action
+  # shellcheck disable=SC2064 # expanded now: the locals are gone when the trap runs
+  trap "docker tag $old_id $image >/dev/null 2>&1 || true" EXIT
+  if [ -z "$target" ] || ! version_ge "$target" "$REMNAWAVE_MIN_VERSION"; then
+    die "Версия ${target:-?} ниже требуемой $REMNAWAVE_MIN_VERSION — обновление отменено."
+  fi
+  if [ -n "$current" ] && [ "${target%%.*}" != "${current%%.*}" ]; then
+    die "Смена мажорной версии ($current → $target) — только по официальной инструкции Remnawave."
+  fi
+  if [ -n "$current" ] && ! version_ge "$target" "$current"; then
+    die "Образ $target старее работающего $current — обновление отменено."
+  fi
+  note "Что нового: https://github.com/remnawave/backend/releases/tag/$target"
+  note "Ноды (remnanode) должны быть не ниже $REMNANODE_MIN_VERSION; их обновляют на серверах нод."
+
+  step 3 5 'Резервная копия'
+  require_backup before-remnawave-update
+  backup_dump="$LAST_BACKUP_DIR/remnawave.dump"
+
+  step 4 5 'Перезапуск панели'
+  warn 'Панель будет недоступна ~1 минуту; новая версия при старте сама применит миграции своей базы.'
+  type_to_confirm ОБНОВИТЬ || die 'Обновление отменено, ничего не изменено.'
+  journal remnawave-update "start ${current:-?} -> $target"
+  trap - EXIT
+  rw_compose up -d --no-deps --pull never "$service" || err 'docker compose up завершился ошибкой.'
+
+  step 5 5 'Проверка'
+  if rw_wait_healthy && [ "$(rw_version "$RW_CONTAINER")" = "$target" ]; then
+    journal remnawave-update "ok $target"
+    ok "Remnawave $target работает"
+    return 0
+  fi
+  err 'Новая версия не стала healthy.'
+  docker logs --tail 60 "$RW_CONTAINER" 2>&1 | sed 's/^/    /' || true
+  journal remnawave-update "failed $target, rollback to ${current:-?}"
+  warn "Возвращаю прежний образ ($current)…"
+  docker tag "$old_id" "$image"
+  rw_compose up -d --no-deps --pull never "$service" || true
+  if rw_wait_healthy; then
+    warn "Прежняя версия $current снова работает."
+  else
+    err 'Прежняя версия не запустилась: вероятно, новая уже изменила схему базы.'
+    [ ! -f "$backup_dump" ] || note "Копия базы панели до обновления: $backup_dump (пункт «Как восстановить из копии»)."
+  fi
+  return 1
+}
+
 show_zdt() {
   title 'Обновление без простоя (zero-downtime)' 'Для релизов без изменений схемы БД'
   cat <<'EOF'
@@ -1383,6 +1572,7 @@ edit_settings() {
     kv '5  Каталог сборок' "$REMNASHOP_STAGING"
     kv '6  Имя образа Remnashop' "$REMNASHOP_IMAGE:$REMNASHOP_TAG_PREFIX<sha>"
     kv '7  Caddyfile для копий' "${CADDYFILE:-авто: $(detect_caddyfile 2>/dev/null || true)}"
+    kv '8  Контейнеры Remnawave' "$RW_CONTAINER, $RW_DB"
     kv '0  Назад' ''
     choice=$(ask_value 'Что изменить' 0)
     case "$choice" in
@@ -1394,6 +1584,8 @@ edit_settings() {
       6) value=$(ask_value 'Имя образа' "$REMNASHOP_IMAGE"); [ -n "$value" ] && REMNASHOP_IMAGE=$value
          value=$(ask_value 'Префикс тега' "$REMNASHOP_TAG_PREFIX"); REMNASHOP_TAG_PREFIX=$value ;;
       7) value=$(ask_value 'Путь к Caddyfile (пусто — авто)' "$CADDYFILE"); { [ -z "$value" ] || valid_abs_path "$value"; } && CADDYFILE=$value ;;
+      8) value=$(ask_value 'Контейнер панели' "$RW_CONTAINER"); [ -n "$value" ] && RW_CONTAINER=$value
+         value=$(ask_value 'Контейнер её PostgreSQL' "$RW_DB"); [ -n "$value" ] && RW_DB=$value ;;
       *) break ;;
     esac || warn 'Значение не принято: нужен абсолютный путь без пробелов.'
     save_settings && ok 'Сохранено' && RS_COMPOSE="$REMNASHOP_DIR/docker-compose.yml"
@@ -1452,13 +1644,15 @@ main_menu() {
     menu_section 'REMNASHOP'
     menu_item 9 'Обновить Remnashop' 'копия'
     menu_item 10 'Установить Remnashop с нуля' 'копия'
+    menu_section "REMNAWAVE (панель ≥ $REMNAWAVE_MIN_VERSION, ноды ≥ $REMNANODE_MIN_VERSION)"
+    menu_item 11 'Обновить Remnawave' 'копия'
     menu_section 'РЕЗЕРВНЫЕ КОПИИ'
-    menu_item 11 'Создать полную резервную копию сейчас'
-    menu_item 12 'Список копий и проверка'
-    menu_item 13 'Как восстановить из копии'
+    menu_item 12 'Создать полную резервную копию сейчас'
+    menu_item 13 'Список копий и проверка'
+    menu_item 14 'Как восстановить из копии'
     menu_section 'СПРАВКА'
-    menu_item 14 'Обновление без простоя (zero-downtime)'
-    menu_item 15 'Настройки меню'
+    menu_item 15 'Обновление без простоя (zero-downtime)'
+    menu_item 16 'Настройки меню'
     printf '\n'
     menu_item 0 'Выход'
     printf '\n'
@@ -1475,11 +1669,12 @@ main_menu() {
       8) run_action cp_stop ;;
       9) run_action rs_update ;;
       10) run_action rs_install ;;
-      11) run_action backup_create manual ;;
-      12) run_view list_backups ;;
-      13) run_view show_restore ;;
-      14) run_view show_zdt ;;
-      15) edit_settings ;;
+      11) run_action rw_update ;;
+      12) run_action backup_create manual ;;
+      13) run_view list_backups ;;
+      14) run_view show_restore ;;
+      15) run_view show_zdt ;;
+      16) edit_settings ;;
       0|q|й|exit|выход) say ''; exit 0 ;;
       '') continue ;;
       *) warn 'Нет такого пункта.' ;;
@@ -1504,6 +1699,9 @@ Clean Pay — меню установки, обновления и резерв�
   ./menu.sh update             обновить Clean Pay
   ./menu.sh remnashop-update   обновить Remnashop
   ./menu.sh remnashop-install  установить Remnashop с нуля
+  ./menu.sh remnawave-update   обновить панель Remnawave
+
+  Требования: Remnawave ≥ 2.8.0, ноды remnanode ≥ 2.8.0.
 EOF
 }
 
@@ -1519,6 +1717,7 @@ case "${1:-menu}" in
   update) run_action cp_update ;;
   remnashop-update) run_action rs_update ;;
   remnashop-install) run_action rs_install ;;
+  remnawave-update) run_action rw_update ;;
   help|-h|--help) usage ;;
   *) usage; exit 1 ;;
 esac

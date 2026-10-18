@@ -477,6 +477,7 @@ configure() {
     ''|*change-me*) replace_env REMNASHOP_AUTH_SERVICE_KEY "$(generate_internal_secret)" ;;
   esac
 
+  printf '%s\n' 'Нужны Remnawave 2.8.0 или новее и ноды remnanode 2.8.0 или новее.'
   prompt_value REMNAWAVE_API_BASE_URL 'Публичный HTTPS-адрес Remnawave, без пути' 'https://panel.example.com'
   replace_env CLEAN_PAY_READINESS_REMNAWAVE_URL "$(env_value REMNAWAVE_API_BASE_URL)"
   prompt_secret REMNAWAVE_TOKEN 'API-токен Remnawave'
