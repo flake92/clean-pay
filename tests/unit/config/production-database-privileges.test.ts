@@ -15,6 +15,7 @@ import {
   DATABASE_REVIEWED_CATALOG_STATE_ALTERNATES,
   DATABASE_REVIEWED_CATALOG_STATES,
   DATABASE_REVIEWED_ENVIRONMENT_CONTRACT_ALTERNATES,
+  DATABASE_SECURITY_CONSTRAINTS,
   DATABASE_TABLE_COLUMNS,
   DATABASE_TABLES,
   DATABASE_TRIGGERS,
@@ -176,14 +177,48 @@ describe("production database least-privilege contract", () => {
       DATABASE_REVIEWED_CATALOG_STATE_ALTERNATES,
     )) {
       expect(DATABASE_REVIEWED_CATALOG_STATES).toHaveProperty(state);
-      expect(fingerprints).toHaveLength(1);
-      expect(fingerprints[0]).toMatch(/^[0-9a-f]{64}$/);
-      expect(fingerprints[0]).not.toBe(
-        DATABASE_REVIEWED_CATALOG_STATES[
-          state as keyof typeof DATABASE_REVIEWED_CATALOG_STATES
-        ],
+      // the production lineage, plus restored-dump lineages for the current boundary only
+      expect(fingerprints).toHaveLength(
+        state === "20260825230000_guard_retention_mutations" ? 3 : 1,
       );
+      expect(new Set(fingerprints).size).toBe(fingerprints.length);
+      for (const fingerprint of fingerprints) {
+        expect(fingerprint).toMatch(/^[0-9a-f]{64}$/);
+        expect(fingerprint).not.toBe(
+          DATABASE_REVIEWED_CATALOG_STATES[
+            state as keyof typeof DATABASE_REVIEWED_CATALOG_STATES
+          ],
+        );
+      }
     }
+  });
+
+  it("admits the flattened retention CHECK of a restored database and nothing else", () => {
+    const restoredHashes = DATABASE_SECURITY_CONSTRAINTS.filter(
+      (constraint) => "restoredDefinitionSha256" in constraint,
+    );
+    expect(restoredHashes.map(({ name }) => name)).toEqual([
+      "_clean_pay_retention_policy_ranges_check",
+    ]);
+    expect(restoredHashes[0]).toMatchObject({
+      definitionSha256: "21db4b72d88225583770df458b4f91e0e0b874e6b738a8f701c4a6e112af4f1e",
+      restoredDefinitionSha256: "2f44b57bbb7b0f064819ef018d2a335f84e7e4352a362835a03d1a78edf98549",
+    });
+    const provisioner = readFileSync("deploy/prod/database-role-provision.mjs", "utf8");
+    expect(provisioner).toContain(
+      "[expected.definitionSha256, expected.restoredDefinitionSha256].includes(",
+    );
+  });
+
+  it("admits the current catalog restored from a pg_dump backup", () => {
+    // disaster recovery: pg_restore flattens the nested AND of the RetentionPolicy
+    // CHECK; both the production lineage and a fresh install restore stably
+    expect(DATABASE_REVIEWED_CATALOG_STATE_ALTERNATES["20260825230000_guard_retention_mutations"])
+      .toEqual([
+        "c38536cfcac173226f49e40864151d682d20bb34059a62e92426ca4ab247994d",
+        "0e1eebba3e29c929747ce7bb8198f2ef4877c381440e8d4e74e3f22498d0b2d2",
+        "5318f3d7340e4902eb3eec55de7200b381c740eaef0d0abde97f8d351619649c",
+      ]);
   });
 
   it("admits the exact v0.1.1 catalog boundary for a guarded direct upgrade", () => {

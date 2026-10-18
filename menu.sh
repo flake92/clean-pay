@@ -787,6 +787,19 @@ show_restore() {
      cp -p $dir/config/clean-pay/.env* $ROOT_DIR/deploy/prod/
   4. Запустите: cd $ROOT_DIR && ./deploy.sh install
 EOF
+    # Before 0.3.2 the role provisioner rejected a catalog restored from a dump
+    # (PostgreSQL flattens a nested CHECK), so install from such a revision fails.
+    if [ -n "$app_head" ] && git -C "$ROOT_DIR" cat-file -e "$app_head^{commit}" 2>/dev/null \
+      && ! git -C "$ROOT_DIR" show "$app_head:deploy/prod/database-privilege-manifest.mjs" 2>/dev/null \
+        | grep -q restoredDefinitionSha256; then
+      say ''
+      warn "Код копии ($(short "$app_head")) старше 0.3.2: его установщик не примет базу, восстановленную из дампа."
+      if git -C "$ROOT_DIR" diff --quiet "$app_head" HEAD -- prisma/migrations 2>/dev/null; then
+        note "  В шаге 3 оставьте текущий код ($(short "$(git -C "$ROOT_DIR" rev-parse HEAD)")): миграции те же. Настройки копируйте как указано."
+      else
+        note '  В шаге 3 возьмите 0.3.2 или новее с тем же набором prisma/migrations, что в копии.'
+      fi
+    fi
   fi
   if [ -f "$dir/remnashop.dump" ]; then
     cat <<EOF

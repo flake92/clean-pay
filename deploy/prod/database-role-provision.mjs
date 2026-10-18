@@ -2411,8 +2411,9 @@ function assertSecurityCatalogArtifacts(inventory) {
       || !actual.validated
       || actual.deferrable !== expectedDeferred
       || actual.initially_deferred !== expectedDeferred
-      || catalogDefinitionSha256(actual.definition, inventory.schema)
-        !== expected.definitionSha256
+      || ![expected.definitionSha256, expected.restoredDefinitionSha256].includes(
+        catalogDefinitionSha256(actual.definition, inventory.schema),
+      )
     ) {
       throw new Error(
         `security constraint ${expected.table}.${expected.name} does not match privilege manifest ${DATABASE_PRIVILEGE_MANIFEST_VERSION}`,
