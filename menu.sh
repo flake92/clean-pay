@@ -1168,7 +1168,8 @@ rs_build_image() {
 }
 
 # Containers without a health check (the upstream compose) count as ready once
-# they have kept running, without a restart, for three polls in a row.
+# they have kept running, without a restart, for a minute (six polls): a crashing
+# app restarts well within that window.
 rs_wait_healthy() {
   local i states restarts last_restarts='' running_polls=0
   for i in $(seq 1 60); do
@@ -1182,7 +1183,7 @@ rs_wait_healthy() {
     case "$states" in
       'running/none '|'running/healthy running/none ')
         if [ "$restarts" = "$last_restarts" ]; then running_polls=$((running_polls + 1)); else running_polls=1; fi
-        if [ "$running_polls" -ge 3 ]; then printf '\n'; return 0; fi ;;
+        if [ "$running_polls" -ge 6 ]; then printf '\n'; return 0; fi ;;
       *) running_polls=0 ;;
     esac
     last_restarts=$restarts
