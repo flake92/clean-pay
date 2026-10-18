@@ -236,7 +236,7 @@ Production запускается из зафиксированного тега
 ветки.
 
 ```bash
-RELEASE_REF='refs/tags/v0.2.3'
+RELEASE_REF='refs/tags/v0.3.0'
 sudo mkdir -p /opt/clean-pay
 sudo chown "$USER":"$USER" /opt/clean-pay
 git clone https://github.com/flake92/clean-pay.git /opt/clean-pay
@@ -483,11 +483,11 @@ workers. Если миграция завершается ошибкой, runtim
 это защита от запуска старого кода поверх новой или частично изменённой схемы.
 Никогда не используйте `docker compose down -v` при обновлении.
 
-### Обычное обновление `0.2.x`
+### Обычное обновление с `0.2.x` и внутри `0.3.x`
 
 ```bash
 cd /opt/clean-pay
-RELEASE_REF='refs/tags/v0.2.3'
+RELEASE_REF='refs/tags/v0.3.0'
 git fetch --depth=1 origin "$RELEASE_REF"
 RELEASE_SHA=$(git rev-parse FETCH_HEAD)
 git checkout --detach "$RELEASE_SHA"
