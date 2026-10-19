@@ -7,6 +7,38 @@
 
 ## [Unreleased]
 
+## [0.3.3] - 2026-10-19
+
+Связь Clean Pay и Remnashop при установке. Код приложения, миграции и формат
+конфигурации не меняются (`CLEAN_PAY_CONFIG_VERSION=0.2.0`).
+
+### Исправлено
+
+- Установка останавливалась на проверке совместимости с
+  «Remnashop env directory must have mode 700 or 750; actual mode is 755»:
+  каталог Remnashop с правами 755 создавали и меню («Установить Remnashop с
+  нуля»), и установщик апстрима. Меню теперь само ставит каталогу 750, а `.env`
+  — 600 при установке и обновлении Remnashop и Clean Pay.
+- После перевода Remnashop с апстрима на сборку Clean Pay в его `.env`
+  появлялся новый `APP_AUTH_SERVICE_KEY`, не совпадающий с
+  `REMNASHOP_AUTH_SERVICE_KEY` Clean Pay, и установка падала с
+  «auth/API contract returned 401 405». Меню теперь после резервной копии и с
+  подтверждением переносит ключ Clean Pay в Remnashop и перезапускает API,
+  worker и scheduler (при установке и обновлении Clean Pay, при установке и
+  обновлении Remnashop). Значения ключей на экран не выводятся.
+- Ответ 401 при наличии нового API Remnashop больше не выдаётся за «неверную
+  ветку»: проверка пишет, что не совпадает ключ, и называет команду
+  исправления. При небезопасных правах `.env` она показывает нужные `chmod`.
+
+### Добавлено
+
+- Пункт меню 11 «Связать с Clean Pay» и команда `./menu.sh remnashop-link`:
+  права `.env` Remnashop, общий ключ, перезапуск и проверка совместимости в
+  одном действии. Последующие пункты меню сдвинулись на один номер.
+- «Установить Clean Pay» в меню выполняет `./deploy.sh configure`, переносит
+  ключ и затем `./deploy.sh install` вместо одного `./deploy.sh setup`, поэтому
+  ручной паузы на копирование ключа больше нет.
+
 ## [0.3.2] - 2026-10-19
 
 Восстановление из резервной копии. Код приложения, миграции и формат
@@ -513,7 +545,8 @@
 - Если внешняя интеграция неофициально вызывала `/api/bff/*`, её нужно перевести на
   поддерживаемые внешние controllers; браузерные BFF-контракты больше не существуют.
 
-[Unreleased]: https://github.com/flake92/clean-pay/compare/v0.3.2...HEAD
+[Unreleased]: https://github.com/flake92/clean-pay/compare/v0.3.3...HEAD
+[0.3.3]: https://github.com/flake92/clean-pay/compare/v0.3.2...v0.3.3
 [0.3.2]: https://github.com/flake92/clean-pay/compare/v0.3.1...v0.3.2
 [0.3.1]: https://github.com/flake92/clean-pay/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/flake92/clean-pay/compare/v0.2.3...v0.3.0
