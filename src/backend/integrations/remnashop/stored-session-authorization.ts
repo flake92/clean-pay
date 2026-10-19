@@ -194,9 +194,25 @@ export async function getStoredAuthorizedRemnashopTokens({
   // token legitimately keeps belonging to the local account, so it must not be
   // read as an owner mismatch (that locked Telegram users out of the cabinet).
   // A genuine unfinished owner transition is authPending and handled above.
+  //
+  // Staging a link to a new e-mail account (link-account stagePendingEmail)
+  // stores that account's provider session, so until the code is confirmed the
+  // token belongs to pendingRemnashopUserId. Only the e-mail confirmation flow
+  // (allowUnverifiedEmail) may read through it, so the code form renders
+  // instead of a merge conflict; cabinet and payment reads stay bound to the
+  // linked owner.
+  const stagedLinkToken = Boolean(
+    allowUnverifiedEmail &&
+    localSession.user.pendingRemnashopUserId &&
+    localSession.user.pendingRemnashopEmail &&
+    localSession.user.pendingRemnashopUserId === remnashopUserId &&
+    !localSession.user.emailVerified,
+  );
   if (
-    !localSession.user.remnashopUserId ||
-    localSession.user.remnashopUserId !== remnashopUserId
+    !stagedLinkToken && (
+      !localSession.user.remnashopUserId ||
+      localSession.user.remnashopUserId !== remnashopUserId
+    )
   ) {
     return accountOwnerMismatch(localSession, "account_owner_mismatch");
   }
