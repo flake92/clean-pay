@@ -53,7 +53,12 @@ const approvedGenericReadmeLines = new Set([
   "cd /opt/clean-pay",
   "По умолчанию приложение доступно только на `127.0.0.1:4000`. Если reverse proxy",
   "    reverse_proxy 127.0.0.1:4000",
+  "        proxy_pass http://127.0.0.1:4000;",
 ]);
+
+// Loopback and the Docker service alias Clean Pay publishes on the edge network
+// appear in reverse-proxy examples; they are never deployment-specific.
+const allowedInternalHosts = new Set(["127.0.0.1", "clean-pay"]);
 
 function markdownFiles() {
   return [
@@ -95,7 +100,8 @@ describe("documentation privacy", () => {
 
   it("allows only example or explicitly approved external hosts", () => {
     const offenders: string[] = [];
-    const urlPattern = /https?:\/\/[^\s)`>"']+/gu;
+    // nginx directives end with ";", which is never part of a URL in these docs.
+    const urlPattern = /https?:\/\/[^\s)`>"';]+/gu;
 
     for (const file of markdownFiles()) {
       const lines = readFileSync(file, "utf8").split(/\r?\n/u);
@@ -106,7 +112,8 @@ describe("documentation privacy", () => {
           const allowed =
             host === "example.com" ||
             host.endsWith(".example.com") ||
-            allowedExternalHosts.has(host);
+            allowedExternalHosts.has(host) ||
+            allowedInternalHosts.has(host);
 
           if (!allowed) {
             offenders.push(`${file}:${index + 1}: unapproved external host`);

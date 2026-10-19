@@ -253,7 +253,7 @@ server {
 ```
 
 Если nginx работает в Docker-контейнере (например, `remnawave-nginx`),
-`127.0.0.1` внутри него — сам контейнер; тогда укажите
+адрес loopback внутри него — это сам контейнер; тогда укажите
 `proxy_pass http://clean-pay:4000;` — под этим именем приложение подключено к
 сети `CLEAN_PAY_EDGE_NETWORK` (по умолчанию `remnawave-network`). Сертификат
 нужен на сам домен Clean Pay; при домене за Cloudflare без него Cloudflare

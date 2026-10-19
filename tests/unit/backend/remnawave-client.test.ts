@@ -19,6 +19,7 @@ import {
   getLiveRemnawaveSubscriptionUrl,
   synchronizeRemnawaveUserIdentity,
 } from "@/backend/integrations/remnawave/client";
+import { resetEnvForTests } from "@/backend/config/env";
 import {
   patchRemnawaveUserIdentity,
   requestRemnawave,
@@ -62,10 +63,12 @@ describe("Remnawave live subscription client", () => {
     global.fetch = fetchMock;
 
     process.env.REMNAWAVE_COOKIE = "egamesKey=s3cr3tValue";
+    resetEnvForTests();
     try {
       await getLiveRemnawaveSubscriptionUrl({ userRemnaId: "rw-1", email: "owner@example.com" });
     } finally {
       delete process.env.REMNAWAVE_COOKIE;
+      resetEnvForTests();
     }
     await getLiveRemnawaveSubscriptionUrl({ userRemnaId: "rw-1", email: "owner@example.com" });
 
