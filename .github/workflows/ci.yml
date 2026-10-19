@@ -354,6 +354,32 @@ jobs:
           node deploy/prod/database-role-provision.mjs sync
           node deploy/prod/database-role-provision.mjs verify
           node scripts/security/verify-database-runtime-privileges.mjs
+      - name: Restore the provisioned database from pg_dump and install over it again
+        # Disaster recovery as the operator menu describes it. pg_restore re-parses
+        # CHECK constraints and PostgreSQL flattens nested AND, so the restored
+        # catalog differs from the migrated one: every new migration boundary
+        # needs its restored fingerprint in DATABASE_REVIEWED_CATALOG_STATE_ALTERNATES.
+        env:
+          POSTGRES_TOOLS_IMAGE: postgres:17-alpine@sha256:18cfe3ef5e6815560c98237d6216d1e5119702fb0f3894c8785dd58b8bbe5d73
+        run: |
+          set -euo pipefail
+          dump="$RUNNER_TEMP/clean-pay-restore-check.dump"
+          docker run --rm --network host -e PGPASSWORD="$POSTGRES_PASSWORD" "$POSTGRES_TOOLS_IMAGE" \
+            pg_dump -h 127.0.0.1 -p 55432 -U "$POSTGRES_USER" -d "$POSTGRES_DB" --format=custom > "$dump"
+          test -s "$dump"
+          docker run --rm -i --network host -e PGPASSWORD="$POSTGRES_PASSWORD" "$POSTGRES_TOOLS_IMAGE" \
+            pg_restore -h 127.0.0.1 -p 55432 -U "$POSTGRES_USER" -d "$POSTGRES_DB" \
+              --clean --if-exists --single-transaction --exit-on-error < "$dump"
+          node deploy/prod/database-role-provision.mjs prepare
+          CLEAN_PAY_RUNTIME_ROLE=migration \
+            DATABASE_URL="$MIGRATION_DATABASE_URL" \
+            env -u POSTGRES_DB -u POSTGRES_USER -u POSTGRES_PASSWORD \
+              -u MIGRATION_DATABASE_URL -u RETENTION_DATABASE_URL \
+              -u HOLD_OPERATOR_DATABASE_URL \
+              node node_modules/prisma/build/index.js migrate deploy
+          node deploy/prod/database-role-provision.mjs sync
+          node deploy/prod/database-role-provision.mjs verify
+          node scripts/security/verify-database-runtime-privileges.mjs
 
   container-security:
     if: >-

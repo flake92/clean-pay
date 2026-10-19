@@ -244,6 +244,37 @@ describe("production database least-privilege contract", () => {
     expect(runtimeProbe).toBeGreaterThan(prepare);
   });
 
+  it("installs over a database restored from pg_dump in CI", () => {
+    const job = ci.slice(
+      ci.indexOf("  database-least-privilege:"),
+      ci.indexOf("\n  container-security:"),
+    );
+    const restoreStep = job.slice(
+      job.indexOf("- name: Restore the provisioned database from pg_dump"),
+    );
+    const firstVerify = job.indexOf("database-role-provision.mjs verify");
+    expect(job.indexOf("- name: Restore the provisioned database from pg_dump")).toBeGreaterThan(
+      firstVerify,
+    );
+    // the tools come from the exact service image, not the runner's client
+    const serviceImage = /image: (postgres:17-alpine@sha256:[0-9a-f]{64})/.exec(job)?.[1];
+    expect(restoreStep).toContain(`POSTGRES_TOOLS_IMAGE: ${serviceImage}`);
+    expect(restoreStep).toContain("pg_dump -h 127.0.0.1");
+    expect(restoreStep).toContain("--clean --if-exists --single-transaction --exit-on-error");
+    for (const command of [
+      "database-role-provision.mjs prepare",
+      "migrate deploy",
+      "database-role-provision.mjs sync",
+      "database-role-provision.mjs verify",
+      "verify-database-runtime-privileges.mjs",
+    ]) {
+      expect(restoreStep).toContain(command);
+    }
+    expect(restoreStep.indexOf("pg_restore")).toBeLessThan(
+      restoreStep.indexOf("database-role-provision.mjs prepare"),
+    );
+  });
+
   it("keeps the exact manifest aligned with every Prisma model, column, and enum", () => {
     const objects = schemaObjects();
     expect([...DATABASE_TABLES].sort()).toEqual(objects.models.sort());
