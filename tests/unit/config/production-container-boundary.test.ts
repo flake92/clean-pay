@@ -329,8 +329,8 @@ describe("production container boundary", () => {
     expect(imageRollbackRehearsal).toContain(
       "readonly EXPECTED_ROLE_ENV_COMPATIBILITY_DELTA="
         + "'+    \"NEXT_PUBLIC_APP_ALIAS_ORIGINS\",\n"
-        + "+    \"PAYMENT_DATA_RETENTION_ENABLED\",\n"
-        + "+    \"REMNAWAVE_COOKIE\",'",
+        + "+    \"REMNAWAVE_COOKIE\",\n"
+        + "+    \"PAYMENT_DATA_RETENTION_ENABLED\",'",
     );
     expect(imageRollbackRehearsal).toContain(
       '[[ "$ROLE_ENV_COMPATIBILITY_DELTA" == '
