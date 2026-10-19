@@ -865,8 +865,22 @@ cp_install() {
   if container_running "$RS_DB" || cp_installed; then
     require_backup before-clean-pay-install
   fi
-  note 'Дальше работает стандартный мастер ./deploy.sh setup.'
-  sh "$DEPLOY_SCRIPT" setup
+  note 'Дальше — стандартные шаги deploy.sh: настройки (configure), затем установка (install).'
+  sh "$DEPLOY_SCRIPT" configure || die 'Настройка не завершена — ничего не установлено.'
+  load_settings
+  # the key Clean Pay just generated must reach Remnashop before the compatibility check
+  if container_exists "$RS_API"; then
+    rs_secure_env
+    rs_sync_auth_key restart \
+      || warn 'Ключ не перенесён — установка остановится на проверке совместимости Remnashop.'
+  fi
+  if ! ask_yes_no 'DNS и HTTPS reverse proxy уже направляют домен Clean Pay на этот сервер?' no; then
+    note 'Настройки сохранены. Когда будет готово, повторите этот пункт или выполните ./deploy.sh install'
+    return 0
+  fi
+  ask_yes_no 'Собрать образы и запустить Clean Pay сейчас?' yes \
+    || { note 'Настройки сохранены. Для продолжения: ./deploy.sh install'; return 0; }
+  sh "$DEPLOY_SCRIPT" install || die 'Установка не прошла — причина в выводе выше.'
   journal clean-pay-install "$(git -C "$ROOT_DIR" rev-parse HEAD 2>/dev/null)"
 }
 
@@ -957,6 +971,10 @@ cp_update() {
 
   step 3 6 'Резервная копия'
   require_backup "before-clean-pay-$(short "$target")"
+  if container_exists "$RS_API"; then
+    rs_secure_env
+    rs_sync_auth_key restart || die 'Без общего ключа установка не пройдёт проверку Remnashop. Код ещё не переключён.'
+  fi
 
   step 4 6 'Переключение кода на новую версию'
   local old_revision old_release old_image old_migration_image traceable=no
@@ -1310,6 +1328,7 @@ rs_update() {
 
   step 4 6 'Резервная копия'
   require_backup "before-remnashop-$(short "$target")"
+  rs_secure_env
   compose_before="$LAST_BACKUP_DIR/config/remnashop/docker-compose.yml"
   [ -f "$compose_before" ] || die 'В копии нет compose-файла Remnashop — откат был бы невозможен.'
   if [ "$layout" = upstream ]; then
@@ -1408,6 +1427,7 @@ rs_update() {
     fi
     ok 'Миграции применены'
   fi
+  rs_sync_auth_key || true
   rs_compose up -d --no-deps --force-recreate "$api_svc" "$worker_svc" "$scheduler_svc"
   if rs_wait_healthy \
     && [ "$(container_field "$RS_API" '{{.Image}}')" = "$image_id" ] \
@@ -1423,7 +1443,7 @@ rs_update() {
   if cp_installed && [ -f "$REMNASHOP_CHECK_SCRIPT" ]; then
     note 'Проверка совместимости с Clean Pay…'
     if sh "$REMNASHOP_CHECK_SCRIPT" "$ENV_FILE" check; then ok 'Clean Pay и Remnashop совместимы'
-    else warn 'Проверка совместимости с Clean Pay не прошла — посмотрите вывод выше.'
+    else warn 'Проверка совместимости с Clean Pay не прошла — посмотрите вывод выше и пункт «Связать с Clean Pay».'
     fi
   fi
   journal remnashop-update "$(short "$current_rev") -> $(short "$target") ok; previous image $current_id; backup $LAST_BACKUP_DIR"
@@ -1448,6 +1468,64 @@ rs_env_placeholder() {
   local value
   value=$(env_get "$1" "$2")
   case "$value" in ''|change_me|replace_with_*) return 0 ;; *) return 1 ;; esac
+}
+
+# Clean Pay reads the Remnashop .env only from a private root directory
+# (700/750) and a private file (600/400); mkdir and the upstream installer leave 755/644.
+rs_secure_env() {
+  local mode
+  [ -d "$REMNASHOP_DIR" ] || return 0
+  mode=$(stat -c '%a' "$REMNASHOP_DIR" 2>/dev/null) || return 0
+  case "$mode" in 700|750) ;; *) chmod 750 "$REMNASHOP_DIR" && ok "Права каталога $REMNASHOP_DIR: $mode → 750" ;; esac
+  [ -f "$REMNASHOP_DIR/.env" ] || return 0
+  mode=$(stat -c '%a' "$REMNASHOP_DIR/.env" 2>/dev/null) || return 0
+  case "$mode" in 600|400) ;; *) chmod 600 "$REMNASHOP_DIR/.env" && ok "Права $REMNASHOP_DIR/.env: $mode → 600" ;; esac
+  return 0
+}
+
+# Clean Pay authenticates to Remnashop with one shared key: REMNASHOP_AUTH_SERVICE_KEY
+# in deploy/prod/.env must equal APP_AUTH_SERVICE_KEY in the Remnashop .env, otherwise
+# Remnashop answers 401. Copies the Clean Pay value over; with "restart" it also
+# recreates API, worker and scheduler so they read it. Values are never printed.
+rs_sync_auth_key() {
+  local restart=${1:-} rs_env="$REMNASHOP_DIR/.env" cp_key rs_key api_key
+  cp_installed && [ -f "$rs_env" ] || return 0
+  cp_key=$(cp_env REMNASHOP_AUTH_SERVICE_KEY)
+  case "$cp_key" in ''|*change-me*|*change_me*) return 0 ;; esac
+  rs_key=$(env_get "$rs_env" APP_AUTH_SERVICE_KEY)
+  if [ "$cp_key" = "$rs_key" ]; then ok 'Ключ auth-сервиса Clean Pay и Remnashop совпадает'; return 0; fi
+  api_key=$(env_get "$rs_env" APP_API_KEY)
+  [ "$cp_key" != "$api_key" ] || { err 'REMNASHOP_AUTH_SERVICE_KEY Clean Pay совпадает с APP_API_KEY Remnashop — так нельзя, задайте другой.'; return 1; }
+  warn "Ключ auth-сервиса не совпадает: REMNASHOP_AUTH_SERVICE_KEY ($ENV_FILE) ≠ APP_AUTH_SERVICE_KEY ($rs_env)."
+  note 'Без этого Remnashop отвечает Clean Pay 401 и проверка совместимости не проходит.'
+  if [ "$restart" = restart ]; then
+    ask_yes_no 'Записать ключ Clean Pay в Remnashop и перезапустить API, worker и scheduler (~30 с)?' yes || return 1
+  fi
+  rs_env_set "$rs_env" APP_AUTH_SERVICE_KEY "$cp_key"
+  ok "APP_AUTH_SERVICE_KEY в $rs_env обновлён"
+  [ "$restart" = restart ] || return 0
+  rs_compose up -d --no-deps --force-recreate \
+    "$(rs_service_of "$RS_API" remnashop)" \
+    "$(rs_service_of "$RS_WORKER" remnashop-taskiq-worker)" \
+    "$(rs_service_of "$RS_SCHEDULER" remnashop-taskiq-scheduler)" \
+    && rs_wait_healthy || { err 'Remnashop не стал healthy после перезапуска — смотрите «Логи сервисов».'; return 1; }
+  ok 'Remnashop перезапущен с ключом Clean Pay'
+}
+
+# Menu item: everything Clean Pay needs from the local Remnashop, then the real check.
+rs_link() {
+  title 'Связь Clean Pay ↔ Remnashop' 'Права .env → общий ключ → проверка совместимости'
+  need_docker
+  cp_installed || die 'Clean Pay не установлен (нет deploy/prod/.env).'
+  [ -f "$REMNASHOP_DIR/.env" ] || die "Не найден $REMNASHOP_DIR/.env."
+  [ "$(id -u)" -eq 0 ] || die 'Запустите от root: нужны права на .env Remnashop.'
+  rs_secure_env
+  rs_sync_auth_key restart || return 1
+  [ -f "$REMNASHOP_CHECK_SCRIPT" ] || return 0
+  note 'Проверка совместимости с Clean Pay…'
+  if sh "$REMNASHOP_CHECK_SCRIPT" "$ENV_FILE" check; then ok 'Clean Pay и Remnashop совместимы'
+  else err 'Проверка не прошла — посмотрите вывод выше.'; return 1
+  fi
 }
 
 rs_install() {
@@ -1479,6 +1557,7 @@ rs_install() {
 
   step 4 7 'Каталог и compose'
   mkdir -p "$REMNASHOP_DIR"
+  chmod 750 "$REMNASHOP_DIR"
   mkdir -p "$REMNASHOP_DIR/logs" "$REMNASHOP_DIR/assets" "$REMNASHOP_DIR/backups"
   chown 10001:10001 "$REMNASHOP_DIR/logs" "$REMNASHOP_DIR/assets" "$REMNASHOP_DIR/backups"
   [ "$(grep -c '^  image: ghcr.io/' "$source/docker-compose.prod.internal.yml")" = 1 ] \
@@ -1501,6 +1580,7 @@ rs_install() {
   rs_env_set "$env_file" DATABASE_PASSWORD "$(openssl rand -hex 24)"
   rs_env_set "$env_file" REDIS_PASSWORD "$(openssl rand -hex 24)"
   rs_env_set "$env_file" TASKIQ_DEPLOYMENT_ID "$(openssl rand -hex 12)"
+  rs_sync_auth_key
   ok 'Внутренние секреты сгенерированы'
   value=$(ask_value 'Домен бота для webhook (без https://)' ''); rs_env_set "$env_file" APP_DOMAIN "$value"
   value=$(ask_secret 'Токен Telegram-бота от @BotFather'); rs_env_set "$env_file" BOT_TOKEN "$value"
@@ -1533,9 +1613,8 @@ rs_install() {
 
   ${C_BOLD}Дальше — подключение Clean Pay:${C_RESET}
   • APP_API_KEY из $env_file → REMNASHOP_API_KEY в настройках Clean Pay;
-  • после настройки Clean Pay скопируйте его REMNASHOP_AUTH_SERVICE_KEY
-    в APP_AUTH_SERVICE_KEY файла $env_file и выполните «Обновить Remnashop»
-    или docker compose up -d в $REMNASHOP_DIR.
+  • общий ключ REMNASHOP_AUTH_SERVICE_KEY → APP_AUTH_SERVICE_KEY меню переносит само
+    при установке и обновлении Clean Pay; отдельно — пункт «Связать с Clean Pay».
 EOF
 }
 
@@ -1763,15 +1842,16 @@ main_menu() {
     menu_section 'REMNASHOP'
     menu_item 9 'Обновить Remnashop' 'копия'
     menu_item 10 'Установить Remnashop с нуля' 'копия'
+    menu_item 11 'Связать с Clean Pay: права .env, общий ключ, проверка'
     menu_section "REMNAWAVE (панель ≥ $REMNAWAVE_MIN_VERSION, ноды ≥ $REMNANODE_MIN_VERSION)"
-    menu_item 11 'Обновить Remnawave' 'копия'
+    menu_item 12 'Обновить Remnawave' 'копия'
     menu_section 'РЕЗЕРВНЫЕ КОПИИ'
-    menu_item 12 'Создать полную резервную копию сейчас'
-    menu_item 13 'Список копий и проверка'
-    menu_item 14 'Как восстановить из копии'
+    menu_item 13 'Создать полную резервную копию сейчас'
+    menu_item 14 'Список копий и проверка'
+    menu_item 15 'Как восстановить из копии'
     menu_section 'СПРАВКА'
-    menu_item 15 'Обновление без простоя (zero-downtime)'
-    menu_item 16 'Настройки меню'
+    menu_item 16 'Обновление без простоя (zero-downtime)'
+    menu_item 17 'Настройки меню'
     printf '\n'
     menu_item 0 'Выход'
     printf '\n'
@@ -1788,12 +1868,13 @@ main_menu() {
       8) run_action cp_stop ;;
       9) run_action rs_update ;;
       10) run_action rs_install ;;
-      11) run_action rw_update ;;
-      12) run_action backup_create manual ;;
-      13) run_view list_backups ;;
-      14) run_view show_restore ;;
-      15) run_view show_zdt ;;
-      16) edit_settings ;;
+      11) run_action rs_link ;;
+      12) run_action rw_update ;;
+      13) run_action backup_create manual ;;
+      14) run_view list_backups ;;
+      15) run_view show_restore ;;
+      16) run_view show_zdt ;;
+      17) edit_settings ;;
       0|q|й|exit|выход) say ''; exit 0 ;;
       '') continue ;;
       *) warn 'Нет такого пункта.' ;;
@@ -1818,6 +1899,7 @@ Clean Pay — меню установки, обновления и резерв�
   ./menu.sh update             обновить Clean Pay
   ./menu.sh remnashop-update   обновить Remnashop
   ./menu.sh remnashop-install  установить Remnashop с нуля
+  ./menu.sh remnashop-link     связать Remnashop с Clean Pay (права .env, общий ключ, проверка)
   ./menu.sh remnawave-update   обновить панель Remnawave
 
   Требования: Remnawave ≥ 2.8.0, ноды remnanode ≥ 2.8.0.
@@ -1836,6 +1918,7 @@ case "${1:-menu}" in
   update) run_action cp_update ;;
   remnashop-update) run_action rs_update ;;
   remnashop-install) run_action rs_install ;;
+  remnashop-link) run_action rs_link ;;
   remnawave-update) run_action rw_update ;;
   help|-h|--help) usage ;;
   *) usage; exit 1 ;;

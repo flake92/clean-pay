@@ -38,7 +38,7 @@ describe("operator menu", () => {
 
   it("takes a verified full backup before every global action", () => {
     expectBefore(functionBody("cp_update"), "require_backup", 'checkout --quiet --detach "$target"');
-    expectBefore(functionBody("cp_install"), "require_backup", 'sh "$DEPLOY_SCRIPT" setup');
+    expectBefore(functionBody("cp_install"), "require_backup", 'sh "$DEPLOY_SCRIPT" configure');
     expectBefore(functionBody("rs_update"), "require_backup", 'mv -f -- "$RS_COMPOSE.new" "$RS_COMPOSE"');
     expectBefore(functionBody("rs_install"), "require_backup", "rs_build_image");
 
@@ -187,6 +187,39 @@ describe("operator menu", () => {
     }
     // existing values are kept: keys are generated only when missing or placeholders
     expect(adopt).toContain('rs_env_placeholder "$env_out"');
+  });
+
+  it("keeps the Remnashop .env private and shares the Clean Pay service key", () => {
+    // the Clean Pay preflight accepts only a 700/750 directory and a 600/400 file
+    const secure = functionBody("rs_secure_env");
+    expect(secure).toContain("700|750) ;;");
+    expect(secure).toContain('chmod 750 "$REMNASHOP_DIR"');
+    expect(secure).toContain('chmod 600 "$REMNASHOP_DIR/.env"');
+    expectBefore(functionBody("rs_install"), 'mkdir -p "$REMNASHOP_DIR"', 'chmod 750 "$REMNASHOP_DIR"');
+
+    // Clean Pay is the source of the key; it must never reuse the admin key
+    const sync = functionBody("rs_sync_auth_key");
+    expect(sync).toContain("cp_env REMNASHOP_AUTH_SERVICE_KEY");
+    expect(sync).toContain('rs_env_set "$rs_env" APP_AUTH_SERVICE_KEY "$cp_key"');
+    expect(sync).toContain('[ "$cp_key" != "$api_key" ]');
+    expectBefore(sync, "ask_yes_no", "rs_env_set");
+    expectBefore(sync, "rs_env_set", "--force-recreate");
+    expect(sync).not.toMatch(/(printf|say|note|ok|warn|err) [^\n]*\$(cp_key|rs_key|api_key)/);
+
+    // both Clean Pay flows sync after the backup and before the compatibility check runs
+    const update = functionBody("cp_update");
+    expectBefore(update, "require_backup", "rs_sync_auth_key restart");
+    expectBefore(update, "rs_sync_auth_key restart", 'sh "$DEPLOY_SCRIPT" install');
+    const install = functionBody("cp_install");
+    expectBefore(install, 'sh "$DEPLOY_SCRIPT" configure', "rs_sync_auth_key restart");
+    expectBefore(install, "rs_sync_auth_key restart", 'sh "$DEPLOY_SCRIPT" install');
+    // rs_update aligns the key right before it recreates API, worker and scheduler anyway
+    expect(functionBody("rs_update")).toContain(
+      'rs_sync_auth_key || true\n  rs_compose up -d --no-deps --force-recreate "$api_svc"',
+    );
+
+    expect(menu).toContain("remnashop-link) run_action rs_link ;;");
+    expect(menu).toContain("11) run_action rs_link ;;");
   });
 
   it("does not wait forever for health checks the upstream compose does not have", () => {

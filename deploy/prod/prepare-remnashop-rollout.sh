@@ -87,7 +87,7 @@ run_remnashop_env_preflight() {
 }
 
 run_remnashop_env_preflight \
-  || fail "Remnashop environment-file metadata is unsafe"
+  || fail "Remnashop environment-file metadata is unsafe. Fix: chmod 750 $(dirname -- "$remnashop_env_file") && chmod 600 $remnashop_env_file (owner uid $remnashop_env_expected_uid, gid $remnashop_env_expected_gid), or run ./menu.sh remnashop-link"
 
 command -v docker >/dev/null 2>&1 || fail "docker is not installed or is not available in PATH"
 
@@ -147,8 +147,14 @@ print(*statuses)
 ' 2>/dev/null
   ) || fail "could not probe the Remnashop notification-preferences API"
 
-  [ "$contract_statuses" = "422 405" ] \
-    || incompatible "Remnashop auth/API contract returned $contract_statuses; expected 422 405"
+  case "$contract_statuses" in
+    "422 405") ;;
+    # 405 proves the Clean Pay build is running, so a 401 means only the shared key differs
+    "401 405")
+      fail "Remnashop rejected the Clean Pay service key (401): REMNASHOP_AUTH_SERVICE_KEY in $ENV_FILE must equal APP_AUTH_SERVICE_KEY in $remnashop_env_file, and Remnashop must be restarted after the change. Fix: ./menu.sh remnashop-link" ;;
+    *)
+      incompatible "Remnashop auth/API contract returned $contract_statuses; expected 422 405" ;;
+  esac
 }
 
 api_container=$(env_value REMNASHOP_API_CONTAINER remnashop)

@@ -1091,7 +1091,8 @@ setup() {
   printf 'Три этапа: конфигурация .env → подготовка Compose → установка.\n'
   configure
   required_remnashop_revision=$(env_value REMNASHOP_MINIMUM_ALEMBIC_REVISION 0059)
-  printf '\nПеред продолжением скопируйте REMNASHOP_AUTH_SERVICE_KEY в APP_AUTH_SERVICE_KEY Remnashop.\n'
+  printf '\nПеред продолжением скопируйте REMNASHOP_AUTH_SERVICE_KEY в APP_AUTH_SERVICE_KEY Remnashop\n'
+  printf 'или выполните во втором терминале ./menu.sh remnashop-link — меню перенесёт ключ и перезапустит Remnashop.\n'
   printf 'API, worker и scheduler Remnashop должны быть перезапущены из одного image; Alembic revision — не ниже %s.\n' "$required_remnashop_revision"
   if ! confirm 'Ключ синхронизирован и все три сервиса Remnashop перезапущены?' no; then
     printf 'Настройки сохранены. После настройки Remnashop выполните: ./deploy.sh install\n'
