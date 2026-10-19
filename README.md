@@ -231,6 +231,39 @@ pay.example.com {
 }
 ```
 
+То же для nginx:
+
+```nginx
+server {
+    listen 443 ssl;
+    http2 on;
+    server_name pay.example.com;
+    ssl_certificate     /etc/letsencrypt/live/pay.example.com/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/pay.example.com/privkey.pem;
+
+    location / {
+        proxy_pass http://127.0.0.1:4000;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto https;
+    }
+}
+```
+
+Если nginx работает в Docker-контейнере (например, `remnawave-nginx`),
+`127.0.0.1` внутри него — сам контейнер; тогда укажите
+`proxy_pass http://clean-pay:4000;` — под этим именем приложение подключено к
+сети `CLEAN_PAY_EDGE_NETWORK` (по умолчанию `remnawave-network`). Сертификат
+нужен на сам домен Clean Pay; при домене за Cloudflare без него Cloudflare
+отвечает `525`.
+
+Панель, поставленная скриптом eGames, скрыта за секретной cookie, и без неё её
+nginx на запросы API отвечает `404`. Укажите ту же cookie в `REMNAWAVE_COOKIE`
+(мастер настройки спрашивает её после токена Remnawave) — иначе установка
+остановится на «dependencies are not ready: remnawave».
+
 До запуска Clean Pay reverse proxy может временно отвечать `502`; сертификат,
 маршрут и внешний HTTPS должны быть готовы до подтверждения соответствующего
 вопроса мастера.
@@ -396,6 +429,7 @@ workers не редактируйте вручную.
 | `REMNASHOP_MINIMUM_ALEMBIC_REVISION` | минимальная схема Remnashop, не ниже `0059` |
 | `REMNASHOP_ENV_FILE`, `REMNASHOP_ENV_EXPECTED_UID`, `REMNASHOP_ENV_EXPECTED_GID` | путь к `.env` Remnashop и ожидаемый владелец |
 | `REMNAWAVE_API_BASE_URL`, `REMNAWAVE_TOKEN` | API панели Remnawave |
+| `REMNAWAVE_COOKIE` | только если панель ставилась скриптом eGames и закрыта секретной cookie: то же значение `ключ=значение`, что `REMNAWAVE_COOKIE` в `.env` Remnashop. Без неё nginx панели отвечает 404, и установка останавливается на «dependencies are not ready: remnawave» |
 | `REMNAWAVE_SUBSCRIPTION_ORIGINS` | точные HTTPS origins ссылок подписки через запятую |
 
 ### Платежи

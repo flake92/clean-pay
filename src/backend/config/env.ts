@@ -20,6 +20,8 @@ type AppEnv = {
   remnawave: {
     apiBaseUrl: string | null;
     token: string | null;
+    /** `name=value` cookie a protected panel proxy requires (eGames install), or null. */
+    cookie: string | null;
     subscriptionOrigins: string[];
   };
   webJwtSecret: string;
@@ -279,6 +281,19 @@ function isLoopbackHostname(hostname: string) {
     || normalized.endsWith(".localhost")
     || normalized === "::1"
     || ipv4Loopback;
+}
+
+// One RFC 6265 cookie pair; the same value Remnashop takes as REMNAWAVE_COOKIE.
+const REMNAWAVE_COOKIE_PATTERN =
+  /^[!#$%&'*+.^_`|~0-9A-Za-z-]{1,128}=[\x21\x23-\x2B\x2D-\x3A\x3C-\x5B\x5D-\x7E]{1,1024}$/;
+
+function remnawaveCookie(environment: EnvironmentSource) {
+  const value = optional("REMNAWAVE_COOKIE", environment);
+  if (!value) return null;
+  if (!REMNAWAVE_COOKIE_PATTERN.test(value)) {
+    throw new Error("REMNAWAVE_COOKIE must be a single name=value cookie");
+  }
+  return value;
 }
 
 function remnawaveSubscriptionOrigins(environment: EnvironmentSource) {
@@ -556,6 +571,7 @@ function createEnv(environment: EnvironmentSource): AppEnv {
     remnawave: {
       apiBaseUrl: optionalUrl("REMNAWAVE_API_BASE_URL", environment),
       token: optional("REMNAWAVE_TOKEN", environment),
+      cookie: remnawaveCookie(environment),
       subscriptionOrigins: remnawaveSubscriptionOrigins(environment),
     },
     webJwtSecret: required("WEB_JWT_SECRET", environment),
