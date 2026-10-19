@@ -1504,11 +1504,14 @@ rs_sync_auth_key() {
   rs_env_set "$rs_env" APP_AUTH_SERVICE_KEY "$cp_key"
   ok "APP_AUTH_SERVICE_KEY в $rs_env обновлён"
   [ "$restart" = restart ] || return 0
-  rs_compose up -d --no-deps --force-recreate \
+  if ! rs_compose up -d --no-deps --force-recreate \
     "$(rs_service_of "$RS_API" remnashop)" \
     "$(rs_service_of "$RS_WORKER" remnashop-taskiq-worker)" \
     "$(rs_service_of "$RS_SCHEDULER" remnashop-taskiq-scheduler)" \
-    && rs_wait_healthy || { err 'Remnashop не стал healthy после перезапуска — смотрите «Логи сервисов».'; return 1; }
+    || ! rs_wait_healthy; then
+    err 'Remnashop не стал healthy после перезапуска — смотрите «Логи сервисов».'
+    return 1
+  fi
   ok 'Remnashop перезапущен с ключом Clean Pay'
 }
 
