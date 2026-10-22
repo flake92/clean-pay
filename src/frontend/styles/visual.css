@@ -229,15 +229,11 @@
 
 /* ─── Motion (only when the visitor has not asked for reduced motion) ──── */
 
+/* No opacity here on purpose: content must stay readable even where
+   animations never advance (frozen timelines, screenshots, print). */
 @keyframes cp-rise {
-  from {
-    opacity: 0;
-    transform: translate3d(0, 22px, 0) scale(0.985);
-  }
-  to {
-    opacity: 1;
-    transform: none;
-  }
+  from { transform: translate3d(0, 26px, 0) scale(0.97); }
+  to { transform: none; }
 }
 
 @keyframes cp-spin {
@@ -259,9 +255,11 @@
   50% { translate: 0 -7px; }
 }
 
-@keyframes cp-fill {
-  from { transform: scaleX(0); }
-  to { transform: scaleX(1); }
+/* A highlight sweeping over the real fill; the bar's width is never animated,
+   so it always shows the true usage. */
+@keyframes cp-sweep {
+  from { background-position: 150% 0, 0 0; }
+  to { background-position: -50% 0, 0 0; }
 }
 
 @media (prefers-reduced-motion: no-preference) {
@@ -303,7 +301,11 @@
   .layout-main .grid > :nth-child(n + 6) .card { animation-delay: 0.3s; }
 
   .layout-main .p-progressbar .p-progressbar-value {
-    animation: cp-fill 1.2s var(--cp-ease-out) 0.35s both;
-    transform-origin: left center;
+    animation: cp-sweep 2.4s ease-in-out 0.4s infinite;
+    background-image:
+      linear-gradient(100deg, transparent 35%, rgba(255, 255, 255, 0.45) 50%, transparent 65%),
+      linear-gradient(90deg, var(--cp-indigo), var(--cp-cyan));
+    background-repeat: no-repeat;
+    background-size: 200% 100%, 100% 100%;
   }
 }
