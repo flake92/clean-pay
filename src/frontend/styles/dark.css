@@ -326,3 +326,15 @@
     color: #c7d2fe;
   }
 }
+
+@media (prefers-color-scheme: dark) {
+  .p-inline-message.p-inline-message-info { background: rgba(59, 130, 246, 0.14); color: #93c5fd; }
+  .p-inline-message.p-inline-message-success { background: rgba(16, 185, 129, 0.14); color: #6ee7b7; }
+  .p-inline-message.p-inline-message-warn { background: rgba(234, 179, 8, 0.14); color: #fde047; }
+  .p-inline-message.p-inline-message-error { background: rgba(239, 68, 68, 0.14); color: #fca5a5; }
+
+  .p-inline-message .p-inline-message-icon,
+  .p-inline-message .p-inline-message-text {
+    color: inherit;
+  }
+}
