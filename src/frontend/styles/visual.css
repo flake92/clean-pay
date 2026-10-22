@@ -37,7 +37,7 @@
   content: "";
   filter: blur(64px);
   height: 34rem;
-  opacity: 0.5;
+  opacity: 0.75;
   pointer-events: none;
   position: fixed;
   width: 34rem;
@@ -66,10 +66,11 @@
   );
   border-radius: 26px;
   box-shadow: 0 40px 90px -40px rgba(49, 46, 129, 0.45), 0 12px 32px -18px rgba(15, 23, 42, 0.2);
-  padding: 2px;
+  padding: 3px;
 }
 
 .auth-card {
+  background: var(--surface-card, #ffffff);
   border-radius: 24px;
 }
 
