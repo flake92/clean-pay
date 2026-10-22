@@ -4,7 +4,6 @@ import Link from "next/link";
 import { APP_VERSION } from "@/shared/app-version";
 import { getBranding } from "@/shared/branding";
 import { SupportChatGuestBoundary } from "@/frontend/components/chatwoot-widget";
-import { AuthCardContent } from "@/frontend/components/auth-card-content";
 import { AuthLogo } from "@/frontend/components/auth-logo";
 
 const AUTH_LOGO_RENDERING = {
@@ -29,20 +28,9 @@ export function AuthShell({
       <SupportChatGuestBoundary />
       <main className="surface-ground auth-page flex align-items-center justify-content-center w-full overflow-x-hidden">
         <div className="w-full flex justify-content-center">
-          <div
-            className="w-full auth-card-frame"
-            style={{
-              border: "1px solid var(--surface-border)",
-              borderRadius: "24px",
-              padding: "0.25rem",
-              background: "var(--surface-card)",
-            }}
-          >
-            <div
-              className="w-full surface-card auth-card"
-              style={{ borderRadius: "20px" }}
-            >
-              <AuthCardContent>
+          <div className="w-full auth-card-frame">
+            <div className="w-full surface-card auth-card">
+              <div className="auth-card-content">
                 <div className="text-center mb-4">
                   <AuthLogo
                     src={branding.logoUrl}
@@ -61,7 +49,7 @@ export function AuthShell({
                     Версия {APP_VERSION}
                   </div>
                 </div>
-              </AuthCardContent>
+              </div>
             </div>
           </div>
         </div>

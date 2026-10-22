@@ -1,5 +1,7 @@
 import type { ReactNode } from "react";
 
+import { MetricValue } from "@/frontend/components/metric-value";
+
 export function Metric({
   icon,
   label,
@@ -12,14 +14,14 @@ export function Metric({
   value: ReactNode;
 }) {
   return (
-    <div className="card mb-0 h-full">
+    <div className="card mb-0 h-full cabinet-metric" data-tone={tone}>
       <div className="flex h-full justify-content-between gap-3">
         <div className="min-w-0">
           <span className="block text-500 font-medium mb-3">{label}</span>
-          <div className="text-900 font-medium text-xl break-words">{value}</div>
+          <MetricValue>{value}</MetricValue>
         </div>
         <div
-          className={`flex flex-shrink-0 align-items-center justify-content-center bg-${tone}-100 border-round`}
+          className={`flex flex-shrink-0 align-items-center justify-content-center bg-${tone}-100 border-round cabinet-metric-icon`}
           style={{ width: "2.5rem", height: "2.5rem" }}
         >
           <i className={`${icon} text-${tone}-500 text-xl`} />

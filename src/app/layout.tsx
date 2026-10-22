@@ -5,6 +5,7 @@ import "primeflex/primeflex.css";
 import "../../public/themes/lara-light-indigo/theme.css";
 import "../frontend/styles/layout/layout.scss";
 import "./globals.css";
+import "../frontend/styles/visual.css";
 import { Providers } from "./providers";
 import { getBranding } from "@/shared/branding";
 

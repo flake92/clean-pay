@@ -1,0 +1,306 @@
+/*
+ * Decorative visual layer. Loaded after globals.css; it only changes how
+ * existing elements look and move. Every animation is opt-in through
+ * prefers-reduced-motion: no-preference, so reduced-motion users get the
+ * static styling only.
+ */
+
+@property --cp-angle {
+  syntax: "<angle>";
+  inherits: false;
+  initial-value: 0deg;
+}
+
+:root {
+  --cp-indigo: #6366f1;
+  --cp-violet: #8b5cf6;
+  --cp-cyan: #06b6d4;
+  --cp-ease-out: cubic-bezier(0.2, 0.8, 0.2, 1);
+  --cp-shadow-soft: 0 24px 60px -32px rgba(49, 46, 129, 0.35), 0 8px 24px -16px rgba(15, 23, 42, 0.14);
+}
+
+/* ─── Authentication pages ─────────────────────────────────────────────── */
+
+.auth-page {
+  background:
+    radial-gradient(60rem 40rem at 8% -12%, rgba(99, 102, 241, 0.16), transparent 62%),
+    radial-gradient(52rem 36rem at 108% 112%, rgba(6, 182, 212, 0.14), transparent 62%),
+    linear-gradient(180deg, #f6f7ff 0%, #eef2fb 100%);
+  isolation: isolate;
+  position: relative;
+}
+
+/* Fixed, so the drifting glows never extend the page or clip its overlays. */
+.auth-page::before,
+.auth-page::after {
+  border-radius: 50%;
+  content: "";
+  filter: blur(64px);
+  height: 34rem;
+  opacity: 0.5;
+  pointer-events: none;
+  position: fixed;
+  width: 34rem;
+  z-index: -1;
+}
+
+.auth-page::before {
+  background: radial-gradient(circle at 35% 35%, #818cf8, transparent 66%);
+  left: -12rem;
+  top: -14rem;
+}
+
+.auth-page::after {
+  background: radial-gradient(circle at 65% 65%, #22d3ee, transparent 66%);
+  bottom: -14rem;
+  right: -12rem;
+}
+
+.auth-card-frame {
+  background: conic-gradient(
+    from var(--cp-angle),
+    rgba(99, 102, 241, 0.6),
+    rgba(34, 211, 238, 0.55),
+    rgba(139, 92, 246, 0.5),
+    rgba(99, 102, 241, 0.6)
+  );
+  border-radius: 26px;
+  box-shadow: 0 40px 90px -40px rgba(49, 46, 129, 0.45), 0 12px 32px -18px rgba(15, 23, 42, 0.2);
+  padding: 2px;
+}
+
+.auth-card {
+  border-radius: 24px;
+}
+
+.clean-auth-logo {
+  box-shadow: 0 14px 30px -12px rgba(99, 102, 241, 0.55);
+}
+
+.auth-title {
+  background: linear-gradient(90deg, #312e81, var(--cp-indigo) 45%, var(--cp-cyan));
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+
+/* ─── Buttons and inputs ───────────────────────────────────────────────── */
+
+.p-button {
+  transition:
+    background-color 0.2s ease,
+    background-position 0.9s var(--cp-ease-out),
+    box-shadow 0.25s ease,
+    translate 0.2s var(--cp-ease-out),
+    scale 0.15s ease;
+}
+
+/* The shine is a second background layer, so the button never clips its label. */
+.p-button:not(.p-button-outlined):not(.p-button-text):not(.p-button-info):not(.p-button-secondary):not(.p-button-danger):not(.p-button-success):not(.p-button-warning):not(.p-button-help):not(.p-button-contrast) {
+  background-image:
+    linear-gradient(105deg, transparent 40%, rgba(255, 255, 255, 0.32) 50%, transparent 60%),
+    linear-gradient(120deg, var(--cp-indigo), var(--cp-violet));
+  background-position: 160% 0, 0 0;
+  background-repeat: no-repeat;
+  background-size: 250% 100%, 100% 100%;
+}
+
+.p-button.p-button-info:not(.p-button-outlined):not(.p-button-text) {
+  background-image:
+    linear-gradient(105deg, transparent 40%, rgba(255, 255, 255, 0.32) 50%, transparent 60%),
+    linear-gradient(120deg, #0ea5e9, var(--cp-cyan));
+  background-position: 160% 0, 0 0;
+  background-repeat: no-repeat;
+  background-size: 250% 100%, 100% 100%;
+}
+
+.p-button:not(:disabled):hover {
+  box-shadow: 0 12px 26px -14px rgba(79, 70, 229, 0.75);
+  translate: 0 -1px;
+}
+
+.p-button:not(:disabled):active {
+  scale: 0.98;
+  translate: 0 0;
+}
+
+.p-inputtext {
+  transition: border-color 0.2s ease, box-shadow 0.25s ease;
+}
+
+.p-inputtext:enabled:hover {
+  border-color: #a5b4fc;
+}
+
+.p-inputtext:enabled:focus {
+  border-color: var(--cp-indigo);
+  box-shadow: 0 0 0 0.25rem rgba(99, 102, 241, 0.18);
+}
+
+/* ─── Application shell ────────────────────────────────────────────────── */
+
+.layout-wrapper {
+  background:
+    radial-gradient(70rem 42rem at 105% -10%, rgba(99, 102, 241, 0.1), transparent 60%),
+    radial-gradient(60rem 40rem at -10% 110%, rgba(6, 182, 212, 0.08), transparent 60%);
+  background-attachment: fixed;
+  min-height: 100vh;
+}
+
+.layout-topbar {
+  -webkit-backdrop-filter: saturate(160%) blur(14px);
+  backdrop-filter: saturate(160%) blur(14px);
+  background-color: rgba(255, 255, 255, 0.8);
+}
+
+.layout-main .card {
+  border-color: rgba(99, 102, 241, 0.1);
+  border-radius: 16px;
+  box-shadow: var(--cp-shadow-soft);
+}
+
+.page-header-title {
+  background: linear-gradient(90deg, #1e1b4b, var(--cp-indigo) 55%, var(--cp-cyan));
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+
+.layout-menu ul a {
+  transition: background-color 0.2s ease, translate 0.2s var(--cp-ease-out);
+}
+
+.layout-menu ul a:hover {
+  translate: 3px 0;
+}
+
+/* Cabinet metric tiles */
+.cabinet-metric {
+  overflow: hidden;
+  position: relative;
+  transition: box-shadow 0.3s ease, translate 0.3s var(--cp-ease-out);
+}
+
+.cabinet-metric::before {
+  background: linear-gradient(90deg, var(--cp-metric-from), var(--cp-metric-to));
+  content: "";
+  height: 4px;
+  inset: 0 0 auto;
+  position: absolute;
+}
+
+.cabinet-metric:hover {
+  box-shadow: 0 30px 60px -30px rgba(49, 46, 129, 0.45), 0 10px 24px -16px rgba(15, 23, 42, 0.18);
+  translate: 0 -4px;
+}
+
+.cabinet-metric-icon {
+  background-image: linear-gradient(135deg, var(--cp-metric-from), var(--cp-metric-to));
+  box-shadow: 0 10px 22px -10px var(--cp-metric-from);
+  transition: rotate 0.4s var(--cp-ease-out), scale 0.4s var(--cp-ease-out);
+}
+
+.cabinet-metric-icon i {
+  color: #ffffff !important;
+}
+
+.cabinet-metric:hover .cabinet-metric-icon {
+  rotate: -8deg;
+  scale: 1.08;
+}
+
+.cabinet-metric[data-tone="blue"] { --cp-metric-from: #3b82f6; --cp-metric-to: #6366f1; }
+.cabinet-metric[data-tone="orange"] { --cp-metric-from: #f97316; --cp-metric-to: #f59e0b; }
+.cabinet-metric[data-tone="cyan"] { --cp-metric-from: #06b6d4; --cp-metric-to: #22d3ee; }
+.cabinet-metric[data-tone="purple"] { --cp-metric-from: #8b5cf6; --cp-metric-to: #d946ef; }
+
+.layout-main .p-progressbar {
+  border-radius: 999px;
+  overflow: hidden;
+}
+
+.layout-main .p-progressbar .p-progressbar-value {
+  background-image: linear-gradient(90deg, var(--cp-indigo), var(--cp-cyan));
+  border-radius: 999px;
+}
+
+/* ─── Motion (only when the visitor has not asked for reduced motion) ──── */
+
+@keyframes cp-rise {
+  from {
+    opacity: 0;
+    transform: translate3d(0, 22px, 0) scale(0.985);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes cp-spin {
+  to { --cp-angle: 360deg; }
+}
+
+@keyframes cp-drift-a {
+  from { transform: translate3d(0, 0, 0) scale(1); }
+  to { transform: translate3d(12rem, 8rem, 0) scale(1.15); }
+}
+
+@keyframes cp-drift-b {
+  from { transform: translate3d(0, 0, 0) scale(1.1); }
+  to { transform: translate3d(-10rem, -9rem, 0) scale(0.95); }
+}
+
+@keyframes cp-float {
+  0%, 100% { translate: 0 0; }
+  50% { translate: 0 -7px; }
+}
+
+@keyframes cp-fill {
+  from { transform: scaleX(0); }
+  to { transform: scaleX(1); }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .auth-page::before { animation: cp-drift-a 18s ease-in-out infinite alternate; }
+  .auth-page::after { animation: cp-drift-b 22s ease-in-out infinite alternate; }
+
+  .auth-card-frame {
+    animation:
+      cp-rise 0.8s var(--cp-ease-out) both,
+      cp-spin 10s linear infinite;
+  }
+
+  .auth-card-content > * {
+    animation: cp-rise 0.7s var(--cp-ease-out) both;
+  }
+
+  .auth-card-content > :nth-child(1) { animation-delay: 0.15s; }
+  .auth-card-content > :nth-child(2) { animation-delay: 0.27s; }
+  .auth-card-content > :nth-child(3) { animation-delay: 0.39s; }
+  .auth-card-content > :nth-child(n + 4) { animation-delay: 0.51s; }
+
+  .clean-auth-logo {
+    animation: cp-float 5s ease-in-out 1s infinite;
+  }
+
+  .p-button:not(.p-button-outlined):not(.p-button-text):not(.p-button-info):not(.p-button-secondary):not(.p-button-danger):not(.p-button-success):not(.p-button-warning):not(.p-button-help):not(.p-button-contrast):not(:disabled):hover,
+  .p-button.p-button-info:not(.p-button-outlined):not(.p-button-text):not(:disabled):hover {
+    background-position: -60% 0, 0 0;
+  }
+
+  .layout-main .card {
+    animation: cp-rise 0.65s var(--cp-ease-out) both;
+  }
+
+  .layout-main .grid > :nth-child(2) .card { animation-delay: 0.06s; }
+  .layout-main .grid > :nth-child(3) .card { animation-delay: 0.12s; }
+  .layout-main .grid > :nth-child(4) .card { animation-delay: 0.18s; }
+  .layout-main .grid > :nth-child(5) .card { animation-delay: 0.24s; }
+  .layout-main .grid > :nth-child(n + 6) .card { animation-delay: 0.3s; }
+
+  .layout-main .p-progressbar .p-progressbar-value {
+    animation: cp-fill 1.2s var(--cp-ease-out) 0.35s both;
+    transform-origin: left center;
+  }
+}

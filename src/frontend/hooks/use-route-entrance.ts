@@ -1,13 +1,13 @@
 "use client";
 
-import { animate as animeAnimate, stagger } from "animejs";
 import { useAnimate } from "motion/react";
 import { useLayoutEffect, useRef } from "react";
 
 import { prefersReducedMotion } from "@/frontend/lib/reduced-motion";
 
-// Purely visual: content is never hidden on the first paint, and every
-// inline style the animations leave behind is completed or reverted.
+// Purely visual: on client-side navigation the new page content fades and
+// rises in. The first paint is never hidden (CSS handles the initial entrance),
+// and the animation is completed on cleanup so no partial style remains.
 export function useRouteEntrance<T extends HTMLElement>(pathname: string) {
   const [scope, animate] = useAnimate<T>();
   const previousPathname = useRef(pathname);
@@ -16,25 +16,16 @@ export function useRouteEntrance<T extends HTMLElement>(pathname: string) {
     const root = scope.current;
     const routeChanged = previousPathname.current !== pathname;
     previousPathname.current = pathname;
-    if (!root || prefersReducedMotion()) return;
+    if (!root || !routeChanged || prefersReducedMotion()) return;
 
-    const fade = routeChanged
-      ? animate(root, { opacity: [0, 1], y: [10, 0] }, { duration: 0.28, ease: "easeOut" })
-      : undefined;
-    const cards = root.querySelectorAll<HTMLElement>(".card");
-    const wave = cards.length > 0
-      ? animeAnimate(cards, {
-        translateY: [{ to: -6 }, { to: 0 }],
-        duration: 560,
-        delay: stagger(60),
-        ease: "outQuad",
-        onComplete: (self) => self.revert(),
-      })
-      : undefined;
+    const fade = animate(
+      root,
+      { opacity: [0, 1], y: [16, 0] },
+      { duration: 0.45, ease: [0.2, 0.8, 0.2, 1] },
+    );
 
     return () => {
-      fade?.complete();
-      wave?.revert();
+      fade.complete();
     };
   }, [animate, pathname, scope]);
 
