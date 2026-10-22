@@ -69,8 +69,10 @@
   padding: 3px;
 }
 
+/* PrimeFlex's .surface-card forces an (undefined, so transparent) background
+   color with !important; an image layer is not affected by it. */
 .auth-card {
-  background: var(--surface-card, #ffffff);
+  background-image: linear-gradient(var(--surface-card, #ffffff), var(--surface-card, #ffffff));
   border-radius: 24px;
 }
 
