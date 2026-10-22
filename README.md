@@ -28,12 +28,17 @@ Production-запуск использует Docker Compose, собственн�
 
 <table>
   <tr>
-    <td width="50%" valign="top">
+    <td width="33%" valign="top">
       <a href="docs/screenshots/login.png">
         <img src="docs/screenshots/login.png" alt="Вход в Clean Pay по e-mail или через Telegram">
       </a>
     </td>
-    <td width="50%" valign="top">
+    <td width="33%" valign="top">
+      <a href="docs/screenshots/login-dark.png">
+        <img src="docs/screenshots/login-dark.png" alt="Вход в Clean Pay в тёмной теме">
+      </a>
+    </td>
+    <td width="33%" valign="top">
       <a href="docs/screenshots/authentication-methods.png">
         <img src="docs/screenshots/authentication-methods.png" alt="Настройка способов входа в Clean Pay">
       </a>
@@ -41,9 +46,26 @@ Production-запуск использует Docker Compose, собственн�
   </tr>
   <tr>
     <td align="center"><sub>Вход по e-mail или через Telegram.</sub></td>
+    <td align="center"><sub>Тёмная тема.</sub></td>
     <td align="center"><sub>E-mail, Telegram и быстрый вход.</sub></td>
   </tr>
 </table>
+
+Оформление:
+
+- **Светлая и тёмная тема** переключаются автоматически по настройке
+  системы или браузера (`prefers-color-scheme`).
+- **Анимации** построены на [Motion](https://github.com/motiondivision/motion)
+  и [anime.js](https://github.com/juliangarnier/anime): появление карточек,
+  кольцевой индикатор трафика, счётчики в плитках, «живой» статус подписки,
+  плавная смена страниц, конфетти после оплаты. Анимации чисто визуальные: они
+  не скрывают содержимое и не меняют поведение. Если в системе включено
+  «уменьшение движения» (`prefers-reduced-motion`), они отключаются.
+- **На телефоне** внизу экрана есть панель быстрой навигации по основным
+  разделам кабинета.
+- Весь декоративный слой собран в `src/frontend/styles/visual.css` и
+  `src/frontend/styles/dark.css`; брендинг (название, логотип) настраивается
+  как прежде.
 
 ## Меню управления
 
@@ -274,7 +296,7 @@ Production запускается из зафиксированного тега
 ветки.
 
 ```bash
-RELEASE_REF='refs/tags/v0.3.4'
+RELEASE_REF='refs/tags/v0.4.0'
 sudo mkdir -p /opt/clean-pay
 sudo chown "$USER":"$USER" /opt/clean-pay
 git clone https://github.com/flake92/clean-pay.git /opt/clean-pay
@@ -526,11 +548,11 @@ workers. Если миграция завершается ошибкой, runtim
 это защита от запуска старого кода поверх новой или частично изменённой схемы.
 Никогда не используйте `docker compose down -v` при обновлении.
 
-### Обычное обновление с `0.2.x` и внутри `0.3.x`
+### Обычное обновление с `0.2.x`, `0.3.x` и внутри `0.4.x`
 
 ```bash
 cd /opt/clean-pay
-RELEASE_REF='refs/tags/v0.3.4'
+RELEASE_REF='refs/tags/v0.4.0'
 git fetch --depth=1 origin "$RELEASE_REF"
 RELEASE_SHA=$(git rev-parse FETCH_HEAD)
 git checkout --detach "$RELEASE_SHA"
