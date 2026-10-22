@@ -93,9 +93,12 @@ describe("application security headers", () => {
     expect(liveBoundary).toContain("BODY_LIMIT = 64 * 1_024");
     expect(liveBoundary).toContain("PAYLOAD_TOO_LARGE");
     expect(liveBoundary).toContain("FORBIDDEN");
-    expect(liveBoundary).toContain('response.status !== 404');
+    expect(liveBoundary).toContain("response.status !== UNKNOWN_ACTION_STATUS");
+    expect(liveBoundary).toContain("UNKNOWN_ACTION_STATUS = 409");
+    expect(liveBoundary).toContain('UNKNOWN_ACTION_TEXT = "Server Action unavailable."');
+    expect(liveBoundary).toContain('PROBE_ACTION_ID = `00${"c1ea".repeat(10)}`');
+    expect(liveBoundary).toContain('["application/x-www-form-urlencoded", 404]');
     expect(liveBoundary).toContain('x-nextjs-action-not-found');
-    expect(liveBoundary).toContain("Server action not found.");
     expect(liveBoundary).toContain("application/x-www-form-urlencoded");
     expect(liveBoundary).toContain("multipart/form-data");
     expect(liveBoundary).toContain('"x-forwarded-host"');
