@@ -6,6 +6,7 @@ import { classNames } from "primereact/utils";
 import { useContext, useEffect, useRef } from "react";
 
 import type { NavigationViewModel } from "@/application/models/navigation";
+import { useRouteEntrance } from "@/frontend/hooks/use-route-entrance";
 import type { AppTopbarRef, ChildContainerProps, LayoutState } from "@/frontend/types";
 import AppFooter from "./AppFooter";
 import AppMenu from "./AppMenu";
@@ -28,6 +29,7 @@ const Layout = ({
   const topbarRef = useRef<AppTopbarRef>(null);
   const sidebarRef = useRef<HTMLElement>(null);
   const pathname = usePathname();
+  const mainRef = useRouteEntrance<HTMLElement>(pathname);
 
   const [bindMenuOutsideClickListener, unbindMenuOutsideClickListener] = useEventListener({
     type: "click",
@@ -211,7 +213,7 @@ const Layout = ({
         <AppMenu navigation={navigation} />
       </nav>
       <div className="layout-main-container">
-        <main className="layout-main" id="main-content" tabIndex={-1}>{children}</main>
+        <main className="layout-main" ref={mainRef} id="main-content" tabIndex={-1}>{children}</main>
         <AppFooter />
       </div>
       <div className="layout-mask" />
