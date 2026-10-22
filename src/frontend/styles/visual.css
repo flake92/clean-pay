@@ -197,7 +197,24 @@
   translate: 0 -4px;
 }
 
+/* The icon sits in the corner so the value can use the full tile width and
+   words like «активна» do not break mid-word in narrow columns. */
+.cabinet-metric > .flex {
+  position: relative;
+}
+
+.cabinet-metric > .flex > .min-w-0 {
+  flex: 1 1 auto;
+}
+
+.cabinet-metric > .flex > .min-w-0 > span {
+  padding-right: 3rem;
+}
+
 .cabinet-metric-icon {
+  position: absolute;
+  right: 0;
+  top: 0;
   background-image: linear-gradient(135deg, var(--cp-metric-from), var(--cp-metric-to));
   box-shadow: 0 10px 22px -10px var(--cp-metric-from);
   transition: rotate 0.4s var(--cp-ease-out), scale 0.4s var(--cp-ease-out);
