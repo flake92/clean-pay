@@ -1,0 +1,328 @@
+/*
+ * Dark appearance that follows the visitor's system setting. Loaded after
+ * visual.css. Only colors change; layout and behavior are untouched.
+ *
+ * PrimeFlex 4 utilities (.text-900, .surface-card, ...) are built on
+ * light-dark(var(--p-surface-*)) tokens that this project never defined, so
+ * those classes resolved to nothing. Defining the palette makes them work in
+ * both schemes; the Lara theme's `color-scheme` picks the light branch, and the
+ * dark block below switches it.
+ */
+
+:root {
+  --p-surface-0: #ffffff;
+  --p-surface-50: #f9fafb;
+  --p-surface-100: #f3f4f6;
+  --p-surface-200: #e5e7eb;
+  --p-surface-300: #d1d5db;
+  --p-surface-400: #9ca3af;
+  --p-surface-500: #6b7280;
+  --p-surface-600: #4b5563;
+  --p-surface-700: #374151;
+  --p-surface-800: #1f2937;
+  --p-surface-900: #111827;
+  --p-surface-950: #030712;
+  --p-text-muted-color: #6b7280;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    color-scheme: dark;
+
+    --cp-dark-ground: #0b1020;
+    --cp-dark-card: #121a2e;
+    --cp-dark-raised: #18223a;
+    --cp-dark-border: #24304b;
+    --cp-dark-text: #e5e7f0;
+    --cp-dark-strong: #f8fafc;
+    --cp-dark-muted: #94a3b8;
+
+    --p-surface-700: #2c3a58;
+    --p-surface-800: #18223a;
+    --p-surface-900: #121a2e;
+    --p-surface-950: #0b1020;
+    --p-text-muted-color: #94a3b8;
+
+    --background: var(--cp-dark-ground);
+    --foreground: var(--cp-dark-text);
+    --surface-ground: var(--cp-dark-ground);
+    --surface-section: var(--cp-dark-card);
+    --surface-card: var(--cp-dark-card);
+    --surface-overlay: var(--cp-dark-raised);
+    --surface-border: var(--cp-dark-border);
+    --surface-hover: rgba(255, 255, 255, 0.04);
+    --text-color: var(--cp-dark-text);
+    --text-color-secondary: var(--cp-dark-muted);
+    --highlight-bg: rgba(99, 102, 241, 0.18);
+    --highlight-text-color: #c7d2fe;
+    --maskbg: rgba(2, 6, 23, 0.65);
+    --card-shadow: 0 1px 2px rgba(0, 0, 0, 0.4);
+    --cp-shadow-soft: 0 24px 60px -32px rgba(0, 0, 0, 0.7), 0 8px 24px -16px rgba(0, 0, 0, 0.5);
+  }
+
+  body {
+    background: var(--cp-dark-ground);
+    color: var(--cp-dark-text);
+  }
+
+  /* Shell */
+  .layout-wrapper {
+    background:
+      radial-gradient(70rem 42rem at 105% -10%, rgba(99, 102, 241, 0.16), transparent 60%),
+      radial-gradient(60rem 40rem at -10% 110%, rgba(6, 182, 212, 0.1), transparent 60%),
+      var(--cp-dark-ground);
+  }
+
+  .layout-topbar {
+    background-color: rgba(18, 26, 46, 0.78);
+    box-shadow: 0 1px 0 var(--cp-dark-border);
+  }
+
+  .layout-sidebar {
+    background: var(--cp-dark-card);
+    box-shadow: none;
+    outline: 1px solid var(--cp-dark-border);
+  }
+
+  .layout-main .card {
+    border-color: var(--cp-dark-border);
+  }
+
+  .page-header-title {
+    background: linear-gradient(90deg, #e0e7ff, #a5b4fc 55%, #67e8f9);
+    -webkit-background-clip: text;
+    background-clip: text;
+  }
+
+  .skip-link {
+    background: var(--cp-dark-raised);
+    color: #c7d2fe;
+  }
+
+  /* Sign-in */
+  .auth-page {
+    background:
+      radial-gradient(60rem 40rem at 8% -12%, rgba(99, 102, 241, 0.28), transparent 62%),
+      radial-gradient(52rem 36rem at 108% 112%, rgba(6, 182, 212, 0.2), transparent 62%),
+      linear-gradient(180deg, #0b1020 0%, #0d1428 100%);
+  }
+
+  .auth-page::before,
+  .auth-page::after {
+    opacity: 0.45;
+  }
+
+  .auth-title {
+    background: linear-gradient(90deg, #e0e7ff, #a5b4fc 45%, #67e8f9);
+    -webkit-background-clip: text;
+    background-clip: text;
+  }
+
+  .auth-account-summary {
+    background: var(--cp-dark-raised);
+    border-color: var(--cp-dark-border);
+  }
+
+  .auth-account-icon { color: #93c5fd; }
+  .auth-account-label { color: var(--cp-dark-muted); }
+  .auth-account-email { color: var(--cp-dark-strong); }
+
+  /* Form controls */
+  .p-inputtext {
+    background: #0e1528;
+    border-color: var(--cp-dark-border);
+    color: var(--cp-dark-strong);
+  }
+
+  .p-inputtext::placeholder {
+    color: #64748b;
+  }
+
+  .p-button.p-button-outlined {
+    color: #a5b4fc;
+  }
+
+  .p-button.p-button-outlined:not(:disabled):hover,
+  .p-button.p-button-text:not(:disabled):hover {
+    background: rgba(129, 140, 248, 0.12);
+    color: #c7d2fe;
+  }
+
+  .p-button.p-button-text {
+    color: #a5b4fc;
+  }
+
+  .p-password-panel,
+  .p-dropdown,
+  .p-dropdown-panel {
+    background: var(--cp-dark-raised);
+    border-color: var(--cp-dark-border);
+    color: var(--cp-dark-text);
+  }
+
+  .p-dropdown .p-dropdown-label {
+    color: var(--cp-dark-strong);
+  }
+
+  .p-dropdown-panel .p-dropdown-items .p-dropdown-item {
+    color: var(--cp-dark-text);
+  }
+
+  .p-dropdown-panel .p-dropdown-items .p-dropdown-item:not(.p-highlight):not(.p-disabled):hover {
+    background: rgba(255, 255, 255, 0.05);
+    color: var(--cp-dark-strong);
+  }
+
+  /* Cards, messages, tags, tables */
+  .p-card {
+    background: var(--cp-dark-card);
+    border-color: var(--cp-dark-border);
+    color: var(--cp-dark-text);
+  }
+
+  .p-card .p-card-title { color: var(--cp-dark-strong); }
+  .p-card .p-card-subtitle { color: var(--cp-dark-muted); }
+
+  .p-message.p-message-info { background: rgba(59, 130, 246, 0.14); color: #93c5fd; }
+  .p-message.p-message-success { background: rgba(16, 185, 129, 0.14); color: #6ee7b7; }
+  .p-message.p-message-warn { background: rgba(234, 179, 8, 0.14); color: #fde047; }
+  .p-message.p-message-error { background: rgba(239, 68, 68, 0.14); color: #fca5a5; }
+
+  .p-message .p-message-icon,
+  .p-message .p-message-close {
+    color: inherit;
+  }
+
+  .p-tag.p-tag-success { background-color: rgba(74, 222, 128, 0.18); color: #86efac; }
+  .p-tag.p-tag-info { background-color: rgba(56, 189, 248, 0.18); color: #7dd3fc; }
+  .p-tag.p-tag-warning { background-color: rgba(251, 146, 60, 0.18); color: #fdba74; }
+  .p-tag.p-tag-danger { background-color: rgba(248, 113, 113, 0.18); color: #fca5a5; }
+  .p-tag:not(.p-tag-success):not(.p-tag-info):not(.p-tag-warning):not(.p-tag-danger) {
+    background-color: rgba(129, 140, 248, 0.2);
+    color: #c7d2fe;
+  }
+
+  .p-datatable .p-datatable-thead > tr > th {
+    background: var(--cp-dark-raised);
+    border-color: var(--cp-dark-border);
+    color: var(--cp-dark-muted);
+  }
+
+  .p-datatable .p-datatable-tbody > tr {
+    background: transparent;
+    color: var(--cp-dark-text);
+  }
+
+  .p-datatable .p-datatable-tbody > tr > td {
+    border-color: var(--cp-dark-border);
+  }
+
+  .p-progress-spinner-circle {
+    stroke: #818cf8 !important;
+  }
+
+  /* Project components with fixed light colors in globals.css */
+  .cabinet-mobile-record,
+  .clean-pay-gateway-switcher,
+  .account-method-meta,
+  .passkey-list-item {
+    background: var(--cp-dark-raised);
+    border-color: var(--cp-dark-border);
+  }
+
+  .cabinet-mobile-record__details > div {
+    border-top-color: var(--cp-dark-border);
+  }
+
+  .cabinet-mobile-record__title,
+  .cabinet-mobile-record__details dd,
+  .clean-pay-price-option__price,
+  .clean-pay-gateway-switcher__current strong,
+  .account-method-title,
+  .passkey-list-item__name {
+    color: var(--cp-dark-strong);
+  }
+
+  .cabinet-mobile-record__id,
+  .cabinet-mobile-record__details dt,
+  .clean-pay-gateway-switcher__current span,
+  .account-method-description,
+  .passkey-list-item__meta {
+    color: var(--cp-dark-muted);
+  }
+
+  .account-method-meta {
+    color: var(--cp-dark-text);
+  }
+
+  .clean-pay-price-choice,
+  .account-method-card {
+    background: var(--cp-dark-card);
+    border-color: var(--cp-dark-border);
+    box-shadow: none;
+  }
+
+  .clean-pay-price-choice--selected {
+    background: rgba(99, 102, 241, 0.14);
+    border-color: #818cf8;
+  }
+
+  .clean-pay-price-option__gateway,
+  .account-method-icon {
+    background: rgba(59, 130, 246, 0.14);
+    border-color: rgba(59, 130, 246, 0.3);
+    color: #93c5fd;
+  }
+
+  .clean-pay-gateway-switcher__button {
+    background: var(--cp-dark-card);
+    border-color: var(--cp-dark-border);
+    color: #a5b4fc;
+  }
+
+  .clean-pay-gateway-switcher__button:focus-visible {
+    background: rgba(99, 102, 241, 0.2);
+    color: #e0e7ff;
+  }
+
+  /* Visual layer pieces */
+  .traffic-ring-track { stroke: var(--cp-dark-border); }
+  .traffic-ring-percent { color: var(--cp-dark-strong); }
+  .traffic-ring-caption { color: var(--cp-dark-muted); }
+
+  .skeleton-line {
+    background:
+      linear-gradient(100deg, transparent 30%, rgba(255, 255, 255, 0.06) 50%, transparent 70%),
+      linear-gradient(90deg, #1b2540, #202b48);
+    background-repeat: no-repeat;
+    background-size: 200% 100%, 100% 100%;
+  }
+
+  .cabinet-metric[data-tone="blue"] { --cp-metric-ink: #a5b4fc; --cp-metric-soft: rgba(129, 140, 248, 0.14); --cp-metric-glow: rgba(129, 140, 248, 0.1); }
+  .cabinet-metric[data-tone="orange"] { --cp-metric-ink: #fdba74; --cp-metric-soft: rgba(251, 146, 60, 0.14); --cp-metric-glow: rgba(251, 146, 60, 0.08); }
+  .cabinet-metric[data-tone="cyan"] { --cp-metric-ink: #67e8f9; --cp-metric-soft: rgba(34, 211, 238, 0.14); --cp-metric-glow: rgba(34, 211, 238, 0.09); }
+  .cabinet-metric[data-tone="purple"] { --cp-metric-ink: #c4b5fd; --cp-metric-soft: rgba(167, 139, 250, 0.14); --cp-metric-glow: rgba(167, 139, 250, 0.1); }
+}
+
+@media (prefers-color-scheme: dark) {
+  .copy-button.is-copied.p-button-outlined {
+    border-color: #4ade80;
+    color: #86efac;
+  }
+}
+
+@media (prefers-color-scheme: dark) and (max-width: 991px) {
+  .mobile-bottom-nav {
+    background: rgba(18, 26, 46, 0.86);
+    box-shadow: 0 18px 40px -18px rgba(0, 0, 0, 0.7), 0 0 0 1px var(--cp-dark-border);
+  }
+
+  .mobile-bottom-nav__item {
+    color: var(--cp-dark-muted);
+  }
+
+  .mobile-bottom-nav__item.is-active {
+    background: rgba(129, 140, 248, 0.16);
+    color: #c7d2fe;
+  }
+}

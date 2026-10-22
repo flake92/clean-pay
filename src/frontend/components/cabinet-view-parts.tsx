@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 
 import { MetricValue } from "@/frontend/components/metric-value";
+import { TiltCard } from "@/frontend/components/tilt-card";
 
 export function Metric({
   icon,
@@ -14,20 +15,15 @@ export function Metric({
   value: ReactNode;
 }) {
   return (
-    <div className="card mb-0 h-full cabinet-metric" data-tone={tone}>
-      <div className="flex h-full justify-content-between gap-3">
-        <div className="min-w-0">
-          <span className="block text-500 font-medium mb-3">{label}</span>
-          <MetricValue>{value}</MetricValue>
-        </div>
-        <div
-          className={`flex flex-shrink-0 align-items-center justify-content-center bg-${tone}-100 border-round cabinet-metric-icon`}
-          style={{ width: "2.5rem", height: "2.5rem" }}
-        >
-          <i className={`${icon} text-${tone}-500 text-xl`} />
-        </div>
+    <TiltCard className="card mb-0 h-full cabinet-metric" tone={tone}>
+      <div className="cabinet-metric-head">
+        <span aria-hidden="true" className="cabinet-metric-icon">
+          <i className={icon} />
+        </span>
+        <span className="text-500 font-medium">{label}</span>
       </div>
-    </div>
+      <MetricValue>{value}</MetricValue>
+    </TiltCard>
   );
 }
 

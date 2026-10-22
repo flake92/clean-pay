@@ -177,62 +177,64 @@
   translate: 3px 0;
 }
 
-/* Cabinet metric tiles */
+/* Cabinet metric tiles: a soft tinted glow in the corner and a round, lightly
+   tinted icon next to the label; the value gets the full tile width. */
 .cabinet-metric {
-  overflow: hidden;
-  position: relative;
+  background-image: radial-gradient(18rem 10rem at 100% 0%, var(--cp-metric-glow), transparent 70%);
+  display: flex;
+  flex-direction: column;
+  gap: 0.85rem;
   transition: box-shadow 0.3s ease, translate 0.3s var(--cp-ease-out);
 }
 
-.cabinet-metric::before {
-  background: linear-gradient(90deg, var(--cp-metric-from), var(--cp-metric-to));
-  content: "";
-  height: 4px;
-  inset: 0 0 auto;
-  position: absolute;
-}
-
 .cabinet-metric:hover {
-  box-shadow: 0 30px 60px -30px rgba(49, 46, 129, 0.45), 0 10px 24px -16px rgba(15, 23, 42, 0.18);
+  box-shadow: 0 30px 60px -30px rgba(49, 46, 129, 0.4), 0 10px 24px -16px rgba(15, 23, 42, 0.16);
   translate: 0 -4px;
 }
 
-/* The icon sits in the corner so the value can use the full tile width and
-   words like «активна» do not break mid-word in narrow columns. */
-.cabinet-metric > .flex {
-  position: relative;
-}
-
-.cabinet-metric > .flex > .min-w-0 {
-  flex: 1 1 auto;
-}
-
-.cabinet-metric > .flex > .min-w-0 > span {
-  padding-right: 3rem;
+.cabinet-metric-head {
+  align-items: center;
+  display: flex;
+  gap: 0.7rem;
+  min-width: 0;
 }
 
 .cabinet-metric-icon {
-  position: absolute;
-  right: 0;
-  top: 0;
-  background-image: linear-gradient(135deg, var(--cp-metric-from), var(--cp-metric-to));
-  box-shadow: 0 10px 22px -10px var(--cp-metric-from);
-  transition: rotate 0.4s var(--cp-ease-out), scale 0.4s var(--cp-ease-out);
-}
-
-.cabinet-metric-icon i {
-  color: #ffffff !important;
+  align-items: center;
+  background: var(--cp-metric-soft);
+  border-radius: 50%;
+  box-shadow: inset 0 0 0 1px var(--cp-metric-ring);
+  color: var(--cp-metric-ink);
+  display: inline-flex;
+  flex: 0 0 auto;
+  font-size: 1.05rem;
+  height: 2.4rem;
+  justify-content: center;
+  transition: scale 0.4s var(--cp-ease-out), box-shadow 0.4s ease;
+  width: 2.4rem;
 }
 
 .cabinet-metric:hover .cabinet-metric-icon {
-  rotate: -8deg;
-  scale: 1.08;
+  box-shadow: inset 0 0 0 1px var(--cp-metric-ring), 0 0 0 6px var(--cp-metric-soft);
+  scale: 1.06;
 }
 
-.cabinet-metric[data-tone="blue"] { --cp-metric-from: #3b82f6; --cp-metric-to: #6366f1; }
-.cabinet-metric[data-tone="orange"] { --cp-metric-from: #f97316; --cp-metric-to: #f59e0b; }
-.cabinet-metric[data-tone="cyan"] { --cp-metric-from: #06b6d4; --cp-metric-to: #22d3ee; }
-.cabinet-metric[data-tone="purple"] { --cp-metric-from: #8b5cf6; --cp-metric-to: #d946ef; }
+.cabinet-metric[data-tone="blue"] {
+  --cp-metric-ink: #4f46e5; --cp-metric-soft: rgba(99, 102, 241, 0.1);
+  --cp-metric-ring: rgba(99, 102, 241, 0.22); --cp-metric-glow: rgba(99, 102, 241, 0.08);
+}
+.cabinet-metric[data-tone="orange"] {
+  --cp-metric-ink: #ea580c; --cp-metric-soft: rgba(249, 115, 22, 0.1);
+  --cp-metric-ring: rgba(249, 115, 22, 0.22); --cp-metric-glow: rgba(249, 115, 22, 0.07);
+}
+.cabinet-metric[data-tone="cyan"] {
+  --cp-metric-ink: #0891b2; --cp-metric-soft: rgba(6, 182, 212, 0.1);
+  --cp-metric-ring: rgba(6, 182, 212, 0.24); --cp-metric-glow: rgba(6, 182, 212, 0.08);
+}
+.cabinet-metric[data-tone="purple"] {
+  --cp-metric-ink: #7c3aed; --cp-metric-soft: rgba(139, 92, 246, 0.1);
+  --cp-metric-ring: rgba(139, 92, 246, 0.22); --cp-metric-glow: rgba(139, 92, 246, 0.08);
+}
 
 /* Traffic gauge */
 .traffic-usage {
@@ -443,7 +445,7 @@
   }
 
   .layout-main .card {
-    animation: cp-rise 0.65s var(--cp-ease-out) both;
+    animation: cp-rise 0.65s var(--cp-ease-out) backwards;
   }
 
   .layout-main .grid > :nth-child(2) .card { animation-delay: 0.06s; }
@@ -463,4 +465,114 @@
   .subscription-status.is-expiring .p-tag {
     animation: cp-glow 2.2s ease-in-out infinite;
   }
+}
+
+/* ─── Cabinet extras ───────────────────────────────────────────────────── */
+
+/* Network backdrop sits behind the shell and never receives input. */
+.layout-wrapper {
+  isolation: isolate;
+  position: relative;
+}
+
+.network-backdrop {
+  height: 100%;
+  inset: 0;
+  pointer-events: none;
+  position: fixed;
+  width: 100%;
+  z-index: -1;
+}
+
+/* Copy confirmation */
+.copy-button.is-copied.p-button-outlined {
+  border-color: #22c55e;
+  color: #16a34a;
+}
+
+@keyframes cp-pop {
+  0% { rotate: -30deg; scale: 0.4; }
+  60% { scale: 1.25; }
+  100% { rotate: 0deg; scale: 1; }
+}
+
+/* Phone tab bar */
+.mobile-bottom-nav {
+  display: none;
+}
+
+@media (max-width: 991px) {
+  .mobile-bottom-nav {
+    -webkit-backdrop-filter: saturate(160%) blur(16px);
+    backdrop-filter: saturate(160%) blur(16px);
+    background: rgba(255, 255, 255, 0.86);
+    border-radius: 20px;
+    bottom: max(0.75rem, env(safe-area-inset-bottom));
+    box-shadow: 0 18px 40px -18px rgba(49, 46, 129, 0.45), 0 0 0 1px rgba(99, 102, 241, 0.12);
+    display: flex;
+    gap: 0.25rem;
+    left: 0.75rem;
+    padding: 0.4rem;
+    position: fixed;
+    right: 0.75rem;
+    z-index: 996;
+  }
+
+  .mobile-bottom-nav__item {
+    align-items: center;
+    border-radius: 14px;
+    color: #64748b;
+    display: flex;
+    flex: 1 1 0;
+    flex-direction: column;
+    font-size: 0.7rem;
+    font-weight: 600;
+    gap: 0.2rem;
+    min-width: 0;
+    padding: 0.45rem 0.25rem;
+    text-decoration: none;
+    transition: background-color 0.2s ease, color 0.2s ease;
+  }
+
+  .mobile-bottom-nav__item i {
+    font-size: 1.15rem;
+    transition: translate 0.25s var(--cp-ease-out);
+  }
+
+  .mobile-bottom-nav__item.is-active {
+    background: rgba(99, 102, 241, 0.1);
+    color: var(--cp-indigo);
+  }
+
+  .mobile-bottom-nav__item.is-active i {
+    translate: 0 -2px;
+  }
+
+  .layout-wrapper:has(.mobile-bottom-nav) .layout-main-container {
+    padding-bottom: calc(6rem + env(safe-area-inset-bottom));
+  }
+
+  body:has(.mobile-bottom-nav) .clean-pay-chatwoot-launcher {
+    bottom: calc(5.75rem + env(safe-area-inset-bottom));
+  }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .copy-button.is-copied .p-button-icon {
+    animation: cp-pop 0.45s var(--cp-ease-out);
+  }
+
+  /* Newly shown list rows (e.g. after «Показать ещё») slide in; rows that
+     were already visible do not move. */
+  .cabinet-mobile-record,
+  .cabinet-desktop-table .p-datatable-tbody > tr {
+    animation: cp-rise 0.5s var(--cp-ease-out) backwards;
+  }
+
+  .cabinet-mobile-record:nth-child(2),
+  .cabinet-desktop-table .p-datatable-tbody > tr:nth-child(2) { animation-delay: 0.05s; }
+  .cabinet-mobile-record:nth-child(3),
+  .cabinet-desktop-table .p-datatable-tbody > tr:nth-child(3) { animation-delay: 0.1s; }
+  .cabinet-mobile-record:nth-child(n + 4),
+  .cabinet-desktop-table .p-datatable-tbody > tr:nth-child(n + 4) { animation-delay: 0.15s; }
 }

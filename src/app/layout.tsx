@@ -6,6 +6,7 @@ import "../../public/themes/lara-light-indigo/theme.css";
 import "../frontend/styles/layout/layout.scss";
 import "./globals.css";
 import "../frontend/styles/visual.css";
+import "../frontend/styles/dark.css";
 import { Providers } from "./providers";
 import { getBranding } from "@/shared/branding";
 

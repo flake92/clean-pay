@@ -47,6 +47,9 @@ vi.mock("@/frontend/layout/AppMenu", () => ({
 vi.mock("@/frontend/layout/AppFooter", () => ({
   default: () => createElement("footer", null, "footer"),
 }));
+vi.mock("@/frontend/layout/MobileBottomNav", () => ({
+  default: () => null,
+}));
 
 import Layout from "@/frontend/layout/layout";
 import { LayoutContext } from "@/frontend/layout/context/layoutcontext";

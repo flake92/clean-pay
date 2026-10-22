@@ -11,6 +11,8 @@ import type { AppTopbarRef, ChildContainerProps, LayoutState } from "@/frontend/
 import AppFooter from "./AppFooter";
 import AppMenu from "./AppMenu";
 import AppTopbar from "./AppTopbar";
+import MobileBottomNav from "./MobileBottomNav";
+import NetworkBackdrop from "./NetworkBackdrop";
 import { LayoutContext } from "./context/layoutcontext";
 
 function blockBodyScroll() {
@@ -200,6 +202,7 @@ const Layout = ({
 
   return (
     <div className={containerClass}>
+      <NetworkBackdrop />
       <a className="skip-link" href="#main-content">
         К основному содержимому
       </a>
@@ -216,6 +219,7 @@ const Layout = ({
         <main className="layout-main" ref={mainRef} id="main-content" tabIndex={-1}>{children}</main>
         <AppFooter />
       </div>
+      <MobileBottomNav navigation={navigation} />
       <div className="layout-mask" />
     </div>
   );

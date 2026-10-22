@@ -192,7 +192,8 @@ export function CabinetPanel({ model }: { model: CabinetViewModel }) {
                   label="Подключиться"
                 />
                 <Button
-                  icon="pi pi-copy"
+                  className={copyStatus === "Ссылка скопирована" ? "copy-button is-copied" : "copy-button"}
+                  icon={copyStatus === "Ссылка скопирована" ? "pi pi-check" : "pi pi-copy"}
                   label="Скопировать ссылку"
                   onClick={copySubscriptionUrl}
                   outlined

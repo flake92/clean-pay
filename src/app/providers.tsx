@@ -1,5 +1,6 @@
 "use client";
 
+import { useButtonHaptics } from "@/frontend/hooks/use-button-haptics";
 import { LayoutProvider } from "@/frontend/layout/context/layoutcontext";
 import {
   addLocale,
@@ -70,6 +71,8 @@ const russianPrimeAria = {
 addLocale("ru", { aria: russianPrimeAria });
 
 export function Providers({ children }: { children: React.ReactNode }) {
+  useButtonHaptics();
+
   return (
     <PrimeReactProvider value={{ locale: "ru" }}>
       <LayoutProvider>{children}</LayoutProvider>
