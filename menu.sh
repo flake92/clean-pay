@@ -31,7 +31,7 @@ fi
 # Width calculations below count characters, which needs a UTF-8 locale.
 case "$(locale charmap 2>/dev/null)" in
   UTF-8|utf8) ;;
-  *) if locale -a 2>/dev/null | grep -qiE '^c[.]utf-?8$'; then export LC_ALL=C.UTF-8; fi ;;
+  *) if locale -a 2>/dev/null | grep -iE '^c[.]utf-?8$' >/dev/null; then export LC_ALL=C.UTF-8; fi ;;
 esac
 
 ROOT_DIR=$CLEAN_PAY_MENU_ROOT
@@ -213,7 +213,7 @@ save_settings() {
   } > "$tmp" && chmod 600 "$tmp" && mv -f -- "$tmp" "$MENU_CONF"
 }
 
-valid_abs_path() { case "$1" in /*) [ "$1" != / ] && ! printf '%s' "$1" | grep -q '[[:space:]]' ;; *) return 1 ;; esac; }
+valid_abs_path() { case "$1" in /*) [ "$1" != / ] && ! printf '%s' "$1" | grep '[[:space:]]' >/dev/null ;; *) return 1 ;; esac; }
 
 # ─── Окружение и Docker ─────────────────────────────────────────────────────
 
@@ -238,7 +238,7 @@ cp_container() {
   docker ps -a \
     --filter "label=com.docker.compose.project=$(cp_project)" \
     --filter "label=com.docker.compose.service=$1" \
-    --format '{{.Names}}' 2>/dev/null | head -n 1
+    --format '{{.Names}}' 2>/dev/null | sed -n '1p'
 }
 
 container_exists() { [ -n "$1" ] && docker inspect "$1" >/dev/null 2>&1; }
@@ -528,7 +528,7 @@ detect_caddyfile() {
   local name
   { docker ps --format '{{.Names}}' 2>/dev/null || true; } | { grep -i caddy || true; } | while IFS= read -r name; do
     docker inspect -f '{{range .Mounts}}{{if eq .Destination "/etc/caddy/Caddyfile"}}{{.Source}}{{end}}{{end}}' "$name" 2>/dev/null
-  done | head -n 1
+  done | sed -n '1p'
 }
 
 copy_config() {
@@ -791,7 +791,7 @@ EOF
     # (PostgreSQL flattens a nested CHECK), so install from such a revision fails.
     if [ -n "$app_head" ] && git -C "$ROOT_DIR" cat-file -e "$app_head^{commit}" 2>/dev/null \
       && ! git -C "$ROOT_DIR" show "$app_head:deploy/prod/database-privilege-manifest.mjs" 2>/dev/null \
-        | grep -q restoredDefinitionSha256; then
+        | grep restoredDefinitionSha256 >/dev/null; then
       say ''
       warn "Код копии ($(short "$app_head")) старше 0.3.2: его установщик не примет базу, восстановленную из дампа."
       if git -C "$ROOT_DIR" diff --quiet "$app_head" HEAD -- prisma/migrations 2>/dev/null; then
@@ -897,7 +897,7 @@ show_remote_refs() {
   fi
   printf '  %sВетки:%s ' "$C_DIM" "$C_RESET" >&2
   { git --git-dir="$git_dir" ls-remote --heads "$remote" 2>/dev/null || true; } \
-    | awk '{sub("refs/heads/", "", $2); print $2}' | head -n 8 | tr '\n' ' ' >&2
+    | awk '{sub("refs/heads/", "", $2); print $2}' | sed -n '1,8p' | tr '\n' ' ' >&2
   printf '\n' >&2
 }
 
@@ -908,7 +908,7 @@ fetch_ref() {
     '') return 1 ;;
     *[!A-Za-z0-9._/-]*) err 'Недопустимые символы в имени версии.'; return 1 ;;
   esac
-  if printf '%s' "$ref" | grep -Eq '^[0-9a-f]{40}$'; then
+  if printf '%s' "$ref" | grep -E '^[0-9a-f]{40}$' >/dev/null; then
     spec=$ref
   elif git --git-dir="$git_dir" ls-remote --exit-code --tags --refs "$remote" "refs/tags/$ref" >/dev/null 2>&1; then
     spec="refs/tags/$ref"
@@ -929,7 +929,7 @@ cp_prune_release_images() {
   for repository in "$@"; do
     for image in $(docker image ls --format '{{.Repository}}:{{.Tag}}' "$repository" 2>/dev/null); do
       tag=${image##*:}
-      printf '%s' "$tag" | grep -Eq '^[0-9a-f]{40}$' || continue
+      printf '%s' "$tag" | grep -E '^[0-9a-f]{40}$' >/dev/null || continue
       [ "$tag" != "$keep_new" ] && [ "$tag" != "$keep_previous" ] || continue
       if docker image rm "$image" >/dev/null 2>&1; then removed=$((removed + 1)); fi
     done
@@ -946,7 +946,7 @@ cp_update() {
   git_dir=$(git -C "$ROOT_DIR" rev-parse --absolute-git-dir)
   head=$(git -C "$ROOT_DIR" rev-parse HEAD)
   dirty=$(git -C "$ROOT_DIR" status --porcelain --untracked-files=all)
-  [ -z "$dirty" ] || { printf '%s\n' "$dirty" | head -n 10 | sed 's/^/    /'; die 'В каталоге есть незафиксированные изменения — обновление из «грязного» checkout запрещено.'; }
+  [ -z "$dirty" ] || { printf '%s\n' "$dirty" | sed -n '1,10p' | sed 's/^/    /'; die 'В каталоге есть незафиксированные изменения — обновление из «грязного» checkout запрещено.'; }
 
   step 1 6 'Выбор версии'
   kv 'Сейчас установлено' "$(short "$head") $(git -C "$ROOT_DIR" log -1 --format='%cs %s' | cut -c1-60)"
@@ -966,7 +966,7 @@ cp_update() {
   kv 'Новая версия' "$(short "$target") $subject"
   if [ "$ancestor" = yes ]; then
     note 'Изменения:'
-    git -C "$ROOT_DIR" log --oneline --no-merges "$head..$target" | head -n 15 | sed 's/^/      /'
+    git -C "$ROOT_DIR" log --oneline --no-merges "$head..$target" | sed -n '1,15p' | sed 's/^/      /'
   fi
   kv 'Изменено файлов' "$changed"
   if [ "$migrations" -gt 0 ]; then kv 'Новые миграции БД' "${C_YELLOW}$migrations — схема базы изменится${C_RESET}"
@@ -1105,7 +1105,7 @@ rs_service_of() {
   printf '%s' "${service:-$fallback}"
 }
 
-rs_has_service() { rs_compose config --services 2>/dev/null | grep -qx "$1"; }
+rs_has_service() { rs_compose config --services 2>/dev/null | grep -x "$1" >/dev/null; }
 
 alembic_head() {
   [ -n "$1" ] || return 0
@@ -1316,7 +1316,7 @@ rs_update() {
   rs_check_compatible "$target" || die 'Обновление отменено, ничего не изменено.'
   if [ -n "$current_rev" ] && git --git-dir="$REMNASHOP_SOURCES" cat-file -e "$current_rev^{commit}" 2>/dev/null; then
     note 'Изменения:'
-    git --git-dir="$REMNASHOP_SOURCES" log --oneline --no-merges "$current_rev..$target" | head -n 15 | sed 's/^/      /'
+    git --git-dir="$REMNASHOP_SOURCES" log --oneline --no-merges "$current_rev..$target" | sed -n '1,15p' | sed 's/^/      /'
   fi
 
   step 2 6 'Сборка образа (сервисы продолжают работать)'
@@ -1646,7 +1646,7 @@ EOF
 
 # ─── Remnawave ──────────────────────────────────────────────────────────────
 
-version_ge() { [ "$(printf '%s\n%s\n' "$2" "$1" | sort -V | head -n 1)" = "$2" ]; }
+version_ge() { [ "$(printf '%s\n%s\n' "$2" "$1" | sort -V | sed -n '1p')" = "$2" ]; }
 
 # Version from the backend package; works for a running container or an image.
 rw_version() {
@@ -1820,7 +1820,7 @@ offer_screen() {
   is_interactive || return 0
   [ -z "${STY:-}" ] && [ -z "${TMUX:-}" ] || return 0
   have screen || return 0
-  if screen -ls 2>/dev/null | grep -q "[.]${SCREEN_SESSION}[[:space:]]"; then
+  if screen -ls 2>/dev/null | grep "[.]${SCREEN_SESSION}[[:space:]]" >/dev/null; then
     say ''
     warn "Меню уже открыто в screen-сессии «$SCREEN_SESSION» (возможно, после обрыва SSH)."
     if ask_yes_no 'Подключиться к ней?' yes; then exec screen -r "$SCREEN_SESSION"; fi

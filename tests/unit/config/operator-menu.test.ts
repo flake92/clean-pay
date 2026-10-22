@@ -57,6 +57,15 @@ describe("operator menu", () => {
     expect(functionBody("set_cp_env")).toContain("credential-env-set");
   });
 
+  it("never closes a pipeline early under pipefail", () => {
+    // `git log | head -n 15` failed real 0.2.3 → 0.4.0 updates with SIGPIPE
+    // (exit 141): head exits first, the writer dies and pipefail aborts the
+    // action. Readers must drain their input instead.
+    expect(menu).not.toMatch(/\|\s*head\b/);
+    expect(menu).not.toMatch(/\|\s*grep\s+-[A-Za-z]*q/);
+    expect(functionBody("cp_update")).toContain(`| sed -n '1,15p'`);
+  });
+
   it("prunes older release images only after a successful install", () => {
     const update = functionBody("cp_update");
     expectBefore(update, 'if sh "$DEPLOY_SCRIPT" install; then', "cp_prune_release_images");
