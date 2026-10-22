@@ -919,6 +919,24 @@ fetch_ref() {
   git --git-dir="$git_dir" rev-parse 'FETCH_HEAD^{commit}'
 }
 
+# Every update builds a new pair of SHA-tagged images (~1.4 GB). After a
+# successful install, remove the SHA-tagged images of older updates so the disk
+# does not fill up. The new release and the one it replaced (quick rollback)
+# stay; other tags and images still used by a container are never removed.
+cp_prune_release_images() {
+  local keep_new=$1 keep_previous=$2 repository image tag removed=0
+  shift 2
+  for repository in "$@"; do
+    for image in $(docker image ls --format '{{.Repository}}:{{.Tag}}' "$repository" 2>/dev/null); do
+      tag=${image##*:}
+      printf '%s' "$tag" | grep -Eq '^[0-9a-f]{40}$' || continue
+      [ "$tag" != "$keep_new" ] && [ "$tag" != "$keep_previous" ] || continue
+      if docker image rm "$image" >/dev/null 2>&1; then removed=$((removed + 1)); fi
+    done
+  done
+  [ "$removed" -eq 0 ] || ok "Удалены образы старых версий: $removed (оставлены текущая и предыдущая для отката)"
+}
+
 cp_update() {
   title 'Обновление Clean Pay' 'Копия → новая версия кода → сборка (сайт работает) → установка (короткий простой)'
   cp_installed || die 'Clean Pay не установлен (нет deploy/prod/.env). Используйте установку.'
@@ -1028,6 +1046,9 @@ cp_update() {
   if sh "$DEPLOY_SCRIPT" install; then
     journal clean-pay-update "$(short "$head") -> $(short "$target") ok; backup $LAST_BACKUP_DIR"
     ok "Clean Pay обновлён до $(short "$target")"
+    if [ "$traceable" = yes ]; then
+      cp_prune_release_images "$target" "${old_image##*:}" "${old_image%:*}" "${old_migration_image%:*}"
+    fi
     note 'Проверьте вход, создание платежа и выдачу подписки.'
     return 0
   fi

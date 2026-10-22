@@ -57,6 +57,56 @@ describe("operator menu", () => {
     expect(functionBody("set_cp_env")).toContain("credential-env-set");
   });
 
+  it("prunes older release images only after a successful install", () => {
+    const update = functionBody("cp_update");
+    expectBefore(update, 'if sh "$DEPLOY_SCRIPT" install; then', "cp_prune_release_images");
+    expectBefore(update, "cp_prune_release_images", "journal clean-pay-update-failed \"install");
+    expect(update).toContain('cp_prune_release_images "$target" "${old_image##*:}"');
+  });
+
+  it.skipIf(!posixShell)(
+    "keeps the new, previous, non-SHA and in-use images when pruning",
+    () => {
+      const dir = mkdtempSync(join(tmpdir(), "cp-prune-"));
+      try {
+        const sha = (digit: string) => digit.repeat(40);
+        const images = [
+          `app:${sha("a")}`, `app:${sha("b")}`, `app:${sha("c")}`, `app:${sha("d")}`, "app:local",
+          `migration:${sha("a")}`, `migration:${sha("b")}`, `migration:${sha("c")}`,
+        ];
+        writeFileSync(join(dir, "images"), `${images.join("\n")}\n`);
+        // Fake docker: lists images per repository, refuses to remove the in-use one.
+        writeFileSync(join(dir, "docker"), [
+          "#!/bin/sh",
+          'if [ "$1 $2" = "image ls" ]; then grep "^$5:" "$DIR/images"; exit 0; fi',
+          `if [ "$1 $2" = "image rm" ]; then [ "$3" = "app:${sha("d")}" ] && exit 1; echo "$3" >> "$DIR/removed"; exit 0; fi`,
+          "exit 2",
+          "",
+        ].join("\n"), { mode: 0o755 });
+        const result = spawnSync(
+          posixShell!,
+          [
+            "-c",
+            [
+              'ok() { printf "%s\\n" "$*"; }',
+              shellFunctionFrom(menu, "cp_prune_release_images"),
+              'export PATH="$DIR:$PATH"',
+              `cp_prune_release_images ${sha("a")} ${sha("b")} app migration`,
+            ].join("\n"),
+          ],
+          { encoding: "utf8", env: { ...process.env, DIR: shellPath(dir) } },
+        );
+        expect(result.status, result.stderr).toBe(0);
+        expect(readFileSync(join(dir, "removed"), "utf8").trim().split("\n").sort())
+          .toEqual([`app:${sha("c")}`, `migration:${sha("c")}`]);
+        expect(result.stdout).toContain("Удалены образы старых версий: 2");
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    },
+    shellIntegrationTimeout,
+  );
+
   it("runs Remnashop migrations explicitly and keeps the previous image", () => {
     const update = functionBody("rs_update");
     expectBefore(update, "alembic_head", "require_backup");
