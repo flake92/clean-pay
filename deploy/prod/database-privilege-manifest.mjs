@@ -468,7 +468,9 @@ export const DATABASE_TRIGGERS = Object.freeze([
 
 export const DATABASE_SECURITY_CONSTRAINTS = Object.freeze([
   Object.freeze({ table: "_clean_pay_retention_policy", name: "_clean_pay_retention_policy_pkey", type: "p", definitionSha256: "d004b3efcdc4a0108ecbe83c93408f63eebecc563529a3941a4c59667835f25b" }),
-  Object.freeze({ table: "_clean_pay_retention_policy", name: "_clean_pay_retention_policy_ranges_check", type: "c", definitionSha256: "21db4b72d88225583770df458b4f91e0e0b874e6b738a8f701c4a6e112af4f1e" }),
+  Object.freeze({ table: "_clean_pay_retention_policy", name: "_clean_pay_retention_policy_ranges_check", type: "c", definitionSha256: "21db4b72d88225583770df458b4f91e0e0b874e6b738a8f701c4a6e112af4f1e",
+    // after pg_dump/pg_restore PostgreSQL flattens the nested AND of this CHECK
+    restoredDefinitionSha256: "2f44b57bbb7b0f064819ef018d2a335f84e7e4352a362835a03d1a78edf98549" }),
   Object.freeze({ table: "_clean_pay_retention_policy", name: "_clean_pay_retention_policy_singleton_check", type: "c", definitionSha256: "0a780c77dfabbc15def3d17957997d352de196c1233a0d25fccc97a40d2d6f41" }),
   Object.freeze({ table: "PaymentOperation", name: "PaymentOperation_payment_retention_hold_integrity", type: "t", definitionSha256: "698fc09045e7267eeb19c5b09473ec8c40f237145be8c1cbd97b9dde2451ddc1" }),
   Object.freeze({ table: "PaymentOperation", name: "PaymentOperation_retentionHoldId_fkey", type: "f", definitionSha256: "71889754feecbf76036d4902bafa0df74d2e78bdf195e9397bf8e5c825b9113d" }),
@@ -538,6 +540,14 @@ export const DATABASE_REVIEWED_CATALOG_STATE_ALTERNATES = Object.freeze({
   ]),
   "20260825230000_guard_retention_mutations": Object.freeze([
     "c38536cfcac173226f49e40864151d682d20bb34059a62e92426ca4ab247994d",
+    // The same two catalogs after pg_dump/pg_restore (disaster recovery): the
+    // restore re-parses _clean_pay_retention_policy_ranges_check and flattens its
+    // nested AND, so pg_get_constraintdef differs while the constraint is the
+    // same. Measured on PostgreSQL 17.11 (2026-10-18): the production database
+    // restored from its menu backup, and the reviewed migration replay
+    // (11e7e5b8...) dumped and restored; a second restore is identical.
+    "0e1eebba3e29c929747ce7bb8198f2ef4877c381440e8d4e74e3f22498d0b2d2",
+    "5318f3d7340e4902eb3eec55de7200b381c740eaef0d0abde97f8d351619649c",
   ]),
 });
 

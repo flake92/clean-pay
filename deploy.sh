@@ -449,6 +449,33 @@ prompt_secret() {
   replace_env "$name" "$answer"
 }
 
+# Like prompt_secret, but the value may stay empty: Enter keeps the current
+# value (or none), a single "-" removes it.
+prompt_optional_secret() {
+  name=$1
+  label=$2
+  current=$(env_value "$name")
+  if [ -n "$current" ]; then
+    printf '%s (Enter — оставить, «-» — убрать): ' "$label"
+  else
+    printf '%s (Enter — не нужно): ' "$label"
+  fi
+  secret_input_stty=''
+  if command -v stty >/dev/null 2>&1; then
+    secret_input_stty=$(stty -g 2>/dev/null || true)
+    stty -echo 2>/dev/null || true
+  fi
+  IFS= read -r answer || answer=''
+  restore_secret_input_terminal
+  printf '\n'
+
+  case "$answer" in
+    '') return ;;
+    -) replace_env "$name" '' ;;
+    *) replace_env "$name" "$answer" ;;
+  esac
+}
+
 configure() {
   is_interactive || die "Interactive configuration requires a terminal. Use ./deploy.sh init and edit deploy/prod/.env manually."
   init
@@ -481,6 +508,8 @@ configure() {
   prompt_value REMNAWAVE_API_BASE_URL 'Публичный HTTPS-адрес Remnawave, без пути' 'https://panel.example.com'
   replace_env CLEAN_PAY_READINESS_REMNAWAVE_URL "$(env_value REMNAWAVE_API_BASE_URL)"
   prompt_secret REMNAWAVE_TOKEN 'API-токен Remnawave'
+  printf '%s\n' 'Если панель ставилась скриптом eGames (вход по секретной ссылке/cookie), укажите ту же cookie, что REMNAWAVE_COOKIE в .env Remnashop, в виде ключ=значение.'
+  prompt_optional_secret REMNAWAVE_COOKIE 'Cookie защиты панели Remnawave'
   prompt_value REMNAWAVE_SUBSCRIPTION_ORIGINS 'Разрешённые HTTPS origin ссылок подписки (через запятую)' 'https://sub.example.com'
 
   prompt_secret TELEGRAM_BOT_TOKEN 'Токен Telegram-бота'
@@ -1091,7 +1120,8 @@ setup() {
   printf 'Три этапа: конфигурация .env → подготовка Compose → установка.\n'
   configure
   required_remnashop_revision=$(env_value REMNASHOP_MINIMUM_ALEMBIC_REVISION 0059)
-  printf '\nПеред продолжением скопируйте REMNASHOP_AUTH_SERVICE_KEY в APP_AUTH_SERVICE_KEY Remnashop.\n'
+  printf '\nПеред продолжением скопируйте REMNASHOP_AUTH_SERVICE_KEY в APP_AUTH_SERVICE_KEY Remnashop\n'
+  printf 'или выполните во втором терминале ./menu.sh remnashop-link — меню перенесёт ключ и перезапустит Remnashop.\n'
   printf 'API, worker и scheduler Remnashop должны быть перезапущены из одного image; Alembic revision — не ниже %s.\n' "$required_remnashop_revision"
   if ! confirm 'Ключ синхронизирован и все три сервиса Remnashop перезапущены?' no; then
     printf 'Настройки сохранены. После настройки Remnashop выполните: ./deploy.sh install\n'

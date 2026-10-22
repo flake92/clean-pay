@@ -69,7 +69,10 @@ describe("Remnashop payment rollout deployment", () => {
     expect(rollout).toContain("count(DISTINCT column_name)");
     expect(rollout).toContain("= 2");
     expect(rollout).toContain("/api/v1/public/auth/notification-preferences");
-    expect(rollout).toContain('contract_statuses" = "422 405');
+    expect(rollout).toContain('"422 405") ;;');
+    // a 401 next to the 405 is a key mismatch on the fork, not an upstream image
+    expect(rollout).toContain('"401 405")');
+    expect(rollout).toContain("./menu.sh remnashop-link");
     expect(rollout.indexOf('if [ "$PHASE" = "check" ]')).toBeLessThan(
       rollout.indexOf("pg_advisory_xact_lock"),
     );

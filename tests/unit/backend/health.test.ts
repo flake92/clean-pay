@@ -343,6 +343,24 @@ describe("health checks", () => {
     }));
   });
 
+  it("passes REMNAWAVE_COOKIE to a cookie-gated panel (eGames install)", async () => {
+    vi.stubEnv("CLEAN_PAY_READINESS_REMNAWAVE_URL", "http://remnawave.test:3000");
+    vi.stubEnv("REMNAWAVE_API_BASE_URL", "http://remnawave.test:3000");
+    vi.stubEnv("REMNAWAVE_TOKEN", "ready-token");
+    vi.stubEnv("REMNAWAVE_COOKIE", "egamesKey=s3cr3tValue");
+    const fetch = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(new Response("{}", { status: 200 }));
+
+    const gateway = createProductionReadinessGateway();
+    await expect(measuredCheck("Remnawave", gateway.checkRemnawave)).resolves.toMatchObject({ status: "ok" });
+    expect(fetch).toHaveBeenCalledWith(new URL("http://remnawave.test:3000/api/system/metadata"), expect.objectContaining({
+      headers: {
+        accept: "application/json",
+        authorization: "Bearer ready-token",
+        cookie: "egamesKey=s3cr3tValue",
+      },
+    }));
+  });
+
   it("skips optional readiness checks when URLs are not configured", async () => {
     vi.stubEnv("CLEAN_PAY_READINESS_MAILPIT_URL", "");
     vi.stubEnv("CLEAN_PAY_READINESS_REMNAWAVE_URL", "");

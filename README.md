@@ -79,18 +79,19 @@ Production-запуск использует Docker Compose, собственн�
   REMNASHOP
     9  Обновить Remnashop                                [копия]
    10  Установить Remnashop с нуля                       [копия]
+   11  Связать с Clean Pay: права .env, общий ключ, проверка
 
   REMNAWAVE (панель ≥ 2.8.0, ноды ≥ 2.8.0)
-   11  Обновить Remnawave                                [копия]
+   12  Обновить Remnawave                                [копия]
 
   РЕЗЕРВНЫЕ КОПИИ
-   12  Создать полную резервную копию сейчас
-   13  Список копий и проверка
-   14  Как восстановить из копии
+   13  Создать полную резервную копию сейчас
+   14  Список копий и проверка
+   15  Как восстановить из копии
 
   СПРАВКА
-   15  Обновление без простоя (zero-downtime)
-   16  Настройки меню
+   16  Обновление без простоя (zero-downtime)
+   17  Настройки меню
 
     0  Выход
 ```
@@ -111,11 +112,12 @@ Production-запуск использует Docker Compose, собственн�
 | --- | --- |
 | Состояние | контейнеры Clean Pay, Remnashop и Remnawave, версии, readiness, схема БД Remnashop, версия панели против требуемой 2.8.0, свободное место, последняя копия |
 | Проверка сервера | Docker, Compose, свободное место, `vm.overcommit_memory`, права `.env`, совместимость Remnashop, версия Remnawave ≥ 2.8.0; ничего не меняет |
-| Установить Clean Pay | копия существующих данных, затем мастер `./deploy.sh setup` |
-| Обновить Clean Pay | выбор тега, ветки или SHA → список изменений и новых миграций → копия → `./deploy.sh build`, пока сайт работает → подтверждение словом `ОБНОВИТЬ` → `./deploy.sh install` |
+| Установить Clean Pay | копия существующих данных → настройки `./deploy.sh configure` → права `.env` Remnashop и общий ключ (см. «Связать с Clean Pay») → вопрос о DNS и HTTPS → `./deploy.sh install` |
+| Обновить Clean Pay | выбор тега, ветки или SHA → список изменений и новых миграций → копия → права `.env` Remnashop и общий ключ → `./deploy.sh build`, пока сайт работает → подтверждение словом `ОБНОВИТЬ` → `./deploy.sh install` |
 | Изменить / применить настройки | `./deploy.sh configure` и безопасный `./deploy.sh restart` |
 | Остановить | `./deploy.sh down` после ввода слова `ОСТАНОВИТЬ`; данные и тома сохраняются |
-| Обновить Remnashop | сборка образа из исходников, пока бот работает → проверка новых миграций Alembic → копия → миграции (если есть) → новый образ и проверки здоровья (healthcheck) этой версии в compose, остальной compose не меняется → перезапуск API, worker и scheduler → проверка совместимости с Clean Pay |
+| Обновить Remnashop | сборка образа из исходников, пока бот работает → проверка новых миграций Alembic → копия → миграции (если есть) → новый образ и проверки здоровья (healthcheck) этой версии в compose, остальной compose не меняется → перезапуск API, worker и scheduler → проверка совместимости с Clean Pay. Установка по compose апстрима snoups (образ `ghcr.io/snoups/remnashop`, нет сервиса `remnashop-migration`) переводится на сборку Clean Pay: compose из выбранной версии, к `.env` добавляются недостающие ключи (прежние значения не меняются), база и Redis остаются в своих томах; новые файлы проверяются, пока старый стек работает, и при сбое до миграций всё возвращается как было |
+| Связать с Clean Pay | ставит права каталога Remnashop 750 и `.env` 600 (иначе Clean Pay его не примет), переносит `REMNASHOP_AUTH_SERVICE_KEY` Clean Pay в `APP_AUTH_SERVICE_KEY` Remnashop и после подтверждения перезапускает API, worker и scheduler (~30 с), затем запускает проверку совместимости. Значения ключей на экран не выводятся. То же из командной строки: `./menu.sh remnashop-link` |
 | Установить Remnashop | исходники, образ, `docker-compose.yml`, `.env` с сгенерированными секретами и вопросами о токенах, база, миграции, запуск. Предлагаются только ветки: теги `v0.x` в форке — релизы апстрима без интеграции с Clean Pay, и такие версии меню отклоняет до сборки |
 | Обновить Remnawave | только если панель на этом сервере: `docker pull` образа по тегу из её compose, пока панель работает → новая версия должна быть ≥ 2.8.0, той же мажорной версии и не старее текущей → копия (в том числе база панели) → подтверждение словом `ОБНОВИТЬ` → пересоздание одного сервиса backend → ожидание healthy; если не поднялась — возврат прежнего образа. Тег, закреплённый на конкретной версии, меню не меняет |
 | Резервные копии | создание, список, проверка контрольных сумм и читаемости дампов, готовые команды восстановления |
@@ -213,8 +215,11 @@ Node.js на сервере необязателен: при его отсутс
 совпадать с [`.node-version`](.node-version).
 
 Для новой установки сначала обновите Remnashop минимум до Alembic revision
-`0059` (пункт меню «Обновить Remnashop»; если Remnashop ещё нет — «Установить
-Remnashop с нуля»). Его API, worker и scheduler должны работать из одного image. Clean Pay
+`0059` (пункт меню «Обновить Remnashop», версия `main`; если Remnashop ещё нет —
+«Установить Remnashop с нуля»). Remnashop, поставленный по инструкции апстрима
+snoups, меню переведёт на сборку Clean Pay тем же пунктом; теги `v0.x` — это
+релизы апстрима без интеграции, меню их отклоняет. Проверено на сервере с
+1 vCPU и 2 ГБ памяти. Его API, worker и scheduler должны работать из одного image. Clean Pay
 не запускает миграции чужого проекта — он только проверяет image, схему и
 API-контракт перед собственным запуском.
 
@@ -226,6 +231,39 @@ pay.example.com {
 }
 ```
 
+То же для nginx:
+
+```nginx
+server {
+    listen 443 ssl;
+    http2 on;
+    server_name pay.example.com;
+    ssl_certificate     /etc/letsencrypt/live/pay.example.com/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/pay.example.com/privkey.pem;
+
+    location / {
+        proxy_pass http://127.0.0.1:4000;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto https;
+    }
+}
+```
+
+Если nginx работает в Docker-контейнере (например, `remnawave-nginx`),
+адрес loopback внутри него — это сам контейнер; тогда укажите
+`proxy_pass http://clean-pay:4000;` — под этим именем приложение подключено к
+сети `CLEAN_PAY_EDGE_NETWORK` (по умолчанию `remnawave-network`). Сертификат
+нужен на сам домен Clean Pay; при домене за Cloudflare без него Cloudflare
+отвечает `525`.
+
+Панель, поставленная скриптом eGames, скрыта за секретной cookie, и без неё её
+nginx на запросы API отвечает `404`. Укажите ту же cookie в `REMNAWAVE_COOKIE`
+(мастер настройки спрашивает её после токена Remnawave) — иначе установка
+остановится на «dependencies are not ready: remnawave».
+
 До запуска Clean Pay reverse proxy может временно отвечать `502`; сертификат,
 маршрут и внешний HTTPS должны быть готовы до подтверждения соответствующего
 вопроса мастера.
@@ -236,7 +274,7 @@ Production запускается из зафиксированного тега
 ветки.
 
 ```bash
-RELEASE_REF='refs/tags/v0.3.0'
+RELEASE_REF='refs/tags/v0.3.5'
 sudo mkdir -p /opt/clean-pay
 sudo chown "$USER":"$USER" /opt/clean-pay
 git clone https://github.com/flake92/clean-pay.git /opt/clean-pay
@@ -269,14 +307,18 @@ Remnashop.
 2. проверяет готовый `deploy/prod/docker-compose.yml` и Docker-сеть;
 3. собирает и проверяет образы, применяет миграции и запускает сервисы.
 
-Писать YAML вручную не требуется. На первом запуске мастер намеренно сделает
-паузу после настройки:
+Писать YAML вручную не требуется. Clean Pay и Remnashop связаны общим ключом:
+`REMNASHOP_AUTH_SERVICE_KEY` из `deploy/prod/.env` должен совпадать с
+`APP_AUTH_SERVICE_KEY` в `.env` Remnashop, иначе Remnashop отвечает 401 и
+установка останавливается на проверке совместимости. Меню (пункт «Установить
+Clean Pay») переносит ключ само. Если запускать `./deploy.sh setup` напрямую,
+мастер сделает паузу после настройки:
 
-1. в приватном редакторе скопируйте значение `REMNASHOP_AUTH_SERVICE_KEY` из
-   `deploy/prod/.env` в `APP_AUTH_SERVICE_KEY` файла `.env` Remnashop;
-2. штатным способом Remnashop перезапустите его API, worker и scheduler из
+1. перенесите ключ: `./menu.sh remnashop-link` во втором терминале (права
+   `.env`, ключ, перезапуск Remnashop и проверка) или вручную в приватном
+   редакторе, после чего перезапустите API, worker и scheduler Remnashop из
    одного image;
-3. вернитесь в мастер и подтвердите Remnashop и готовность внешнего HTTPS.
+2. вернитесь в мастер и подтвердите Remnashop и готовность внешнего HTTPS.
 
 Если ответить «нет», ничего не разворачивается: настройки сохраняются, а после
 подготовки зависимостей установка продолжается командой:
@@ -387,6 +429,7 @@ workers не редактируйте вручную.
 | `REMNASHOP_MINIMUM_ALEMBIC_REVISION` | минимальная схема Remnashop, не ниже `0059` |
 | `REMNASHOP_ENV_FILE`, `REMNASHOP_ENV_EXPECTED_UID`, `REMNASHOP_ENV_EXPECTED_GID` | путь к `.env` Remnashop и ожидаемый владелец |
 | `REMNAWAVE_API_BASE_URL`, `REMNAWAVE_TOKEN` | API панели Remnawave |
+| `REMNAWAVE_COOKIE` | только если панель ставилась скриптом eGames и закрыта секретной cookie: то же значение `ключ=значение`, что `REMNAWAVE_COOKIE` в `.env` Remnashop. Без неё nginx панели отвечает 404, и установка останавливается на «dependencies are not ready: remnawave» |
 | `REMNAWAVE_SUBSCRIPTION_ORIGINS` | точные HTTPS origins ссылок подписки через запятую |
 
 ### Платежи
@@ -487,7 +530,7 @@ workers. Если миграция завершается ошибкой, runtim
 
 ```bash
 cd /opt/clean-pay
-RELEASE_REF='refs/tags/v0.3.0'
+RELEASE_REF='refs/tags/v0.3.5'
 git fetch --depth=1 origin "$RELEASE_REF"
 RELEASE_SHA=$(git rev-parse FETCH_HEAD)
 git checkout --detach "$RELEASE_SHA"

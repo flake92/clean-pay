@@ -31,6 +31,17 @@ function authorizationHeader(token: string) {
   return token.startsWith("Bearer ") ? token : `Bearer ${token}`;
 }
 
+/**
+ * Headers every Remnawave API request carries: the API token plus, for a panel
+ * hidden behind a cookie-gated proxy (eGames install), REMNAWAVE_COOKIE.
+ */
+export function remnawaveAuthHeaders(token: string, cookie = getEnv().remnawave.cookie) {
+  return {
+    authorization: authorizationHeader(token),
+    ...(cookie ? { cookie } : {}),
+  };
+}
+
 export async function requestRemnawave<T>(
   path: string,
   decode: (value: unknown) => T,
@@ -60,7 +71,7 @@ export async function requestRemnawave<T>(
     const response = await credentialedFetch(endpoint, {
       headers: tracedHeaders({
         accept: "application/json",
-        authorization: authorizationHeader(token),
+        ...remnawaveAuthHeaders(token),
       }, trace),
       cache: "no-store",
       signal: AbortSignal.timeout(10_000),
@@ -151,7 +162,7 @@ export async function patchRemnawaveUserIdentity(
       method: "PATCH",
       headers: tracedHeaders({
         accept: "application/json",
-        authorization: authorizationHeader(target.token),
+        ...remnawaveAuthHeaders(target.token),
         "content-type": "application/json",
       }, trace),
       body: JSON.stringify({

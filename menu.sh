@@ -31,7 +31,7 @@ fi
 # Width calculations below count characters, which needs a UTF-8 locale.
 case "$(locale charmap 2>/dev/null)" in
   UTF-8|utf8) ;;
-  *) if locale -a 2>/dev/null | grep -qiE '^c[.]utf-?8$'; then export LC_ALL=C.UTF-8; fi ;;
+  *) if locale -a 2>/dev/null | grep -iE '^c[.]utf-?8$' >/dev/null; then export LC_ALL=C.UTF-8; fi ;;
 esac
 
 ROOT_DIR=$CLEAN_PAY_MENU_ROOT
@@ -213,7 +213,7 @@ save_settings() {
   } > "$tmp" && chmod 600 "$tmp" && mv -f -- "$tmp" "$MENU_CONF"
 }
 
-valid_abs_path() { case "$1" in /*) [ "$1" != / ] && ! printf '%s' "$1" | grep -q '[[:space:]]' ;; *) return 1 ;; esac; }
+valid_abs_path() { case "$1" in /*) [ "$1" != / ] && ! printf '%s' "$1" | grep '[[:space:]]' >/dev/null ;; *) return 1 ;; esac; }
 
 # ─── Окружение и Docker ─────────────────────────────────────────────────────
 
@@ -238,7 +238,7 @@ cp_container() {
   docker ps -a \
     --filter "label=com.docker.compose.project=$(cp_project)" \
     --filter "label=com.docker.compose.service=$1" \
-    --format '{{.Names}}' 2>/dev/null | head -n 1
+    --format '{{.Names}}' 2>/dev/null | sed -n '1p'
 }
 
 container_exists() { [ -n "$1" ] && docker inspect "$1" >/dev/null 2>&1; }
@@ -528,7 +528,7 @@ detect_caddyfile() {
   local name
   { docker ps --format '{{.Names}}' 2>/dev/null || true; } | { grep -i caddy || true; } | while IFS= read -r name; do
     docker inspect -f '{{range .Mounts}}{{if eq .Destination "/etc/caddy/Caddyfile"}}{{.Source}}{{end}}{{end}}' "$name" 2>/dev/null
-  done | head -n 1
+  done | sed -n '1p'
 }
 
 copy_config() {
@@ -787,6 +787,19 @@ show_restore() {
      cp -p $dir/config/clean-pay/.env* $ROOT_DIR/deploy/prod/
   4. Запустите: cd $ROOT_DIR && ./deploy.sh install
 EOF
+    # Before 0.3.2 the role provisioner rejected a catalog restored from a dump
+    # (PostgreSQL flattens a nested CHECK), so install from such a revision fails.
+    if [ -n "$app_head" ] && git -C "$ROOT_DIR" cat-file -e "$app_head^{commit}" 2>/dev/null \
+      && ! git -C "$ROOT_DIR" show "$app_head:deploy/prod/database-privilege-manifest.mjs" 2>/dev/null \
+        | grep restoredDefinitionSha256 >/dev/null; then
+      say ''
+      warn "Код копии ($(short "$app_head")) старше 0.3.2: его установщик не примет базу, восстановленную из дампа."
+      if git -C "$ROOT_DIR" diff --quiet "$app_head" HEAD -- prisma/migrations 2>/dev/null; then
+        note "  В шаге 3 оставьте текущий код ($(short "$(git -C "$ROOT_DIR" rev-parse HEAD)")): миграции те же. Настройки копируйте как указано."
+      else
+        note '  В шаге 3 возьмите 0.3.2 или новее с тем же набором prisma/migrations, что в копии.'
+      fi
+    fi
   fi
   if [ -f "$dir/remnashop.dump" ]; then
     cat <<EOF
@@ -852,8 +865,22 @@ cp_install() {
   if container_running "$RS_DB" || cp_installed; then
     require_backup before-clean-pay-install
   fi
-  note 'Дальше работает стандартный мастер ./deploy.sh setup.'
-  sh "$DEPLOY_SCRIPT" setup
+  note 'Дальше — стандартные шаги deploy.sh: настройки (configure), затем установка (install).'
+  sh "$DEPLOY_SCRIPT" configure || die 'Настройка не завершена — ничего не установлено.'
+  load_settings
+  # the key Clean Pay just generated must reach Remnashop before the compatibility check
+  if container_exists "$RS_API"; then
+    rs_secure_env
+    rs_sync_auth_key restart \
+      || warn 'Ключ не перенесён — установка остановится на проверке совместимости Remnashop.'
+  fi
+  if ! ask_yes_no 'DNS и HTTPS reverse proxy уже направляют домен Clean Pay на этот сервер?' no; then
+    note 'Настройки сохранены. Когда будет готово, повторите этот пункт или выполните ./deploy.sh install'
+    return 0
+  fi
+  ask_yes_no 'Собрать образы и запустить Clean Pay сейчас?' yes \
+    || { note 'Настройки сохранены. Для продолжения: ./deploy.sh install'; return 0; }
+  sh "$DEPLOY_SCRIPT" install || die 'Установка не прошла — причина в выводе выше.'
   journal clean-pay-install "$(git -C "$ROOT_DIR" rev-parse HEAD 2>/dev/null)"
 }
 
@@ -870,7 +897,7 @@ show_remote_refs() {
   fi
   printf '  %sВетки:%s ' "$C_DIM" "$C_RESET" >&2
   { git --git-dir="$git_dir" ls-remote --heads "$remote" 2>/dev/null || true; } \
-    | awk '{sub("refs/heads/", "", $2); print $2}' | head -n 8 | tr '\n' ' ' >&2
+    | awk '{sub("refs/heads/", "", $2); print $2}' | sed -n '1,8p' | tr '\n' ' ' >&2
   printf '\n' >&2
 }
 
@@ -881,7 +908,7 @@ fetch_ref() {
     '') return 1 ;;
     *[!A-Za-z0-9._/-]*) err 'Недопустимые символы в имени версии.'; return 1 ;;
   esac
-  if printf '%s' "$ref" | grep -Eq '^[0-9a-f]{40}$'; then
+  if printf '%s' "$ref" | grep -E '^[0-9a-f]{40}$' >/dev/null; then
     spec=$ref
   elif git --git-dir="$git_dir" ls-remote --exit-code --tags --refs "$remote" "refs/tags/$ref" >/dev/null 2>&1; then
     spec="refs/tags/$ref"
@@ -901,7 +928,7 @@ cp_update() {
   git_dir=$(git -C "$ROOT_DIR" rev-parse --absolute-git-dir)
   head=$(git -C "$ROOT_DIR" rev-parse HEAD)
   dirty=$(git -C "$ROOT_DIR" status --porcelain --untracked-files=all)
-  [ -z "$dirty" ] || { printf '%s\n' "$dirty" | head -n 10 | sed 's/^/    /'; die 'В каталоге есть незафиксированные изменения — обновление из «грязного» checkout запрещено.'; }
+  [ -z "$dirty" ] || { printf '%s\n' "$dirty" | sed -n '1,10p' | sed 's/^/    /'; die 'В каталоге есть незафиксированные изменения — обновление из «грязного» checkout запрещено.'; }
 
   step 1 6 'Выбор версии'
   kv 'Сейчас установлено' "$(short "$head") $(git -C "$ROOT_DIR" log -1 --format='%cs %s' | cut -c1-60)"
@@ -921,7 +948,7 @@ cp_update() {
   kv 'Новая версия' "$(short "$target") $subject"
   if [ "$ancestor" = yes ]; then
     note 'Изменения:'
-    git -C "$ROOT_DIR" log --oneline --no-merges "$head..$target" | head -n 15 | sed 's/^/      /'
+    git -C "$ROOT_DIR" log --oneline --no-merges "$head..$target" | sed -n '1,15p' | sed 's/^/      /'
   fi
   kv 'Изменено файлов' "$changed"
   if [ "$migrations" -gt 0 ]; then kv 'Новые миграции БД' "${C_YELLOW}$migrations — схема базы изменится${C_RESET}"
@@ -944,6 +971,10 @@ cp_update() {
 
   step 3 6 'Резервная копия'
   require_backup "before-clean-pay-$(short "$target")"
+  if container_exists "$RS_API"; then
+    rs_secure_env
+    rs_sync_auth_key restart || die 'Без общего ключа установка не пройдёт проверку Remnashop. Код ещё не переключён.'
+  fi
 
   step 4 6 'Переключение кода на новую версию'
   local old_revision old_release old_image old_migration_image traceable=no
@@ -1053,7 +1084,7 @@ rs_service_of() {
   printf '%s' "${service:-$fallback}"
 }
 
-rs_has_service() { rs_compose config --services 2>/dev/null | grep -qx "$1"; }
+rs_has_service() { rs_compose config --services 2>/dev/null | grep -x "$1" >/dev/null; }
 
 alembic_head() {
   [ -n "$1" ] || return 0
@@ -1167,19 +1198,65 @@ rs_build_image() {
   printf '%s' "$image"
 }
 
+# Containers without a health check (the upstream compose) count as ready once
+# they have kept running, without a restart, for a minute (six polls): a crashing
+# app restarts well within that window.
 rs_wait_healthy() {
-  local i states
+  local i states restarts last_restarts='' running_polls=0
   for i in $(seq 1 60); do
     states=$({ docker inspect "$RS_API" "$RS_WORKER" "$RS_SCHEDULER" \
       --format '{{.State.Status}}/{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' 2>/dev/null || true; } \
       | sort -u | tr '\n' ' ')
+    restarts=$({ docker inspect "$RS_API" "$RS_WORKER" "$RS_SCHEDULER" --format '{{.RestartCount}}' 2>/dev/null || true; } | tr '\n' ' ')
     printf '\r  Ожидание готовности (%s/60): %s   ' "$i" "$states"
     if [ "$states" = 'running/healthy ' ]; then printf '\n'; return 0; fi
     case "$states" in *exited*|*unhealthy*|*dead*) printf '\n'; return 1 ;; esac
+    case "$states" in
+      'running/none '|'running/healthy running/none ')
+        if [ "$restarts" = "$last_restarts" ]; then running_polls=$((running_polls + 1)); else running_polls=1; fi
+        if [ "$running_polls" -ge 6 ]; then printf '\n'; return 0; fi ;;
+      *) running_polls=0 ;;
+    esac
+    last_restarts=$restarts
     sleep 10
   done
   printf '\n'
   return 1
+}
+
+# 1 when the Docker Engine predates healthcheck start_interval (Engine 25).
+rs_drop_start_interval() {
+  local major
+  major=$(docker version --format '{{.Server.Version}}' 2>/dev/null | cut -d. -f1)
+  case "$major" in ''|*[!0-9]*) printf 1 ;; *) if [ "$major" -ge 25 ]; then printf 0; else printf 1; fi ;; esac
+}
+
+# An install made from the upstream snoups compose (image ghcr.io/snoups/remnashop,
+# migrations inside the app container) has no remnashop-migration service. Moving it
+# to this build writes the release compose and adds the keys it requires to a copy
+# of the existing .env; the database and Redis volumes keep their names.
+rs_adopt_files() {
+  local target=$1 image=$2 compose_out=$3 env_out=$4 web=$5 key template
+  template=$(mktemp)
+  git --git-dir="$REMNASHOP_SOURCES" show "$target:docker-compose.prod.internal.yml" > "$template" \
+    || { rm -f -- "$template"; return 1; }
+  [ "$(grep -c '^  image: ghcr.io/' "$template")" = 1 ] \
+    || { rm -f -- "$template"; err 'Шаблон compose изменился: не найдена единственная строка образа ghcr.io.'; return 1; }
+  awk -v image="$image" '/^  image: ghcr.io\// { print "  image: " image; next } { print }' "$template" > "$compose_out"
+  if [ "$(rs_drop_start_interval)" = 1 ]; then
+    rs_sync_healthchecks "$template" "$compose_out" 1 > "$template.synced" && mv -f -- "$template.synced" "$compose_out"
+  fi
+  rm -f -- "$template" "$template.synced"
+  chmod 600 "$compose_out"
+  cp -p -- "$REMNASHOP_DIR/.env" "$env_out"
+  chmod 600 "$env_out"
+  rs_env_placeholder "$env_out" TASKIQ_DEPLOYMENT_ID && rs_env_set "$env_out" TASKIQ_DEPLOYMENT_ID "$(openssl rand -hex 12)"
+  rs_env_placeholder "$env_out" REDIS_PASSWORD && rs_env_set "$env_out" REDIS_PASSWORD "$(openssl rand -hex 24)"
+  for key in APP_JWT_SECRET APP_API_KEY APP_AUTH_SERVICE_KEY; do
+    rs_env_placeholder "$env_out" "$key" && rs_env_set "$env_out" "$key" "$(openssl rand -hex 32)"
+  done
+  [ -z "$web" ] || rs_env_set "$env_out" WEB_ENABLED "$web"
+  return 0
 }
 
 rs_update() {
@@ -1195,9 +1272,20 @@ rs_update() {
   api_svc=$(rs_service_of "$RS_API" remnashop)
   worker_svc=$(rs_service_of "$RS_WORKER" remnashop-taskiq-worker)
   scheduler_svc=$(rs_service_of "$RS_SCHEDULER" remnashop-taskiq-scheduler)
+  local layout=build env_before='' web=''
+  rs_compose config --quiet || die "$RS_COMPOSE не проходит docker compose config — исправьте его, ничего не изменено."
+  rs_has_service remnashop-migration || layout=upstream
 
   step 1 6 'Выбор версии'
   kv 'Сейчас работает' "$current_image"
+  if [ "$layout" = upstream ]; then
+    warn 'Remnashop установлен по compose апстрима snoups (нет сервиса remnashop-migration).'
+    note 'Обновление переведёт его на сборку Clean Pay: новый compose из выбранной версии,'
+    note 'в .env добавятся недостающие ключи (старые значения сохраняются), база и Redis'
+    note 'остаются в тех же томах. Пока не начались миграции, всё возвращается как было.'
+    have openssl || die 'Нужен openssl для генерации недостающих ключей.'
+    [ "$(id -u)" -eq 0 ] || die 'Перевод на сборку Clean Pay нужно запускать от root (права на каталоги для uid 10001).'
+  fi
   rs_prepare_sources
   show_remote_refs "$REMNASHOP_SOURCES" origin branches
   ref=$(ask_value 'Тег, ветка или полный SHA' main)
@@ -1207,7 +1295,7 @@ rs_update() {
   rs_check_compatible "$target" || die 'Обновление отменено, ничего не изменено.'
   if [ -n "$current_rev" ] && git --git-dir="$REMNASHOP_SOURCES" cat-file -e "$current_rev^{commit}" 2>/dev/null; then
     note 'Изменения:'
-    git --git-dir="$REMNASHOP_SOURCES" log --oneline --no-merges "$current_rev..$target" | head -n 15 | sed 's/^/      /'
+    git --git-dir="$REMNASHOP_SOURCES" log --oneline --no-merges "$current_rev..$target" | sed -n '1,15p' | sed 's/^/      /'
   fi
 
   step 2 6 'Сборка образа (сервисы продолжают работать)'
@@ -1226,22 +1314,69 @@ rs_update() {
   else
     ok 'Новых миграций нет — перезапуск займёт ~30 секунд'
   fi
-  ask_yes_no "Обновить Remnashop до $(short "$target")?" no || { note 'Отменено. Работающие сервисы не затронуты.'; return 0; }
+  if [ "$pending" = yes ] && [ "$layout" = build ] && ! rs_has_service remnashop-migration; then
+    die "В $RS_COMPOSE нет сервиса remnashop-migration — миграции применить нечем. Ничего не изменено."
+  fi
+  if [ "$layout" = upstream ] && [ -z "$(env_get "$REMNASHOP_DIR/.env" WEB_ENABLED)" ]; then
+    if ask_yes_no 'Включить HTTP API для Clean Pay (WEB_ENABLED=true)?' yes; then web=true; else web=false; fi
+  fi
+  if [ "$layout" = upstream ]; then
+    ask_yes_no "Перевести Remnashop на сборку Clean Pay $(short "$target")?" no || { note 'Отменено. Работающие сервисы не затронуты.'; return 0; }
+  else
+    ask_yes_no "Обновить Remnashop до $(short "$target")?" no || { note 'Отменено. Работающие сервисы не затронуты.'; return 0; }
+  fi
 
   step 4 6 'Резервная копия'
   require_backup "before-remnashop-$(short "$target")"
+  rs_secure_env
   compose_before="$LAST_BACKUP_DIR/config/remnashop/docker-compose.yml"
   [ -f "$compose_before" ] || die 'В копии нет compose-файла Remnashop — откат был бы невозможен.'
+  if [ "$layout" = upstream ]; then
+    env_before="$LAST_BACKUP_DIR/config/remnashop/.env"
+    [ -f "$env_before" ] || die 'В копии нет .env Remnashop — откат был бы невозможен.'
+  fi
 
   rs_rollback() {
-    warn 'Возвращаю предыдущий образ…'
+    warn 'Возвращаю предыдущую версию…'
     cp -p -- "$compose_before" "$RS_COMPOSE"
-    rs_compose up -d --no-deps --force-recreate "$api_svc" "$worker_svc" "$scheduler_svc" || true
+    if [ -n "$env_before" ]; then
+      cp -p -- "$env_before" "$REMNASHOP_DIR/.env"
+      rs_compose up -d --force-recreate --remove-orphans || true
+    else
+      rs_compose up -d --no-deps --force-recreate "$api_svc" "$worker_svc" "$scheduler_svc" || true
+    fi
     if rs_wait_healthy; then warn "Предыдущая версия ($current_image) снова работает."
     else err 'Предыдущая версия не стала healthy — нужна ручная проверка.'
     fi
   }
 
+  if [ "$layout" = upstream ]; then
+    step 5 6 'Новый compose и .env (сервисы ещё работают)'
+    if ! rs_adopt_files "$target" "$image" "$RS_COMPOSE.new" "$REMNASHOP_DIR/.env.new" "$web" \
+      || ! docker compose --project-directory "$REMNASHOP_DIR" -f "$RS_COMPOSE.new" \
+        --env-file "$REMNASHOP_DIR/.env.new" config --quiet; then
+      rm -f -- "$RS_COMPOSE.new" "$REMNASHOP_DIR/.env.new"
+      die 'Новый compose или .env не прошли проверку. Ничего не изменено.'
+    fi
+    mkdir -p "$REMNASHOP_DIR/logs" "$REMNASHOP_DIR/assets" "$REMNASHOP_DIR/backups"
+    chown -R 10001:10001 "$REMNASHOP_DIR/logs" "$REMNASHOP_DIR/assets" "$REMNASHOP_DIR/backups"
+    mv -f -- "$REMNASHOP_DIR/.env.new" "$REMNASHOP_DIR/.env"
+    mv -f -- "$RS_COMPOSE.new" "$RS_COMPOSE"
+    api_svc=remnashop; worker_svc=remnashop-taskiq-worker; scheduler_svc=remnashop-taskiq-scheduler
+    ok "compose и .env переведены на сборку Clean Pay (прежние — в $LAST_BACKUP_DIR/config/remnashop)"
+
+    step 6 6 'Перезапуск: база и Redis → миграции → сервисы'
+    note 'Остановка API, worker и scheduler…'
+    rs_compose stop "$api_svc" "$worker_svc" "$scheduler_svc"
+    if ! rs_compose up -d --wait --wait-timeout 180 remnashop-db remnashop-redis; then
+      err 'База или Redis не запустились в новой конфигурации.'
+      rs_rollback
+      journal remnashop-update-failed "adopt db/redis $(short "$target")"
+      return 1
+    fi
+    rs_compose run --rm --no-deps remnashop-storage-init
+    pending=yes
+  else
   step 5 6 'Переключение compose на новый образ'
   replaced=$(grep -cF "image: $current_image" "$RS_COMPOSE" || true)
   [ "$replaced" = 1 ] || die "В $RS_COMPOSE ожидалась ровно одна строка «image: $current_image» (найдено: $replaced). Обновите вручную."
@@ -1278,6 +1413,9 @@ rs_update() {
     note 'Остановка API, worker и scheduler…'
     rs_compose stop "$api_svc" "$worker_svc" "$scheduler_svc"
     if rs_has_service remnashop-storage-init; then rs_compose run --rm --no-deps remnashop-storage-init; fi
+  fi
+  fi
+  if [ "$pending" = yes ]; then
     note 'Применение миграций Alembic…'
     migrated=1
     if ! rs_compose run --rm --no-deps remnashop-migration; then
@@ -1289,6 +1427,7 @@ rs_update() {
     fi
     ok 'Миграции применены'
   fi
+  rs_sync_auth_key || true
   rs_compose up -d --no-deps --force-recreate "$api_svc" "$worker_svc" "$scheduler_svc"
   if rs_wait_healthy \
     && [ "$(container_field "$RS_API" '{{.Image}}')" = "$image_id" ] \
@@ -1304,7 +1443,7 @@ rs_update() {
   if cp_installed && [ -f "$REMNASHOP_CHECK_SCRIPT" ]; then
     note 'Проверка совместимости с Clean Pay…'
     if sh "$REMNASHOP_CHECK_SCRIPT" "$ENV_FILE" check; then ok 'Clean Pay и Remnashop совместимы'
-    else warn 'Проверка совместимости с Clean Pay не прошла — посмотрите вывод выше.'
+    else warn 'Проверка совместимости с Clean Pay не прошла — посмотрите вывод выше и пункт «Связать с Clean Pay».'
     fi
   fi
   journal remnashop-update "$(short "$current_rev") -> $(short "$target") ok; previous image $current_id; backup $LAST_BACKUP_DIR"
@@ -1329,6 +1468,67 @@ rs_env_placeholder() {
   local value
   value=$(env_get "$1" "$2")
   case "$value" in ''|change_me|replace_with_*) return 0 ;; *) return 1 ;; esac
+}
+
+# Clean Pay reads the Remnashop .env only from a private root directory
+# (700/750) and a private file (600/400); mkdir and the upstream installer leave 755/644.
+rs_secure_env() {
+  local mode
+  [ -d "$REMNASHOP_DIR" ] || return 0
+  mode=$(stat -c '%a' "$REMNASHOP_DIR" 2>/dev/null) || return 0
+  case "$mode" in 700|750) ;; *) chmod 750 "$REMNASHOP_DIR" && ok "Права каталога $REMNASHOP_DIR: $mode → 750" ;; esac
+  [ -f "$REMNASHOP_DIR/.env" ] || return 0
+  mode=$(stat -c '%a' "$REMNASHOP_DIR/.env" 2>/dev/null) || return 0
+  case "$mode" in 600|400) ;; *) chmod 600 "$REMNASHOP_DIR/.env" && ok "Права $REMNASHOP_DIR/.env: $mode → 600" ;; esac
+  return 0
+}
+
+# Clean Pay authenticates to Remnashop with one shared key: REMNASHOP_AUTH_SERVICE_KEY
+# in deploy/prod/.env must equal APP_AUTH_SERVICE_KEY in the Remnashop .env, otherwise
+# Remnashop answers 401. Copies the Clean Pay value over; with "restart" it also
+# recreates API, worker and scheduler so they read it. Values are never printed.
+rs_sync_auth_key() {
+  local restart=${1:-} rs_env="$REMNASHOP_DIR/.env" cp_key rs_key api_key
+  cp_installed && [ -f "$rs_env" ] || return 0
+  cp_key=$(cp_env REMNASHOP_AUTH_SERVICE_KEY)
+  case "$cp_key" in ''|*change-me*|*change_me*) return 0 ;; esac
+  rs_key=$(env_get "$rs_env" APP_AUTH_SERVICE_KEY)
+  if [ "$cp_key" = "$rs_key" ]; then ok 'Ключ auth-сервиса Clean Pay и Remnashop совпадает'; return 0; fi
+  api_key=$(env_get "$rs_env" APP_API_KEY)
+  [ "$cp_key" != "$api_key" ] || { err 'REMNASHOP_AUTH_SERVICE_KEY Clean Pay совпадает с APP_API_KEY Remnashop — так нельзя, задайте другой.'; return 1; }
+  warn "Ключ auth-сервиса не совпадает: REMNASHOP_AUTH_SERVICE_KEY ($ENV_FILE) ≠ APP_AUTH_SERVICE_KEY ($rs_env)."
+  note 'Без этого Remnashop отвечает Clean Pay 401 и проверка совместимости не проходит.'
+  if [ "$restart" = restart ]; then
+    ask_yes_no 'Записать ключ Clean Pay в Remnashop и перезапустить API, worker и scheduler (~30 с)?' yes || return 1
+  fi
+  rs_env_set "$rs_env" APP_AUTH_SERVICE_KEY "$cp_key"
+  ok "APP_AUTH_SERVICE_KEY в $rs_env обновлён"
+  [ "$restart" = restart ] || return 0
+  if ! rs_compose up -d --no-deps --force-recreate \
+    "$(rs_service_of "$RS_API" remnashop)" \
+    "$(rs_service_of "$RS_WORKER" remnashop-taskiq-worker)" \
+    "$(rs_service_of "$RS_SCHEDULER" remnashop-taskiq-scheduler)" \
+    || ! rs_wait_healthy; then
+    err 'Remnashop не стал healthy после перезапуска — смотрите «Логи сервисов».'
+    return 1
+  fi
+  ok 'Remnashop перезапущен с ключом Clean Pay'
+}
+
+# Menu item: everything Clean Pay needs from the local Remnashop, then the real check.
+rs_link() {
+  title 'Связь Clean Pay ↔ Remnashop' 'Права .env → общий ключ → проверка совместимости'
+  need_docker
+  cp_installed || die 'Clean Pay не установлен (нет deploy/prod/.env).'
+  [ -f "$REMNASHOP_DIR/.env" ] || die "Не найден $REMNASHOP_DIR/.env."
+  [ "$(id -u)" -eq 0 ] || die 'Запустите от root: нужны права на .env Remnashop.'
+  rs_secure_env
+  rs_sync_auth_key restart || return 1
+  [ -f "$REMNASHOP_CHECK_SCRIPT" ] || return 0
+  note 'Проверка совместимости с Clean Pay…'
+  if sh "$REMNASHOP_CHECK_SCRIPT" "$ENV_FILE" check; then ok 'Clean Pay и Remnashop совместимы'
+  else err 'Проверка не прошла — посмотрите вывод выше.'; return 1
+  fi
 }
 
 rs_install() {
@@ -1360,6 +1560,7 @@ rs_install() {
 
   step 4 7 'Каталог и compose'
   mkdir -p "$REMNASHOP_DIR"
+  chmod 750 "$REMNASHOP_DIR"
   mkdir -p "$REMNASHOP_DIR/logs" "$REMNASHOP_DIR/assets" "$REMNASHOP_DIR/backups"
   chown 10001:10001 "$REMNASHOP_DIR/logs" "$REMNASHOP_DIR/assets" "$REMNASHOP_DIR/backups"
   [ "$(grep -c '^  image: ghcr.io/' "$source/docker-compose.prod.internal.yml")" = 1 ] \
@@ -1382,6 +1583,7 @@ rs_install() {
   rs_env_set "$env_file" DATABASE_PASSWORD "$(openssl rand -hex 24)"
   rs_env_set "$env_file" REDIS_PASSWORD "$(openssl rand -hex 24)"
   rs_env_set "$env_file" TASKIQ_DEPLOYMENT_ID "$(openssl rand -hex 12)"
+  rs_sync_auth_key
   ok 'Внутренние секреты сгенерированы'
   value=$(ask_value 'Домен бота для webhook (без https://)' ''); rs_env_set "$env_file" APP_DOMAIN "$value"
   value=$(ask_secret 'Токен Telegram-бота от @BotFather'); rs_env_set "$env_file" BOT_TOKEN "$value"
@@ -1414,9 +1616,8 @@ rs_install() {
 
   ${C_BOLD}Дальше — подключение Clean Pay:${C_RESET}
   • APP_API_KEY из $env_file → REMNASHOP_API_KEY в настройках Clean Pay;
-  • после настройки Clean Pay скопируйте его REMNASHOP_AUTH_SERVICE_KEY
-    в APP_AUTH_SERVICE_KEY файла $env_file и выполните «Обновить Remnashop»
-    или docker compose up -d в $REMNASHOP_DIR.
+  • общий ключ REMNASHOP_AUTH_SERVICE_KEY → APP_AUTH_SERVICE_KEY меню переносит само
+    при установке и обновлении Clean Pay; отдельно — пункт «Связать с Clean Pay».
 EOF
 }
 
@@ -1424,7 +1625,7 @@ EOF
 
 # ─── Remnawave ──────────────────────────────────────────────────────────────
 
-version_ge() { [ "$(printf '%s\n%s\n' "$2" "$1" | sort -V | head -n 1)" = "$2" ]; }
+version_ge() { [ "$(printf '%s\n%s\n' "$2" "$1" | sort -V | sed -n '1p')" = "$2" ]; }
 
 # Version from the backend package; works for a running container or an image.
 rw_version() {
@@ -1598,7 +1799,7 @@ offer_screen() {
   is_interactive || return 0
   [ -z "${STY:-}" ] && [ -z "${TMUX:-}" ] || return 0
   have screen || return 0
-  if screen -ls 2>/dev/null | grep -q "[.]${SCREEN_SESSION}[[:space:]]"; then
+  if screen -ls 2>/dev/null | grep "[.]${SCREEN_SESSION}[[:space:]]" >/dev/null; then
     say ''
     warn "Меню уже открыто в screen-сессии «$SCREEN_SESSION» (возможно, после обрыва SSH)."
     if ask_yes_no 'Подключиться к ней?' yes; then exec screen -r "$SCREEN_SESSION"; fi
@@ -1644,15 +1845,16 @@ main_menu() {
     menu_section 'REMNASHOP'
     menu_item 9 'Обновить Remnashop' 'копия'
     menu_item 10 'Установить Remnashop с нуля' 'копия'
+    menu_item 11 'Связать с Clean Pay: права .env, общий ключ, проверка'
     menu_section "REMNAWAVE (панель ≥ $REMNAWAVE_MIN_VERSION, ноды ≥ $REMNANODE_MIN_VERSION)"
-    menu_item 11 'Обновить Remnawave' 'копия'
+    menu_item 12 'Обновить Remnawave' 'копия'
     menu_section 'РЕЗЕРВНЫЕ КОПИИ'
-    menu_item 12 'Создать полную резервную копию сейчас'
-    menu_item 13 'Список копий и проверка'
-    menu_item 14 'Как восстановить из копии'
+    menu_item 13 'Создать полную резервную копию сейчас'
+    menu_item 14 'Список копий и проверка'
+    menu_item 15 'Как восстановить из копии'
     menu_section 'СПРАВКА'
-    menu_item 15 'Обновление без простоя (zero-downtime)'
-    menu_item 16 'Настройки меню'
+    menu_item 16 'Обновление без простоя (zero-downtime)'
+    menu_item 17 'Настройки меню'
     printf '\n'
     menu_item 0 'Выход'
     printf '\n'
@@ -1669,12 +1871,13 @@ main_menu() {
       8) run_action cp_stop ;;
       9) run_action rs_update ;;
       10) run_action rs_install ;;
-      11) run_action rw_update ;;
-      12) run_action backup_create manual ;;
-      13) run_view list_backups ;;
-      14) run_view show_restore ;;
-      15) run_view show_zdt ;;
-      16) edit_settings ;;
+      11) run_action rs_link ;;
+      12) run_action rw_update ;;
+      13) run_action backup_create manual ;;
+      14) run_view list_backups ;;
+      15) run_view show_restore ;;
+      16) run_view show_zdt ;;
+      17) edit_settings ;;
       0|q|й|exit|выход) say ''; exit 0 ;;
       '') continue ;;
       *) warn 'Нет такого пункта.' ;;
@@ -1699,6 +1902,7 @@ Clean Pay — меню установки, обновления и резерв�
   ./menu.sh update             обновить Clean Pay
   ./menu.sh remnashop-update   обновить Remnashop
   ./menu.sh remnashop-install  установить Remnashop с нуля
+  ./menu.sh remnashop-link     связать Remnashop с Clean Pay (права .env, общий ключ, проверка)
   ./menu.sh remnawave-update   обновить панель Remnawave
 
   Требования: Remnawave ≥ 2.8.0, ноды remnanode ≥ 2.8.0.
@@ -1717,6 +1921,7 @@ case "${1:-menu}" in
   update) run_action cp_update ;;
   remnashop-update) run_action rs_update ;;
   remnashop-install) run_action rs_install ;;
+  remnashop-link) run_action rs_link ;;
   remnawave-update) run_action rw_update ;;
   help|-h|--help) usage ;;
   *) usage; exit 1 ;;

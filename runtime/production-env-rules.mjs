@@ -147,6 +147,7 @@ export const PRODUCTION_ENVIRONMENT_FILE_NAMES = Object.freeze([
   "REMNASHOP_SCHEDULER_CONTAINER",
   "REMNASHOP_WORKER_CONTAINER",
   "REMNAWAVE_API_BASE_URL",
+  "REMNAWAVE_COOKIE",
   "REMNAWAVE_SUBSCRIPTION_ORIGINS",
   "REMNAWAVE_TOKEN",
   "RETENTION_DATABASE_CONNECTION_TIMEOUT_MS",
@@ -712,6 +713,15 @@ export function validateProductionEnvironment(environment) {
     required("REMNAWAVE_TOKEN"),
     24,
   );
+  // A panel installed with the eGames script hides behind a cookie-gated
+  // nginx and answers 404 without it; the value is the one Remnashop uses.
+  const remnawaveCookie = optional("REMNAWAVE_COOKIE");
+  if (
+    remnawaveCookie
+    && !/^[!#$%&'*+.^_`|~0-9A-Za-z-]{1,128}=[\x21\x23-\x2B\x2D-\x3A\x3C-\x5B\x5D-\x7E]{1,1024}$/.test(remnawaveCookie)
+  ) {
+    fail("REMNAWAVE_COOKIE must be a single name=value cookie, as in Remnashop");
+  }
   const webJwtSecret = strongSecret(
     "WEB_JWT_SECRET",
     required("WEB_JWT_SECRET"),

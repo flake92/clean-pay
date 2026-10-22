@@ -19,6 +19,7 @@ import {
   getLiveRemnawaveSubscriptionUrl,
   synchronizeRemnawaveUserIdentity,
 } from "@/backend/integrations/remnawave/client";
+import { resetEnvForTests } from "@/backend/config/env";
 import {
   patchRemnawaveUserIdentity,
   requestRemnawave,
@@ -47,6 +48,35 @@ describe("Remnawave live subscription client", () => {
     delete process.env.REMNAWAVE_API_BASE_URL;
     delete process.env.REMNAWAVE_TOKEN;
     delete process.env.REMNAWAVE_SUBSCRIPTION_ORIGINS;
+  });
+
+  it("sends REMNAWAVE_COOKIE to a cookie-gated panel and nothing when it is unset", async () => {
+    const body = {
+      response: {
+        uuid: "rw-1",
+        email: "owner@example.com",
+        status: "ACTIVE",
+        subscriptionUrl: "https://sub3.example.com/token",
+      },
+    };
+    const fetchMock = vi.fn().mockImplementation(async () => jsonResponse(body));
+    global.fetch = fetchMock;
+
+    process.env.REMNAWAVE_COOKIE = "egamesKey=s3cr3tValue";
+    resetEnvForTests();
+    try {
+      await getLiveRemnawaveSubscriptionUrl({ userRemnaId: "rw-1", email: "owner@example.com" });
+    } finally {
+      delete process.env.REMNAWAVE_COOKIE;
+      resetEnvForTests();
+    }
+    await getLiveRemnawaveSubscriptionUrl({ userRemnaId: "rw-1", email: "owner@example.com" });
+
+    expect(fetchMock.mock.calls[0][1].headers).toMatchObject({
+      authorization: "Bearer test-token",
+      cookie: "egamesKey=s3cr3tValue",
+    });
+    expect(fetchMock.mock.calls[1][1].headers).not.toHaveProperty("cookie");
   });
 
   it("returns subscriptionUrl from the Remnawave user UUID endpoint", async () => {

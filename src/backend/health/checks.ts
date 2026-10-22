@@ -25,6 +25,7 @@ export function createProductionReadinessGateway(): ReadinessGateway {
   const telegramOidcJwksUrl = env.readiness.telegramOidcJwksUrl
     ?? env.telegramOidc.jwksUri;
   const remnawaveToken = env.remnawave.token;
+  const remnawaveCookie = env.remnawave.cookie;
 
   return {
     async checkDatabase() {
@@ -149,6 +150,8 @@ export function createProductionReadinessGateway(): ReadinessGateway {
             authorization: remnawaveToken.startsWith("Bearer ")
               ? remnawaveToken
               : `Bearer ${remnawaveToken}`,
+            // A panel behind a cookie-gated proxy (eGames install) answers 404 without it.
+            ...(remnawaveCookie ? { cookie: remnawaveCookie } : {}),
           },
           cache: "no-store",
           signal,

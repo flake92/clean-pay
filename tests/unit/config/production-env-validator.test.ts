@@ -296,6 +296,20 @@ describe("production env validator", () => {
     expect(result.stdout).toContain("Production environment validation passed.");
   });
 
+  it("accepts an eGames panel cookie and rejects anything but one name=value pair", () => {
+    const accepted = runValidator({ REMNAWAVE_COOKIE: "egamesKey=s3cr3tValue123" });
+    expect(accepted.status, accepted.stderr).toBe(0);
+
+    for (const value of ["egamesKey", "=value", "a=b;c=d", "a=b,c"]) {
+      const rejected = runValidator({ REMNAWAVE_COOKIE: value });
+      expect(rejected.status, value).not.toBe(0);
+      expect(rejected.stderr, value).toContain("REMNAWAVE_COOKIE must be a single name=value cookie");
+      expect(rejected.stderr, value).not.toContain("s3cr3t");
+    }
+
+    expect(PRODUCTION_ROLE_ENVIRONMENT_NAMES.application).toContain("REMNAWAVE_COOKIE");
+  });
+
   it("rejects unsafe Docker names, invalid rollout revisions and unknown log levels", () => {
     for (const [name, value, expected] of [
       ["COMPOSE_PROJECT_NAME", "Clean Pay", "lowercase letters"],

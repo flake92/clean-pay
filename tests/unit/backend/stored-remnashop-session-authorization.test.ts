@@ -294,6 +294,59 @@ describe("stored-only Remnashop session authorization", () => {
     });
   });
 
+  describe("staged link whose session holds the new e-mail account", () => {
+    // stagePendingEmail stores the provider session of the account being
+    // linked, so the token belongs to pendingRemnashopUserId until the code is
+    // confirmed (prod 2026-10-19: Telegram users saw a merge conflict instead
+    // of the code form and could not finish the link).
+    const staged = () => session({
+      user: {
+        email: "staged@example.com",
+        emailVerified: false,
+        pendingRemnashopUserId: "7",
+        pendingRemnashopEmail: "staged@example.com",
+      },
+    });
+
+    it("lets the e-mail confirmation flow read through the pending account", async () => {
+      apiMock.getRemnashopUserIdFromAccessToken.mockReturnValue("7");
+
+      await expect(
+        authorize(staged(), { allowUnverifiedEmail: true }),
+      ).resolves.toMatchObject({
+        accessToken: "access",
+        session: { user: { remnashopUserId: "42", pendingRemnashopUserId: "7" } },
+      });
+    });
+
+    it("keeps cabinet and payment reads bound to the linked owner", async () => {
+      apiMock.getRemnashopUserIdFromAccessToken.mockReturnValue("7");
+
+      await expect(authorize(staged())).rejects.toMatchObject({
+        code: "ACCOUNT_MERGE_REQUIRED",
+        status: 409,
+      });
+    });
+
+    it("still rejects a token owned by neither the owner nor the pending account", async () => {
+      apiMock.getRemnashopUserIdFromAccessToken.mockReturnValue("9");
+
+      await expect(
+        authorize(staged(), { allowUnverifiedEmail: true }),
+      ).rejects.toMatchObject({ code: "ACCOUNT_MERGE_REQUIRED", status: 409 });
+    });
+
+    it("does not apply once the local e-mail is already verified", async () => {
+      apiMock.getRemnashopUserIdFromAccessToken.mockReturnValue("7");
+      const value = staged();
+      value.user.emailVerified = true;
+
+      await expect(
+        authorize(value, { allowUnverifiedEmail: true }),
+      ).rejects.toMatchObject({ code: "ACCOUNT_MERGE_REQUIRED", status: 409 });
+    });
+  });
+
   it("does not take the cabinet away from a Telegram account over an unconfirmed staged e-mail", async () => {
     const value = session({
       user: { email: "staged@example.com", emailVerified: false },

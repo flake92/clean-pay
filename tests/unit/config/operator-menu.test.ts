@@ -38,7 +38,7 @@ describe("operator menu", () => {
 
   it("takes a verified full backup before every global action", () => {
     expectBefore(functionBody("cp_update"), "require_backup", 'checkout --quiet --detach "$target"');
-    expectBefore(functionBody("cp_install"), "require_backup", 'sh "$DEPLOY_SCRIPT" setup');
+    expectBefore(functionBody("cp_install"), "require_backup", 'sh "$DEPLOY_SCRIPT" configure');
     expectBefore(functionBody("rs_update"), "require_backup", 'mv -f -- "$RS_COMPOSE.new" "$RS_COMPOSE"');
     expectBefore(functionBody("rs_install"), "require_backup", "rs_build_image");
 
@@ -46,6 +46,15 @@ describe("operator menu", () => {
     expect(backup).toContain("verify_dump");
     expect(backup).toContain("SHA256SUMS");
     expect(functionBody("require_backup")).toContain("действие отменено, ничего не изменено");
+  });
+
+  it("never closes a pipeline early under pipefail", () => {
+    // `git log | head -n 15` failed real 0.2.3 → 0.4.0 updates with SIGPIPE
+    // (exit 141): head exits first, the writer dies and pipefail aborts the
+    // action. Readers must drain their input instead.
+    expect(menu).not.toMatch(/\|\s*head\b/);
+    expect(menu).not.toMatch(/\|\s*grep\s+-[A-Za-z]*q/);
+    expect(functionBody("cp_update")).toContain(`| sed -n '1,15p'`);
   });
 
   it("delegates Clean Pay changes to the reviewed deploy.sh stages", () => {
@@ -60,7 +69,7 @@ describe("operator menu", () => {
   it("runs Remnashop migrations explicitly and keeps the previous image", () => {
     const update = functionBody("rs_update");
     expectBefore(update, "alembic_head", "require_backup");
-    expectBefore(update, "rs_compose stop", "remnashop-migration");
+    expectBefore(update, "rs_compose stop", "rs_compose run --rm --no-deps remnashop-migration");
     expect(update).toContain("rs_rollback");
     expect(update).toContain("Прежний образ сохранён");
   });
@@ -162,8 +171,70 @@ describe("operator menu", () => {
   it("syncs Remnashop health checks inside the guarded compose switch", () => {
     const update = functionBody("rs_update");
     expectBefore(update, "require_backup", "rs_sync_healthchecks");
-    expectBefore(update, "rs_sync_healthchecks", "rs_compose config --quiet");
+    expectBefore(update, "rs_sync_healthchecks \"$hc_template\"", "if ! rs_compose config --quiet; then cp -p");
     expect(update).toContain('git --git-dir="$REMNASHOP_SOURCES" show "$target:docker-compose.prod.internal.yml"');
+  });
+
+  it("moves an upstream Remnashop compose to this build without touching it before the backup", () => {
+    const update = functionBody("rs_update");
+    // the layout is decided from the existing compose before anything else
+    expectBefore(update, "rs_has_service remnashop-migration || layout=upstream", "step 1 6");
+    // new compose and .env are written to side files and validated while the old stack runs
+    expectBefore(update, "require_backup", 'rs_adopt_files "$target" "$image" "$RS_COMPOSE.new"');
+    expectBefore(update, 'rs_adopt_files "$target" "$image" "$RS_COMPOSE.new"', '--env-file "$REMNASHOP_DIR/.env.new" config --quiet');
+    expectBefore(update, '--env-file "$REMNASHOP_DIR/.env.new" config --quiet', 'mv -f -- "$REMNASHOP_DIR/.env.new" "$REMNASHOP_DIR/.env"');
+    expectBefore(update, 'mv -f -- "$RS_COMPOSE.new" "$RS_COMPOSE"', "rs_compose up -d --wait --wait-timeout 180 remnashop-db remnashop-redis");
+    // the rollback restores the previous .env as well as the compose file
+    expect(update).toContain('cp -p -- "$env_before" "$REMNASHOP_DIR/.env"');
+    // a build compose without a migration service is refused before any service stops
+    expectBefore(update, "миграции применить нечем", "rs_compose stop");
+
+    const adopt = functionBody("rs_adopt_files");
+    expect(adopt).toContain('cp -p -- "$REMNASHOP_DIR/.env" "$env_out"');
+    for (const key of ["TASKIQ_DEPLOYMENT_ID", "REDIS_PASSWORD", "APP_JWT_SECRET", "APP_API_KEY", "APP_AUTH_SERVICE_KEY"]) {
+      expect(adopt).toContain(key);
+    }
+    // existing values are kept: keys are generated only when missing or placeholders
+    expect(adopt).toContain('rs_env_placeholder "$env_out"');
+  });
+
+  it("keeps the Remnashop .env private and shares the Clean Pay service key", () => {
+    // the Clean Pay preflight accepts only a 700/750 directory and a 600/400 file
+    const secure = functionBody("rs_secure_env");
+    expect(secure).toContain("700|750) ;;");
+    expect(secure).toContain('chmod 750 "$REMNASHOP_DIR"');
+    expect(secure).toContain('chmod 600 "$REMNASHOP_DIR/.env"');
+    expectBefore(functionBody("rs_install"), 'mkdir -p "$REMNASHOP_DIR"', 'chmod 750 "$REMNASHOP_DIR"');
+
+    // Clean Pay is the source of the key; it must never reuse the admin key
+    const sync = functionBody("rs_sync_auth_key");
+    expect(sync).toContain("cp_env REMNASHOP_AUTH_SERVICE_KEY");
+    expect(sync).toContain('rs_env_set "$rs_env" APP_AUTH_SERVICE_KEY "$cp_key"');
+    expect(sync).toContain('[ "$cp_key" != "$api_key" ]');
+    expectBefore(sync, "ask_yes_no", "rs_env_set");
+    expectBefore(sync, "rs_env_set", "--force-recreate");
+    expect(sync).not.toMatch(/(printf|say|note|ok|warn|err) [^\n]*\$(cp_key|rs_key|api_key)/);
+
+    // both Clean Pay flows sync after the backup and before the compatibility check runs
+    const update = functionBody("cp_update");
+    expectBefore(update, "require_backup", "rs_sync_auth_key restart");
+    expectBefore(update, "rs_sync_auth_key restart", 'sh "$DEPLOY_SCRIPT" install');
+    const install = functionBody("cp_install");
+    expectBefore(install, 'sh "$DEPLOY_SCRIPT" configure', "rs_sync_auth_key restart");
+    expectBefore(install, "rs_sync_auth_key restart", 'sh "$DEPLOY_SCRIPT" install');
+    // rs_update aligns the key right before it recreates API, worker and scheduler anyway
+    expect(functionBody("rs_update")).toContain(
+      'rs_sync_auth_key || true\n  rs_compose up -d --no-deps --force-recreate "$api_svc"',
+    );
+
+    expect(menu).toContain("remnashop-link) run_action rs_link ;;");
+    expect(menu).toContain("11) run_action rs_link ;;");
+  });
+
+  it("does not wait forever for health checks the upstream compose does not have", () => {
+    const wait = functionBody("rs_wait_healthy");
+    expect(wait).toContain("'running/none '");
+    expect(wait).toContain("RestartCount");
   });
 
   it("refuses Remnashop versions without the Clean Pay integration before building", () => {

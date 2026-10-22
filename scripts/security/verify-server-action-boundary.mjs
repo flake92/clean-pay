@@ -47,6 +47,13 @@ const address = proxy.address();
 if (!address || typeof address === "string") throw new Error("proxy did not bind TCP");
 const baseUrl = `http://127.0.0.1:${address.port}`;
 const BODY_LIMIT = 64 * 1_024;
+// Next.js 16.4+ rejects malformed ids with 400 before the action lookup, so the
+// probe uses a well-formed (42-character) id that no deployment ever defines.
+// A request that crossed both origin gates then ends in Next's bounded
+// "unknown action" response.
+const PROBE_ACTION_ID = `00${"c1ea".repeat(10)}`;
+const UNKNOWN_ACTION_STATUS = 409;
+const UNKNOWN_ACTION_TEXT = "Server Action unavailable.";
 
 async function post({
   contentType = "text/plain;charset=UTF-8",
@@ -56,7 +63,7 @@ async function post({
 } = {}) {
   const requestHeaders = new Headers({
     "content-type": contentType,
-    "next-action": "clean-pay-invalid-live-boundary-probe",
+    "next-action": PROBE_ACTION_ID,
     ...headers,
   });
   const requestBody = streamed
@@ -91,13 +98,13 @@ async function expectAcceptedSource(name, headers) {
   const response = await post({ headers });
   const text = await response.text();
   if (
-    response.status !== 404
+    response.status !== UNKNOWN_ACTION_STATUS
     || response.headers.get("x-nextjs-action-not-found") !== "1"
     || text.length > 1_024
-    || !text.includes("Server action not found.")
+    || !text.includes(UNKNOWN_ACTION_TEXT)
   ) {
     throw new Error(
-      `${name}: expected bounded 404/x-nextjs-action-not-found after both origin gates, received ${response.status}`,
+      `${name}: expected bounded ${UNKNOWN_ACTION_STATUS}/x-nextjs-action-not-found after both origin gates, received ${response.status}`,
     );
   }
 }
@@ -129,18 +136,20 @@ try {
     await expectAcceptedSource("alternate trusted origin", { origin: alternateOrigin });
   }
 
+  // Next.js 16.4 no longer dispatches url-encoded bodies as Server Actions; past
+  // both origin gates such a request renders the page's 404 instead.
   const encodings = [
-    "text/plain;charset=UTF-8",
-    "application/x-www-form-urlencoded",
-    "multipart/form-data; boundary=clean-pay-live-boundary",
+    ["text/plain;charset=UTF-8", UNKNOWN_ACTION_STATUS],
+    ["application/x-www-form-urlencoded", 404],
+    ["multipart/form-data; boundary=clean-pay-live-boundary", UNKNOWN_ACTION_STATUS],
   ];
-  for (const contentType of encodings) {
+  for (const [contentType, crossedGatesStatus] of encodings) {
     const exact = await post({
       contentType,
       body: "x".repeat(BODY_LIMIT),
       headers: { origin: trustedOrigin },
     });
-    if (exact.status !== 404) {
+    if (exact.status !== crossedGatesStatus) {
       throw new Error(
         `${contentType}: exact-limit trusted request did not cross both origin gates: ${exact.status}`,
       );
@@ -159,10 +168,10 @@ try {
   });
   const trustedRefererText = await trustedReferer.text();
   if (
-    trustedReferer.status !== 404
+    trustedReferer.status !== UNKNOWN_ACTION_STATUS
     || trustedReferer.headers.get("x-nextjs-action-not-found") !== "1"
     || trustedRefererText.length > 1_024
-    || !trustedRefererText.includes("Server action not found.")
+    || !trustedRefererText.includes(UNKNOWN_ACTION_TEXT)
   ) {
     throw new Error(
       `trusted Referer did not cross both origin gates: ${trustedReferer.status}`,
