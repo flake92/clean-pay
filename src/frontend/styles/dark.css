@@ -43,6 +43,20 @@
     --p-surface-950: #0b1020;
     --p-text-muted-color: #94a3b8;
 
+    /* Lara's light surface scale runs white → near-black; headings, menu
+       section titles and the topbar name use --surface-900, so invert it. */
+    --surface-0: #121a2e;
+    --surface-50: #18223a;
+    --surface-100: #24304b;
+    --surface-200: #334155;
+    --surface-300: #475569;
+    --surface-400: #94a3b8;
+    --surface-500: #cbd5e1;
+    --surface-600: #e2e8f0;
+    --surface-700: #f1f5f9;
+    --surface-800: #f8fafc;
+    --surface-900: #f8fafc;
+
     --background: var(--cp-dark-ground);
     --foreground: var(--cp-dark-text);
     --surface-ground: var(--cp-dark-ground);
