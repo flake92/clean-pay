@@ -217,14 +217,141 @@
 .cabinet-metric[data-tone="cyan"] { --cp-metric-from: #06b6d4; --cp-metric-to: #22d3ee; }
 .cabinet-metric[data-tone="purple"] { --cp-metric-from: #8b5cf6; --cp-metric-to: #d946ef; }
 
-.layout-main .p-progressbar {
-  border-radius: 999px;
-  overflow: hidden;
+/* Traffic gauge */
+.traffic-usage {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1rem 1.5rem;
 }
 
-.layout-main .p-progressbar .p-progressbar-value {
-  background-image: linear-gradient(90deg, var(--cp-indigo), var(--cp-cyan));
-  border-radius: 999px;
+.traffic-ring {
+  flex: 0 0 auto;
+  height: 132px;
+  position: relative;
+  width: 132px;
+}
+
+.traffic-ring svg {
+  display: block;
+  filter: drop-shadow(0 10px 18px rgba(99, 102, 241, 0.25));
+  rotate: -90deg;
+}
+
+.traffic-ring[data-tone="warning"] svg { filter: drop-shadow(0 10px 18px rgba(245, 158, 11, 0.3)); }
+.traffic-ring[data-tone="danger"] svg { filter: drop-shadow(0 10px 18px rgba(220, 38, 38, 0.3)); }
+
+.traffic-ring-track,
+.traffic-ring-value {
+  fill: none;
+  stroke-width: 12;
+}
+
+.traffic-ring-track {
+  stroke: #e0e7ff;
+}
+
+.traffic-ring-value {
+  stroke-linecap: round;
+}
+
+.traffic-ring-label {
+  align-items: center;
+  display: flex;
+  flex-direction: column;
+  inset: 0;
+  justify-content: center;
+  position: absolute;
+}
+
+.traffic-ring-percent {
+  color: #1e1b4b;
+  font-size: 1.6rem;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.traffic-ring-caption {
+  color: #64748b;
+  font-size: 0.75rem;
+  margin-top: 0.25rem;
+}
+
+/* Live subscription status */
+.subscription-status {
+  border-radius: 8px;
+  display: inline-flex;
+}
+
+.subscription-status[data-status="active"] .p-tag {
+  gap: 0.45rem;
+}
+
+.subscription-status[data-status="active"] .p-tag::before {
+  background: currentColor;
+  border-radius: 50%;
+  box-shadow: 0 0 0 0 currentColor;
+  content: "";
+  height: 0.5rem;
+  width: 0.5rem;
+}
+
+.subscription-status.is-expiring .p-tag {
+  box-shadow: 0 0 0 3px rgba(245, 158, 11, 0.35), 0 0 18px rgba(245, 158, 11, 0.55);
+}
+
+/* Loading skeleton */
+.cabinet-skeleton-label {
+  clip-path: inset(50%);
+  height: 1px;
+  overflow: hidden;
+  position: absolute;
+  white-space: nowrap;
+  width: 1px;
+}
+
+.skeleton-card {
+  display: flex;
+  flex-direction: column;
+  gap: 0.9rem;
+  min-height: 7.5rem;
+}
+
+.skeleton-card-tall {
+  min-height: 15rem;
+}
+
+.skeleton-line {
+  background:
+    linear-gradient(100deg, transparent 30%, rgba(255, 255, 255, 0.7) 50%, transparent 70%),
+    linear-gradient(90deg, #e8ebf7, #eef1fa);
+  background-repeat: no-repeat;
+  background-size: 200% 100%, 100% 100%;
+  border-radius: 8px;
+  height: 0.9rem;
+  width: 70%;
+}
+
+.skeleton-line-short { width: 35%; }
+.skeleton-line-wide { height: 1.4rem; width: 85%; }
+.skeleton-line-title { height: 1.8rem; width: 55%; }
+
+/* Payment confetti: never intercepts input, pieces start invisible */
+.payment-celebration {
+  inset: 0;
+  overflow: hidden;
+  pointer-events: none;
+  position: fixed;
+  z-index: 2000;
+}
+
+.payment-celebration-piece {
+  height: 7px;
+  left: 50%;
+  opacity: 0;
+  position: absolute;
+  top: 38%;
+  width: 11px;
 }
 
 /* ─── Motion (only when the visitor has not asked for reduced motion) ──── */
@@ -255,11 +382,19 @@
   50% { translate: 0 -7px; }
 }
 
-/* A highlight sweeping over the real fill; the bar's width is never animated,
-   so it always shows the true usage. */
-@keyframes cp-sweep {
+@keyframes cp-shimmer {
   from { background-position: 150% 0, 0 0; }
   to { background-position: -50% 0, 0 0; }
+}
+
+@keyframes cp-pulse {
+  0% { box-shadow: 0 0 0 0 currentColor; }
+  70%, 100% { box-shadow: 0 0 0 7px transparent; }
+}
+
+@keyframes cp-glow {
+  0%, 100% { box-shadow: 0 0 0 3px rgba(245, 158, 11, 0.3), 0 0 12px rgba(245, 158, 11, 0.35); }
+  50% { box-shadow: 0 0 0 4px rgba(245, 158, 11, 0.45), 0 0 26px rgba(245, 158, 11, 0.7); }
 }
 
 @media (prefers-reduced-motion: no-preference) {
@@ -300,12 +435,15 @@
   .layout-main .grid > :nth-child(5) .card { animation-delay: 0.24s; }
   .layout-main .grid > :nth-child(n + 6) .card { animation-delay: 0.3s; }
 
-  .layout-main .p-progressbar .p-progressbar-value {
-    animation: cp-sweep 2.4s ease-in-out 0.4s infinite;
-    background-image:
-      linear-gradient(100deg, transparent 35%, rgba(255, 255, 255, 0.45) 50%, transparent 65%),
-      linear-gradient(90deg, var(--cp-indigo), var(--cp-cyan));
-    background-repeat: no-repeat;
-    background-size: 200% 100%, 100% 100%;
+  .skeleton-line {
+    animation: cp-shimmer 1.6s ease-in-out infinite;
+  }
+
+  .subscription-status[data-status="active"] .p-tag::before {
+    animation: cp-pulse 1.8s ease-out infinite;
+  }
+
+  .subscription-status.is-expiring .p-tag {
+    animation: cp-glow 2.2s ease-in-out infinite;
   }
 }

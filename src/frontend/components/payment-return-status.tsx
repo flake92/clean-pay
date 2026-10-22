@@ -4,6 +4,7 @@ import { Tag } from "primereact/tag";
 
 import { Button, Message } from "@/frontend/components/sakai/form-foundation";
 
+import { PaymentCelebration } from "@/frontend/components/payment-celebration";
 import { LinkButton } from "@/frontend/components/prime/link-button";
 import {
   formatPaymentReturnDate as formatDate,
@@ -33,6 +34,7 @@ export function PaymentReturnStatus({ kind, model, operationId, paymentId }: Pro
 
   return (
     <div className="flex flex-column gap-6">
+      {data?.payment && paymentSeverity(data.payment.status) === "success" ? <PaymentCelebration /> : null}
       <h2 className="text-3xl font-semibold m-0">{heading(data)}</h2>
       <div className="flex flex-column gap-4">
         {error ? <Message severity="warn" text={`Результат пока неизвестен. ${error}`} /> : null}

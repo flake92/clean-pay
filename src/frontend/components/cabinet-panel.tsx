@@ -1,9 +1,11 @@
 "use client";
 
-import { ProgressBar } from "primereact/progressbar";
 import { Tag } from "primereact/tag";
 
+import { CabinetSkeleton } from "@/frontend/components/cabinet-skeleton";
 import { LinkButton } from "@/frontend/components/prime/link-button";
+import { SubscriptionStatusTag } from "@/frontend/components/subscription-status-tag";
+import { TrafficRing } from "@/frontend/components/traffic-ring";
 import {
   CabinetDevicesSection,
   CabinetPaymentHistorySection,
@@ -100,7 +102,7 @@ export function CabinetPanel({ model }: { model: CabinetViewModel }) {
   }
 
   if (!user) {
-    return <Message severity="info" text="Загрузка кабинета..." />;
+    return <CabinetSkeleton label="Загрузка кабинета..." />;
   }
 
   const {
@@ -161,8 +163,10 @@ export function CabinetPanel({ model }: { model: CabinetViewModel }) {
                 {subscription?.plan_name ?? "Подписка не активна"}
               </h2>
             </div>
-            <Tag
+            <SubscriptionStatusTag
+              expireAt={subscription?.expire_at ?? null}
               severity={subscription ? statusSeverity(subscription.status) : "warning"}
+              status={subscription?.status ?? "none"}
               value={subscription ? statusLabel(subscription.status) : "Нет подписки"}
             />
           </div>
@@ -172,9 +176,9 @@ export function CabinetPanel({ model }: { model: CabinetViewModel }) {
           {subscription ? (
             <>
               {usagePercent !== null ? (
-                <div>
-                  <ProgressBar value={usagePercent} />
-                  <p className="mt-2 mb-0 text-sm text-600">
+                <div className="traffic-usage">
+                  <TrafficRing percent={usagePercent} />
+                  <p className="m-0 text-sm text-600">
                     Использовано {usagePercent}% текущего лимита
                   </p>
                 </div>

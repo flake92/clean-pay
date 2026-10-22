@@ -2,6 +2,7 @@ import { cache, Suspense, type ReactNode } from "react";
 
 import { CabinetHeaderActions } from "@/frontend/components/cabinet-header-actions";
 import { CabinetPanel } from "@/frontend/components/cabinet-panel";
+import { CabinetSkeleton } from "@/frontend/components/cabinet-skeleton";
 import { AppShell } from "@/app/_components/app-shell";
 import { requireCabinetEntrySession } from "@/app/_composition/require-request-session";
 import { PageHeader } from "@/frontend/components/page-header";
@@ -54,14 +55,7 @@ async function CabinetReferralContent() {
 }
 
 function CabinetLoading() {
-  return (
-    <div className="card" aria-busy="true" aria-live="polite">
-      <div className="flex align-items-center gap-2 text-600">
-        <i className="pi pi-spin pi-spinner" aria-hidden="true" />
-        <span>Загрузка данных кабинета...</span>
-      </div>
-    </div>
-  );
+  return <CabinetSkeleton label="Загрузка данных кабинета..." />;
 }
 
 export default function CabinetPage() {
