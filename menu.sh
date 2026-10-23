@@ -47,6 +47,12 @@ SCREEN_SESSION=clean-pay-menu
 REMNAWAVE_MIN_VERSION=2.8.0
 REMNANODE_MIN_VERSION=2.8.0
 LAST_BACKUP_DIR=''
+# deploy.sh's fail-closed lock; the menu inspects it before an update.
+OPERATION_LOCK_FILE="$ROOT_DIR/deploy/prod/.production-operation.lock"
+# deploy.sh checks CLEAN_PAY_MIN_FREE_DISK_MB before the build and again before
+# install, when the new image pair (~1.5 GB) already exists.
+CP_BUILD_SPACE_MB=1536
+CLEAN_PAY_UPSTREAM_DEFAULT=https://github.com/flake92/clean-pay.git
 
 # ─── Оформление ─────────────────────────────────────────────────────────────
 
@@ -186,6 +192,7 @@ load_settings() {
   REMNASHOP_IMAGE=$(env_get "$MENU_CONF" REMNASHOP_IMAGE remnashop)
   REMNASHOP_TAG_PREFIX=$(env_get "$MENU_CONF" REMNASHOP_TAG_PREFIX clean-pay-prod-)
   CADDYFILE=$(env_get "$MENU_CONF" CADDYFILE '')
+  CLEAN_PAY_UPSTREAM=$(env_get "$MENU_CONF" CLEAN_PAY_UPSTREAM "$CLEAN_PAY_UPSTREAM_DEFAULT")
   RS_API=$(cp_env REMNASHOP_API_CONTAINER remnashop)
   RS_WORKER=$(cp_env REMNASHOP_WORKER_CONTAINER remnashop-taskiq-worker)
   RS_SCHEDULER=$(cp_env REMNASHOP_SCHEDULER_CONTAINER remnashop-taskiq-scheduler)
@@ -208,6 +215,7 @@ save_settings() {
     printf 'REMNASHOP_IMAGE=%s\n' "$REMNASHOP_IMAGE"
     printf 'REMNASHOP_TAG_PREFIX=%s\n' "$REMNASHOP_TAG_PREFIX"
     printf 'CADDYFILE=%s\n' "$CADDYFILE"
+    printf 'CLEAN_PAY_UPSTREAM=%s\n' "$CLEAN_PAY_UPSTREAM"
     printf 'REMNAWAVE_CONTAINER=%s\n' "$RW_CONTAINER"
     printf 'REMNAWAVE_DB_CONTAINER=%s\n' "$RW_DB"
   } > "$tmp" && chmod 600 "$tmp" && mv -f -- "$tmp" "$MENU_CONF"
@@ -919,6 +927,128 @@ fetch_ref() {
   git --git-dir="$git_dir" rev-parse 'FETCH_HEAD^{commit}'
 }
 
+# "0.4.1 (64d9e05)": the release version of a commit, read from its package.json.
+cp_version_at() {
+  local version
+  version=$(git -C "$ROOT_DIR" show "$1:package.json" 2>/dev/null \
+    | sed -n 's/^  "version": "\([^"]*\)",*$/\1/p' | sed -n '1p')
+  printf '%s (%s)' "${version:-?}" "$(short "$1")"
+}
+
+# Newest vX.Y.Z tag in origin when it is newer than the checkout; empty otherwise.
+cp_newer_release() {
+  local current latest
+  current=$(git -C "$ROOT_DIR" show HEAD:package.json 2>/dev/null \
+    | sed -n 's/^  "version": "\([^"]*\)",*$/\1/p' | sed -n '1p')
+  latest=$({ timeout 8 git -C "$ROOT_DIR" ls-remote --tags --refs origin 2>/dev/null || true; } \
+    | sed -n 's#.*refs/tags/v\([0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*\)$#\1#p' | sort -V | tail -n 1)
+  if [ -n "$current" ] && [ -n "$latest" ] && ! version_ge "$current" "$latest"; then
+    printf '%s' "$latest"
+  fi
+}
+
+# A local-path origin (such as /opt/deploy-sources/clean-pay.git) is a mirror
+# nothing else keeps current; offer to refresh it before listing versions.
+cp_refresh_local_origin() {
+  local url mirror upstream updated age
+  url=$(git -C "$ROOT_DIR" remote get-url origin 2>/dev/null) || return 0
+  mirror=${url#file://}
+  [ -d "$mirror" ] || return 0
+  upstream=$(git --git-dir="$mirror" remote get-url origin 2>/dev/null || true)
+  [ -n "$upstream" ] || upstream=$CLEAN_PAY_UPSTREAM
+  updated=$(stat -c %Y "$mirror/FETCH_HEAD" 2>/dev/null || stat -c %Y "$mirror" 2>/dev/null || date +%s)
+  age=$(( ($(date +%s) - updated) / 86400 ))
+  note "Версии берутся из локального зеркала $mirror (обновлялось $age дн. назад)."
+  ask_yes_no "Обновить зеркало из $upstream?" yes || return 0
+  if git --git-dir="$mirror" fetch --prune --quiet "$upstream" \
+    '+refs/heads/*:refs/heads/*' '+refs/tags/*:refs/tags/*'; then
+    ok 'Зеркало обновлено'
+  else
+    warn 'Зеркало обновить не удалось — показаны версии, которые в нём уже есть.'
+  fi
+}
+
+lock_field() { sed -n "s/.*\"$2\":\"\{0,1\}\([^\",}]*\).*/\1/p" "$1" | sed -n '1p'; }
+
+# deploy.sh refuses to start while its fail-closed operation lock exists. Check
+# it before the backup and offer the reviewed recovery for a lock whose owner is
+# gone (for example a configure run killed days ago): the lock is released by
+# the reviewed helper with its own token, never deleted blindly.
+cp_check_operation_lock() {
+  [ -f "$OPERATION_LOCK_FILE" ] || return 0
+  local operation owner started token
+  operation=$(lock_field "$OPERATION_LOCK_FILE" operation)
+  owner=$(lock_field "$OPERATION_LOCK_FILE" ownerPid)
+  started=$(lock_field "$OPERATION_LOCK_FILE" startedAt)
+  token=$(lock_field "$OPERATION_LOCK_FILE" token)
+  warn "Найден замок операции «${operation:-?}» от ${started:-?} (процесс ${owner:-?})."
+  if [ -n "$owner" ] && kill -0 "$owner" 2>/dev/null; then
+    die "Операция «$operation» ещё выполняется (процесс $owner) — дождитесь её завершения."
+  fi
+  if have pgrep && pgrep -f 'deploy[.]sh' >/dev/null 2>&1; then
+    die 'Сейчас выполняется deploy.sh — дождитесь его завершения и повторите.'
+  fi
+  note 'Процесса-владельца уже нет: замок остался от прерванной операции.'
+  ask_yes_no 'Снять брошенный замок (копия сохранится в каталоге копий)?' no \
+    || die 'Замок оставлен — пока он есть, deploy.sh не начнёт обновление.'
+  mkdir -p "$BACKUP_DIR"
+  cp -p -- "$OPERATION_LOCK_FILE" "$BACKUP_DIR/stale-operation-lock-$(date +%Y%m%d-%H%M%S)"
+  CLEAN_PAY_PRODUCTION_OPERATION_LOCK_PATH=$OPERATION_LOCK_FILE \
+    sh "$NODE_TOOLING_SCRIPT" operation-lock release "$token" \
+    || die 'Штатно снять замок не удалось — проверьте его вручную.'
+  journal operation-lock-recovered "${operation:-?} ${started:-?} pid ${owner:-?}"
+  ok 'Брошенный замок снят'
+}
+
+# Checks, before the backup, the space deploy.sh will demand at install time:
+# its threshold plus the new images. Runs the same safe cleanup deploy.sh would
+# and drops older release images (keeping the running one), so an update never
+# starts unless it can finish.
+cp_ensure_disk_space() {
+  local current_image=$1 min need free
+  min=$(cp_env CLEAN_PAY_MIN_FREE_DISK_MB 8192)
+  need=$((min + CP_BUILD_SPACE_MB))
+  free=$(free_mb "$ROOT_DIR")
+  if [ "${free:-0}" -lt "$need" ]; then
+    note "Свободно $(human_mb "${free:-0}"), нужно ≥ $(human_mb "$need") — очищаю кэш сборки и старые образы…"
+    docker builder prune -af --filter until=24h >/dev/null 2>&1 || true
+    docker image prune -f >/dev/null 2>&1 || true
+    cp_prune_release_images "${current_image##*:}" "${current_image##*:}" \
+      "${current_image%:*}" "$(cp_env CLEAN_PAY_MIGRATION_IMAGE clean-pay-prod-migration:local | sed 's/:[^:]*$//')"
+    free=$(free_mb "$ROOT_DIR")
+  fi
+  if [ "${free:-0}" -ge "$need" ]; then
+    ok "Свободно $(human_mb "$free") (нужно ≥ $(human_mb "$need"))"
+    return 0
+  fi
+  err "Свободно $(human_mb "${free:-0}"), а для сборки и установки нужно ≥ $(human_mb "$need"):"
+  note "порог CLEAN_PAY_MIN_FREE_DISK_MB=$min плюс ~$(human_mb "$CP_BUILD_SPACE_MB") на новые образы."
+  docker system df 2>/dev/null | sed 's/^/    /' || true
+  die 'Освободите место (или уменьшите порог в .env) и повторите — ничего не изменено.'
+}
+
+# deploy.sh install stops nothing until its preflight checks pass. When the app
+# still runs the previous image, the failure happened before any change.
+cp_runtime_untouched() {
+  local app
+  app=$(cp_container app)
+  [ -n "$app" ] && container_running "$app" \
+    && [ "$(container_field "$app" '{{.Config.Image}}')" = "$1" ]
+}
+
+# The running menu is a private copy of the menu.sh checked out when it started.
+# After an update switched the checkout, restart into the new menu so its fixes
+# apply at once instead of the old code driving the next update.
+menu_reload_if_updated() {
+  local before=$1 now
+  now=$(git -C "$ROOT_DIR" rev-parse HEAD 2>/dev/null) || return 0
+  [ "$now" != "$before" ] || return 0
+  pause
+  note 'Код обновлён — перезапускаю меню новой версии…'
+  [ -z "${CLEAN_PAY_MENU_COPY:-}" ] || rm -f -- "$CLEAN_PAY_MENU_COPY"
+  exec env CLEAN_PAY_MENU_ROOT= CLEAN_PAY_MENU_COPY= bash "$ROOT_DIR/menu.sh"
+}
+
 # Every update builds a new pair of SHA-tagged images (~1.4 GB). After a
 # successful install, remove the SHA-tagged images of older updates so the disk
 # does not fill up. The new release and the one it replaced (quick rollback)
@@ -942,14 +1072,15 @@ cp_update() {
   cp_installed || die 'Clean Pay не установлен (нет deploy/prod/.env). Используйте установку.'
   need_docker
   need_git
-  local git_dir head dirty ref target subject migrations changed ancestor min free
+  local git_dir head dirty ref target subject migrations changed ancestor
   git_dir=$(git -C "$ROOT_DIR" rev-parse --absolute-git-dir)
   head=$(git -C "$ROOT_DIR" rev-parse HEAD)
   dirty=$(git -C "$ROOT_DIR" status --porcelain --untracked-files=all)
   [ -z "$dirty" ] || { printf '%s\n' "$dirty" | sed -n '1,10p' | sed 's/^/    /'; die 'В каталоге есть незафиксированные изменения — обновление из «грязного» checkout запрещено.'; }
 
   step 1 6 'Выбор версии'
-  kv 'Сейчас установлено' "$(short "$head") $(git -C "$ROOT_DIR" log -1 --format='%cs %s' | cut -c1-60)"
+  kv 'Сейчас установлено' "$(cp_version_at "$head") $(git -C "$ROOT_DIR" log -1 --format='%cs %s' | cut -c1-50)"
+  cp_refresh_local_origin
   show_remote_refs "$git_dir" origin
   ref=$(ask_value 'Тег, ветка или полный SHA' main)
   target=$(fetch_ref "$git_dir" origin "$ref") || die "Версия «$ref» не найдена в origin."
@@ -963,7 +1094,7 @@ cp_update() {
     | grep -c '/migration\.sql$' || true)
   if git -C "$ROOT_DIR" merge-base --is-ancestor "$head" "$target" 2>/dev/null; then ancestor=yes; else ancestor=no; fi
   say ''
-  kv 'Новая версия' "$(short "$target") $subject"
+  kv 'Новая версия' "$(cp_version_at "$target") $subject"
   if [ "$ancestor" = yes ]; then
     note 'Изменения:'
     git -C "$ROOT_DIR" log --oneline --no-merges "$head..$target" | sed -n '1,15p' | sed 's/^/      /'
@@ -978,13 +1109,8 @@ cp_update() {
   fi
 
   step 2 6 'Проверки перед обновлением'
-  min=$(cp_env CLEAN_PAY_MIN_FREE_DISK_MB 8192)
-  free=$(free_mb "$ROOT_DIR")
-  if [ "${free:-0}" -ge "$min" ]; then
-    ok "Свободно $(human_mb "$free")"
-  else
-    warn "Свободно $(human_mb "${free:-0}"), для сборки нужно ≥ $(human_mb "$min"): deploy.sh попробует очистить кэш сборки."
-  fi
+  cp_check_operation_lock
+  cp_ensure_disk_space "$(cp_env CLEAN_PAY_IMAGE clean-pay-prod-app:local)"
   ask_yes_no "Обновить Clean Pay до $(short "$target")?" no || { note 'Отменено, ничего не изменено.'; return 0; }
 
   step 3 6 'Резервная копия'
@@ -1054,6 +1180,13 @@ cp_update() {
   fi
 
   journal clean-pay-update-failed "install $(short "$head") -> $(short "$target")"
+  if cp_runtime_untouched "$old_image"; then
+    cp_restore_code
+    err 'Установка не началась: не прошли проверки перед установкой (подробности выше).'
+    ok "Сайт работает на прежней версии $(cp_version_at "$head"); код и релизные поля .env возвращены."
+    note "Резервная копия: $LAST_BACKUP_DIR"
+    return 1
+  fi
   err 'Установка не удалась. Приложение остановлено намеренно — старый код поверх новой схемы опасен.'
   if [ "$migrations" -eq 0 ]; then
     if ask_yes_no 'Новых миграций не было. Вернуть предыдущую версию и запустить её?' yes; then
@@ -1844,7 +1977,8 @@ menu_item() {
 menu_section() { printf '\n  %s%s%s\n' "$C_CYAN" "$1" "$C_RESET"; }
 
 main_menu() {
-  local choice
+  local choice before newer
+  newer=$(cp_newer_release)
   offer_screen
   while :; do
     load_settings
@@ -1853,6 +1987,7 @@ main_menu() {
     printf '  %sCLEAN PAY · центр управления%s   %s%s%s\n' "$C_BOLD" "$C_RESET" "$C_DIM" "$(hostname 2>/dev/null)" "$C_RESET"
     printf '%s%s%s\n' "$C_BLUE" "$RULE" "$C_RESET"
     print_summary
+    [ -z "$newer" ] || printf '  %s %sДоступна версия %s — пункт 5%s\n' "$(pad 'Обновление' 11)" "$C_YELLOW" "$newer" "$C_RESET"
     menu_section 'СОСТОЯНИЕ'
     menu_item 1 'Подробное состояние и здоровье'
     menu_item 2 'Проверка сервера перед установкой'
@@ -1886,7 +2021,9 @@ main_menu() {
       2) run_view check_server ;;
       3) run_view show_logs ;;
       4) run_action cp_install ;;
-      5) run_action cp_update ;;
+      5) before=$(git -C "$ROOT_DIR" rev-parse HEAD 2>/dev/null || true)
+         run_action cp_update
+         menu_reload_if_updated "$before" ;;
       6) run_action cp_configure ;;
       7) run_action cp_restart ;;
       8) run_action cp_stop ;;

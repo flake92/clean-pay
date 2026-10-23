@@ -353,4 +353,145 @@ describe("operator menu", () => {
     expect(readme).toContain("./menu.sh");
     expect(readme).toContain("./menu.sh backup nightly");
   });
+
+  it("checks the operation lock and disk space before the backup", () => {
+    const update = functionBody("cp_update");
+    expectBefore(update, "cp_check_operation_lock", "require_backup");
+    expectBefore(update, "cp_ensure_disk_space", "require_backup");
+    expectBefore(update, "cp_refresh_local_origin", "show_remote_refs");
+  });
+
+  it("reports a refused install as untouched instead of a stopped site", () => {
+    const update = functionBody("cp_update");
+    expectBefore(update, "cp_runtime_untouched \"$old_image\"", "Приложение остановлено намеренно");
+    expect(functionBody("cp_runtime_untouched")).toContain("{{.Config.Image}}");
+  });
+
+  it("restarts into the updated menu after a Clean Pay update", () => {
+    expect(functionBody("main_menu")).toContain('menu_reload_if_updated "$before"');
+    const reload = functionBody("menu_reload_if_updated");
+    expect(reload).toContain('[ "$now" != "$before" ] || return 0');
+    expect(reload).toContain('exec env CLEAN_PAY_MENU_ROOT= CLEAN_PAY_MENU_COPY= bash "$ROOT_DIR/menu.sh"');
+  });
+
+  describe.skipIf(!posixShell)("update preflight helpers", () => {
+    const stubs = [
+      'say() { printf "%s\\n" "$*"; }',
+      'ok() { printf "OK %s\\n" "$*"; }',
+      'note() { printf "NOTE %s\\n" "$*"; }',
+      'warn() { printf "WARN %s\\n" "$*"; }',
+      'err() { printf "ERR %s\\n" "$*"; }',
+      'die() { printf "DIE %s\\n" "$*"; exit 1; }',
+      'journal() { :; }',
+      'have() { return 1; }',
+      'short() { printf "%s" "$(printf "%s" "$1" | cut -c1-7)"; }',
+      'ask_yes_no() { return 0; }',
+    ].join("\n");
+    const run = (dir: string, script: string) => spawnSync(
+      posixShell!,
+      ["-c", script],
+      { encoding: "utf8", env: { ...process.env, DIR: shellPath(dir) } },
+    );
+
+    it("recovers a stale lock with its own token and refuses a live one", () => {
+      const dir = mkdtempSync(join(tmpdir(), "cp-lock-"));
+      try {
+        const token = "a".repeat(64);
+        const lock = (pid: number) => writeFileSync(
+          join(dir, "lock"),
+          JSON.stringify({ operation: "configure", pid, ownerPid: pid, helperPid: 1, startedAt: "2026-10-16T14:20:19.614Z", token }),
+        );
+        writeFileSync(join(dir, "tooling.sh"), 'printf "%s\\n" "$*" > "$DIR/release-args"; rm -f "$CLEAN_PAY_PRODUCTION_OPERATION_LOCK_PATH"\n');
+        const script = (owner: string) => [
+          stubs,
+          shellFunctionFrom(menu, "lock_field"),
+          shellFunctionFrom(menu, "cp_check_operation_lock"),
+          'OPERATION_LOCK_FILE="$DIR/lock"; NODE_TOOLING_SCRIPT="$DIR/tooling.sh"; BACKUP_DIR="$DIR/backups"',
+          owner,
+          "cp_check_operation_lock",
+        ].join("\n");
+
+        lock(999_999);
+        const stale = run(dir, script(""));
+        expect(stale.status, stale.stdout + stale.stderr).toBe(0);
+        expect(stale.stdout).toContain("«configure» от 2026-10-16T14:20:19.614Z");
+        expect(readFileSync(join(dir, "release-args"), "utf8").trim()).toBe(`operation-lock release ${token}`);
+        expect(spawnSync(posixShell!, ["-c", 'ls "$DIR/backups" | grep -c stale-operation-lock'], {
+          encoding: "utf8", env: { ...process.env, DIR: shellPath(dir) },
+        }).stdout.trim()).toBe("1");
+
+        // A lock owned by a live process (this shell) is never touched.
+        rmSync(join(dir, "release-args"), { force: true });
+        writeFileSync(join(dir, "lock"), JSON.stringify({ operation: "install", ownerPid: 1, token }));
+        const live = run(dir, script('OPERATION_LOCK_FILE="$DIR/lock"; sed -i "s/\\"ownerPid\\":1/\\"ownerPid\\":$$/" "$DIR/lock"'));
+        expect(live.status).toBe(1);
+        expect(live.stdout).toContain("ещё выполняется");
+        expect(() => readFileSync(join(dir, "release-args"), "utf8")).toThrow();
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    }, shellIntegrationTimeout);
+
+    it("stops before the backup when the install would run out of disk", () => {
+      const dir = mkdtempSync(join(tmpdir(), "cp-disk-"));
+      try {
+        const script = (free: number) => [
+          stubs,
+          shellFunctionFrom(menu, "cp_ensure_disk_space"),
+          "human_mb() { printf '%s MB' \"$1\"; }",
+          `free_mb() { printf '%s' ${free}; }`,
+          "cp_env() { [ \"$1\" = CLEAN_PAY_MIN_FREE_DISK_MB ] && printf 4096 || printf '%s' \"$2\"; }",
+          "docker() { :; }",
+          "cp_prune_release_images() { :; }",
+          "CP_BUILD_SPACE_MB=1536",
+          "cp_ensure_disk_space app:current",
+        ].join("\n");
+        const short = run(dir, script(5000));
+        expect(short.status).toBe(1);
+        expect(short.stdout).toContain("нужно ≥ 5632 MB");
+        expect(short.stdout).toContain("ничего не изменено");
+        const enough = run(dir, script(6000));
+        expect(enough.status, enough.stdout).toBe(0);
+        expect(enough.stdout).toContain("OK Свободно 6000 MB");
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    }, shellIntegrationTimeout);
+
+    it("shows release versions and refreshes a local mirror origin", () => {
+      const dir = mkdtempSync(join(tmpdir(), "cp-mirror-"));
+      try {
+        const git = (args: string) => spawnSync(posixShell!, ["-c", `cd "$DIR" && ${args}`], {
+          encoding: "utf8", env: { ...process.env, DIR: shellPath(dir), GIT_AUTHOR_NAME: "t", GIT_AUTHOR_EMAIL: "t@t", GIT_COMMITTER_NAME: "t", GIT_COMMITTER_EMAIL: "t@t" },
+        });
+        const setup = git([
+          "git init -q upstream-work && cd upstream-work",
+          "printf '{\\n  \"name\": \"x\",\\n  \"version\": \"0.4.1\",\\n}\\n' > package.json",
+          "git add package.json && git commit -q -m one && cd ..",
+          "git clone -q --bare upstream-work upstream.git",
+          "git clone -q --bare upstream.git mirror.git",
+          "git --git-dir=mirror.git remote remove origin",
+          "git clone -q mirror.git checkout",
+          "cd upstream-work && git tag v0.4.2 && git push -q ../upstream.git v0.4.2",
+        ].join(" && "));
+        expect(setup.status, setup.stderr).toBe(0);
+        const result = spawnSync(posixShell!, ["-c", [
+          stubs,
+          shellFunctionFrom(menu, "cp_version_at"),
+          shellFunctionFrom(menu, "cp_refresh_local_origin"),
+          'ROOT_DIR="$DIR/checkout"; CLEAN_PAY_UPSTREAM="$DIR/upstream.git"',
+          'cp_version_at "$(git -C "$ROOT_DIR" rev-parse HEAD)"; echo',
+          "cp_refresh_local_origin",
+          'git --git-dir="$DIR/mirror.git" tag',
+        ].join("\n")], { encoding: "utf8", env: { ...process.env, DIR: shellPath(dir) } });
+        expect(result.status, result.stdout + result.stderr).toBe(0);
+        expect(result.stdout).toMatch(/^0\.4\.1 \([0-9a-f]{7}\)$/m);
+        expect(result.stdout).toContain("локального зеркала");
+        expect(result.stdout).toContain("OK Зеркало обновлено");
+        expect(result.stdout).toMatch(/^v0\.4\.2$/m);
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    }, shellIntegrationTimeout);
+  });
 });
