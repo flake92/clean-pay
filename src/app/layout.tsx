@@ -8,9 +8,11 @@ import "./globals.css";
 import "../frontend/styles/visual.css";
 import "../frontend/styles/dark.css";
 import { Providers } from "./providers";
+import { brandIcons } from "./_composition/brand-assets";
 import { getBranding } from "@/shared/branding";
 
 const branding = getBranding();
+const icons = brandIcons();
 
 export const metadata: Metadata = {
   title: branding.name,
@@ -21,7 +23,11 @@ export const metadata: Metadata = {
     title: branding.name,
   },
   icons: {
-    apple: [{ url: "/clean-pay-icon-192.png?v=3", sizes: "192x192", type: "image/png" }],
+    icon: [
+      { url: icons.favicon, sizes: "any" },
+      ...(icons.faviconSvg ? [{ url: icons.faviconSvg, type: "image/svg+xml" }] : []),
+    ],
+    apple: [{ ...icons.apple, type: "image/png" }],
   },
 };
 

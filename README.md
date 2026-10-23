@@ -64,8 +64,45 @@ Production-запуск использует Docker Compose, собственн�
 - **На телефоне** внизу экрана есть панель быстрой навигации по основным
   разделам кабинета.
 - Весь декоративный слой собран в `src/frontend/styles/visual.css` и
-  `src/frontend/styles/dark.css`; брендинг (название, логотип) настраивается
-  как прежде.
+  `src/frontend/styles/dark.css`; название, логотип и иконки настраиваются
+  без правки кода — см. «Свой бренд».
+
+## Свой бренд
+
+Свои логотип и иконки кладите в каталог `public/brand/` рабочей копии. Git его
+не отслеживает, поэтому обновления через меню его не трогают, а сборка образа
+забирает его вместе с остальным `public/`. Каталог попадает в резервную копию
+меню. Не заменяйте и не удаляйте штатные файлы в `public/`: тогда рабочая копия
+становится «грязной», меню отказывается обновляться, а образ, собранный из
+чистого дерева, теряет ваши файлы.
+
+| Файл в `public/brand/` | Где используется | Если файла нет |
+|---|---|---|
+| любой, например `logo.svg` | логотип: шапка, вход, подвал — укажите `NEXT_PUBLIC_BRAND_LOGO_URL=/brand/logo.svg` | `/clean-pay-logo.png` |
+| `favicon.ico` (лучше с размерами 16, 32 и 48 px) | значок вкладки | штатный |
+| `favicon.svg` | значок вкладки в современных браузерах | не выводится |
+| `apple-touch-icon.png` (180×180) | иконка на iPhone/iPad | штатная 192×192 |
+| `icon-192.png`, `icon-512.png` | иконки установленного приложения (Android, ПК) | штатные |
+| `icon-maskable-512.png` | адаптивная иконка Android (важное — в центральных 80 %) | штатная |
+
+Путь к логотипу вшивается в образ при сборке. Если файла по этому пути нет,
+сборка остановится с понятной ошибкой ещё до замены работающего сайта. После
+изменения файлов бренда пересоберите образ: «Обновить Clean Pay» → та же версия →
+«Пересобрать её?» → «д» (или `./deploy.sh build` и `./deploy.sh install`).
+
+**Если вы уже заменили файлы прямо в `public/` и стоите на 0.4.2 или раньше**
+(в `.gitignore` этих версий ещё нет `public/brand/`), перенесите их так — это
+локальное правило git, рабочая копия останется чистой:
+
+```bash
+cd /opt/clean-pay
+echo '/public/brand/' >> .git/info/exclude
+mkdir -p public/brand
+git checkout -- public
+```
+
+Затем положите свои файлы в `public/brand/`, укажите в `.env`
+`NEXT_PUBLIC_BRAND_LOGO_URL=/brand/<файл>` (пункт меню 6) и обновитесь кнопкой.
 
 ## Меню управления
 
@@ -296,7 +333,7 @@ Production запускается из зафиксированного тега
 ветки.
 
 ```bash
-RELEASE_REF='refs/tags/v0.4.2'
+RELEASE_REF='refs/tags/v0.4.3'
 sudo mkdir -p /opt/clean-pay
 sudo chown "$USER":"$USER" /opt/clean-pay
 git clone https://github.com/flake92/clean-pay.git /opt/clean-pay
@@ -572,7 +609,7 @@ workers не редактируйте вручную.
 
 ```bash
 cd /opt/clean-pay
-git fetch -q origin tag v0.4.2 && CLEAN_PAY_MENU_ROOT="$PWD" bash <(git show v0.4.2:menu.sh) update
+git fetch -q origin tag v0.4.3 && CLEAN_PAY_MENU_ROOT="$PWD" bash <(git show v0.4.3:menu.sh) update
 ```
 
 Ручной порядок для тех, кто работает без меню:
@@ -595,7 +632,7 @@ workers. Если миграция завершается ошибкой, runtim
 
 ```bash
 cd /opt/clean-pay
-RELEASE_REF='refs/tags/v0.4.2'
+RELEASE_REF='refs/tags/v0.4.3'
 git fetch --depth=1 origin "$RELEASE_REF"
 RELEASE_SHA=$(git rev-parse FETCH_HEAD)
 git checkout --detach "$RELEASE_SHA"

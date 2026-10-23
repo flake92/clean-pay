@@ -53,3 +53,7 @@ Thumbs.db
 # prisma/local data
 *.db
 *.db-journal
+
+# Owner brand files (logo, favicons, app icons): kept out of git so menu updates
+# keep them; the image build copies them with the rest of public/.
+/public/brand/

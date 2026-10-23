@@ -367,6 +367,14 @@ describe("operator menu", () => {
     expect(functionBody("cp_runtime_untouched")).toContain("{{.Config.Image}}");
   });
 
+  it("backs up owner brand files and points edited public/ files to public/brand", () => {
+    expect(functionBody("backup_create")).toContain('cp -pR -- "$ROOT_DIR/public/brand" "$dir/config/clean-pay/brand"');
+    const update = functionBody("cp_update");
+    expectBefore(update, "cp_brand_assets_hint", "обновление из «грязного» checkout запрещено");
+    expect(functionBody("cp_brand_assets_hint")).toContain("NEXT_PUBLIC_BRAND_LOGO_URL=/brand/");
+    expect(readme).toContain("## Свой бренд");
+  });
+
   it("restarts into the updated menu after a Clean Pay update", () => {
     expect(functionBody("main_menu")).toContain('menu_reload_if_updated "$before"');
     const reload = functionBody("menu_reload_if_updated");

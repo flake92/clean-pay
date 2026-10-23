@@ -30,6 +30,13 @@ COPY scripts/next-command.mjs scripts/prisma-generate.mjs ./scripts/
 COPY runtime/database-pool.mjs runtime/production-env-rules.mjs ./runtime/
 COPY prisma ./prisma
 COPY public ./public
+# The logo path is baked into the image: fail the build, not production, when no
+# file backs it (for example brand files left outside public/brand/).
+RUN logo_path="${NEXT_PUBLIC_BRAND_LOGO_URL%%\?*}"; \
+    test -f "public${logo_path}" || { \
+      echo "NEXT_PUBLIC_BRAND_LOGO_URL=${NEXT_PUBLIC_BRAND_LOGO_URL}: file public${logo_path} is not in the build. Put brand files into public/brand/ (ignored by git, kept by updates)." >&2; \
+      exit 1; \
+    }
 COPY src ./src
 RUN NEXT_PUBLIC_APP_URL="${NEXT_PUBLIC_APP_URL}" \
     NEXT_PUBLIC_APP_ALIAS_ORIGINS="${NEXT_PUBLIC_APP_ALIAS_ORIGINS}" \

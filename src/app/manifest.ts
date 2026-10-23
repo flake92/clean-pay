@@ -1,9 +1,11 @@
 import type { MetadataRoute } from "next";
 
+import { brandIcons } from "./_composition/brand-assets";
 import { getBranding } from "@/shared/branding";
 
 export default function manifest(): MetadataRoute.Manifest {
   const branding = getBranding();
+  const icons = brandIcons();
 
   return {
     name: branding.name,
@@ -14,9 +16,9 @@ export default function manifest(): MetadataRoute.Manifest {
     background_color: "#ffffff",
     theme_color: "#0e7490",
     icons: [
-      { src: "/clean-pay-icon-192.png", sizes: "192x192", type: "image/png", purpose: "any" },
-      { src: "/clean-pay-icon-512.png", sizes: "512x512", type: "image/png", purpose: "any" },
-      { src: "/clean-pay-icon-maskable-512.png", sizes: "512x512", type: "image/png", purpose: "maskable" },
+      { src: icons.icon192, sizes: "192x192", type: "image/png", purpose: "any" },
+      { src: icons.icon512, sizes: "512x512", type: "image/png", purpose: "any" },
+      { src: icons.maskable512, sizes: "512x512", type: "image/png", purpose: "maskable" },
     ],
   };
 }

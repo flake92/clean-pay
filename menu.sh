@@ -644,6 +644,9 @@ backup_create() {
   if cp_installed; then
     say '  Clean Pay: настройки…'
     copy_config "$dir/config/clean-pay" "$ENV_FILE" "$ENV_FILE".* "$MENU_CONF"
+    if [ -d "$ROOT_DIR/public/brand" ] && [ ! -L "$ROOT_DIR/public/brand" ]; then
+      cp -pR -- "$ROOT_DIR/public/brand" "$dir/config/clean-pay/brand" && note '  + public/brand/ (файлы бренда)'
+    fi
     items=$((items + 1))
   fi
 
@@ -927,6 +930,20 @@ fetch_ref() {
   git --git-dir="$git_dir" rev-parse 'FETCH_HEAD^{commit}'
 }
 
+# Owners who rebrand by editing public/ make the checkout dirty, and a later
+# build from a clean tree drops their files. public/brand/ is the supported
+# place: git ignores it, updates keep it and the image build copies it.
+cp_brand_assets_hint() {
+  say ''
+  warn 'Похоже, в public/ лежат ваши файлы бренда (логотип, иконки).'
+  note 'Их место — каталог public/brand/: git его не отслеживает, обновления его не трогают,'
+  note 'а сборка образа его забирает. Перенесите туда свои файлы, затем верните штатные:'
+  note "  mkdir -p $ROOT_DIR/public/brand && mv <ваши файлы> $ROOT_DIR/public/brand/"
+  note "  git -C $ROOT_DIR checkout -- public"
+  note 'и укажите путь к логотипу в .env: NEXT_PUBLIC_BRAND_LOGO_URL=/brand/<файл> (пункт 6).'
+  note 'Имена иконок (favicon.ico, apple-touch-icon.png, icon-192.png, …) — в README, раздел «Свой бренд».'
+}
+
 # "0.4.1 (64d9e05)": the release version of a commit, read from its package.json.
 cp_version_at() {
   local version
@@ -1081,7 +1098,13 @@ cp_update() {
   git_dir=$(git -C "$ROOT_DIR" rev-parse --absolute-git-dir)
   head=$(git -C "$ROOT_DIR" rev-parse HEAD)
   dirty=$(git -C "$ROOT_DIR" status --porcelain --untracked-files=all)
-  [ -z "$dirty" ] || { printf '%s\n' "$dirty" | sed -n '1,10p' | sed 's/^/    /'; die 'В каталоге есть незафиксированные изменения — обновление из «грязного» checkout запрещено.'; }
+  if [ -n "$dirty" ]; then
+    printf '%s\n' "$dirty" | sed -n '1,10p' | sed 's/^/    /'
+    if printf '%s\n' "$dirty" | grep -E '^.. public/' >/dev/null; then
+      cp_brand_assets_hint
+    fi
+    die 'В каталоге есть незафиксированные изменения — обновление из «грязного» checkout запрещено.'
+  fi
 
   step 1 6 'Выбор версии'
   kv 'Сейчас установлено' "$(cp_version_at "$head") $(git -C "$ROOT_DIR" log -1 --format='%cs %s' | cut -c1-50)"
@@ -1091,7 +1114,9 @@ cp_update() {
   target=$(fetch_ref "$git_dir" origin "$ref") || die "Версия «$ref» не найдена в origin."
   if [ "$target" = "$head" ]; then
     ok 'Эта версия уже установлена.'
-    return 0
+    # The logo path and public/ files are baked into the image, so brand changes
+    # need a rebuild of the same version.
+    ask_yes_no 'Пересобрать её (например, после изменения файлов в public/brand/)?' no || return 0
   fi
   subject=$(git -C "$ROOT_DIR" log -1 --format='%cs %s' "$target" | cut -c1-70)
   changed=$(git -C "$ROOT_DIR" diff --name-only "$head" "$target" | wc -l | tr -d ' ')
