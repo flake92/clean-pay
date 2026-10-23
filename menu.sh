@@ -1064,7 +1064,12 @@ cp_prune_release_images() {
       if docker image rm "$image" >/dev/null 2>&1; then removed=$((removed + 1)); fi
     done
   done
-  [ "$removed" -eq 0 ] || ok "Удалены образы старых версий: $removed (оставлены текущая и предыдущая для отката)"
+  [ "$removed" -eq 0 ] && return 0
+  if [ "$keep_new" = "$keep_previous" ]; then
+    ok "Удалены образы старых версий: $removed (оставлена работающая)"
+  else
+    ok "Удалены образы старых версий: $removed (оставлены текущая и предыдущая для отката)"
+  fi
 }
 
 cp_update() {
