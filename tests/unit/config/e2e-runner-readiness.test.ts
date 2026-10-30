@@ -8,7 +8,7 @@ const shellRunner = readFileSync("scripts/e2e-devcontainer.sh", "utf8");
 const compose = readFileSync(".devcontainer/docker-compose.yml", "utf8");
 const ciWorkflow = readFileSync(".github/workflows/ci.yml", "utf8");
 const productionRemnashopEnv = readFileSync("deploy/prod/remnashop.env.example", "utf8");
-const remnashopRevision = "7a20b242cdeb6a1dba6fbda123b8da5cb19d9c7b";
+const remnashopRevision = "bec58524f758e54a05221d6a22691952972ac872";
 
 const hostPortContract = [
   ["CLEAN_PAY_DEVCONTAINER_APP_HOST_PORT", "4000", "4000"],

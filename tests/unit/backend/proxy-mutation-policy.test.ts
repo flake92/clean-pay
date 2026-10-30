@@ -161,6 +161,29 @@ describe("proxy browser mutation policy", () => {
     expect(oversizedClone).not.toHaveBeenCalled();
   });
 
+  it("accepts RFC 8058 one-click unsubscribe from mailbox providers but still bounds its body", async () => {
+    const policy = (headers: Record<string, string>, pathname = "/api/notifications/unsubscribe") =>
+      browserMutationPolicy({
+        method: "POST",
+        pathname,
+        headers: new Headers({ "content-type": "application/x-www-form-urlencoded", ...headers }),
+        trustedAppUrl: "https://pay.example.com",
+        hasAccessCookie: false,
+        hasRefreshCookie: false,
+        cloneBody: () => stream(26),
+      });
+
+    await expect(policy({})).resolves.toEqual({ ok: true });
+    await expect(policy({ origin: "https://mail.example.net" })).resolves.toEqual({ ok: true });
+    await expect(policy({ "content-length": String(serverActionBodyLimitBytes + 1) }))
+      .resolves.toEqual({ ok: false, reason: "request_body_too_large", status: 413 });
+    // A Server Action or any other form endpoint keeps the origin check.
+    await expect(policy({ "next-action": "id" }))
+      .resolves.toEqual({ ok: false, reason: "untrusted_origin", status: 403 });
+    await expect(policy({}, "/api/notifications/unsubscribe/other"))
+      .resolves.toEqual({ ok: false, reason: "untrusted_origin", status: 403 });
+  });
+
   it("applies the Server Action byte limit after accepting a configured public alias", async () => {
     const exactClone = vi.fn(() => stream(serverActionBodyLimitBytes));
     await expect(browserMutationPolicy({

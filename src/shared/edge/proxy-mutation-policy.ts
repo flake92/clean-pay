@@ -1,4 +1,5 @@
 export const serverActionBodyLimitBytes = 64 * 1024;
+const oneClickUnsubscribePath = "/api/notifications/unsubscribe";
 
 export type RequestSourceValidationResult =
   | { ok: true }
@@ -166,6 +167,19 @@ export async function browserMutationPolicy({
   hasRefreshCookie: boolean;
   cloneBody: () => ReadableStream<Uint8Array> | null;
 }): Promise<BrowserMutationPolicyResult> {
+  // One-click unsubscribe (RFC 8058): mailbox providers POST a form body from
+  // their own servers, without this site's Origin. The route uses only the
+  // signed token in the URL and never cookies, so it needs no origin check.
+  if (
+    pathname === oneClickUnsubscribePath
+    && method === "POST"
+    && !headers.has("next-action")
+  ) {
+    return await serverActionBodyExceedsLimit({ headers, cloneBody })
+      ? { ok: false, reason: "request_body_too_large", status: 413 }
+      : { ok: true };
+  }
+
   if (isServerActionRequest(method, headers)) {
     const source = validateRequestSource({ headers, trustedAppUrl, trustedAliasOrigins });
     if (!source.ok) return source;
