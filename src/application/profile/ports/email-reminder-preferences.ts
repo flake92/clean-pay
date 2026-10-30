@@ -1,4 +1,7 @@
-import type { EmailReminderPreferenceViewModel } from "@/application/models/profile";
+import type {
+  EmailPreferenceChannel,
+  EmailReminderPreferenceViewModel,
+} from "@/application/models/profile";
 
 export interface EmailReminderPreferenceReader {
   load(): Promise<EmailReminderPreferenceViewModel>;
@@ -14,6 +17,7 @@ export interface EmailReminderPreferenceCommands {
   assertRateLimit(actor: EmailReminderPreferenceActor): Promise<void>;
   update(
     actor: EmailReminderPreferenceActor,
+    channel: EmailPreferenceChannel,
     enabled: boolean,
   ): Promise<EmailReminderPreferenceViewModel>;
 }

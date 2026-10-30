@@ -130,7 +130,38 @@ function decodeNotificationPreferences(value: unknown) {
       }
       return item;
     }),
+    // Added in Remnashop 0060; the defaults describe an older Remnashop.
+    service_email_enabled: optionalBooleanField(input, "service_email_enabled") ?? true,
+    news_email_enabled: optionalBooleanField(input, "news_email_enabled") ?? false,
+    bulk_sender_email: optionalNullableStringField(input, "bulk_sender_email") ?? null,
+    push_available: optionalBooleanField(input, "push_available") ?? false,
   };
+}
+
+export function decodePushKey(value: unknown) {
+  const input = record(value, "Remnashop push key");
+  return {
+    enabled: booleanField(input, "enabled"),
+    public_key: nullableStringField(input, "public_key"),
+  };
+}
+
+export function decodePushStatus(value: unknown) {
+  const input = record(value, "Remnashop push status");
+  const devices = numberField(input, "devices");
+  if (!Number.isSafeInteger(devices) || devices < 0) {
+    throw new TypeError("devices must be a non-negative integer");
+  }
+  return { devices };
+}
+
+export function decodeUnsubscribe(value: unknown) {
+  const input = record(value, "Remnashop unsubscribe response");
+  const category = stringField(input, "category");
+  if (category !== "SERVICE" && category !== "NEWS") {
+    throw new TypeError("category must be SERVICE or NEWS");
+  }
+  return { category } as const;
 }
 
 function decodeCurrentSubscription(value: unknown) {

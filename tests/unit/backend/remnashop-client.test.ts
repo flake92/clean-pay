@@ -426,13 +426,22 @@ describe("remnashop client", () => {
     const fetchMock = vi.spyOn(globalThis, "fetch")
       .mockResolvedValueOnce(response({ body: preference }))
       .mockResolvedValueOnce(response({ body: preference }));
+    // A pre-0060 Remnashop omits the channel fields; the decoder supplies
+    // the defaults of that version (service on, news off, no push).
+    const decoded = {
+      ...preference,
+      service_email_enabled: true,
+      news_email_enabled: false,
+      bulk_sender_email: null,
+      push_available: false,
+    };
     const timeoutMock = vi.spyOn(AbortSignal, "timeout");
 
     await expect(getRemnashopNotificationPreferences("access-1"))
-      .resolves.toEqual(preference);
+      .resolves.toEqual(decoded);
     await expect(updateRemnashopNotificationPreferences("access-1", {
       subscription_expiration_email_enabled: true,
-    })).resolves.toEqual(preference);
+    })).resolves.toEqual(decoded);
 
     expect(timeoutMock).toHaveBeenNthCalledWith(1, 3_000);
     expect(timeoutMock).toHaveBeenNthCalledWith(2, 15_000);

@@ -2,6 +2,7 @@ import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState, type FormEvent } from "react";
 
 import { logoutAction } from "@/app/actions/session";
+import { releaseDevicePush } from "@/frontend/lib/push-logout";
 import {
   activatePromocodeAction,
   deleteAllDevicesAction,
@@ -238,6 +239,7 @@ export function useCabinetPanelController({
 
   async function logout() {
     resetChatwootSession();
+    await releaseDevicePush();
     await logoutAction();
   }
 

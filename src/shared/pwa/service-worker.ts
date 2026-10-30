@@ -13,7 +13,17 @@ function js(value: unknown) {
   return JSON.stringify(value).replaceAll("<", "\\u003c");
 }
 
-export function serviceWorkerSource(buildId: string) {
+export type ServiceWorkerIcons = {
+  icon: string;
+  badge: string;
+};
+
+const defaultIcons: ServiceWorkerIcons = {
+  icon: "/clean-pay-icon-192.png",
+  badge: "/clean-pay-icon-192.png",
+};
+
+export function serviceWorkerSource(buildId: string, icons: ServiceWorkerIcons = defaultIcons) {
   const normalizedBuildId = buildId.trim();
 
   if (!normalizedBuildId || normalizedBuildId.length > 200) {
@@ -57,6 +67,53 @@ self.addEventListener("fetch", (event) => {
     const cache = await caches.open(CACHE_NAME);
     return await cache.match(OFFLINE_URL, { ignoreSearch: true }) ?? Response.error();
   }));
+});
+
+const NOTIFICATION_ICON = ${js(icons.icon)};
+const NOTIFICATION_BADGE = ${js(icons.badge)};
+
+function notificationTarget(value) {
+  try {
+    const url = new URL(typeof value === "string" ? value : "/", self.location.origin);
+    if (url.origin === self.location.origin || url.protocol === "https:") return url.href;
+  } catch (error) {}
+  return new URL("/", self.location.origin).href;
+}
+
+// Copies of bot notifications delivered by Web Push (RFC 8030).
+self.addEventListener("push", (event) => {
+  let data = {};
+  try {
+    data = event.data ? event.data.json() : {};
+  } catch (error) {
+    data = { body: event.data ? event.data.text() : "" };
+  }
+  const title = typeof data.title === "string" && data.title ? data.title : "Уведомление";
+  event.waitUntil(self.registration.showNotification(title, {
+    body: typeof data.body === "string" ? data.body : "",
+    icon: NOTIFICATION_ICON,
+    badge: NOTIFICATION_BADGE,
+    tag: typeof data.tag === "string" ? data.tag : undefined,
+    data: { url: notificationTarget(data.url) },
+  }));
+});
+
+self.addEventListener("notificationclick", (event) => {
+  event.notification.close();
+  const target = notificationTarget(event.notification.data && event.notification.data.url);
+  event.waitUntil((async () => {
+    const sameOrigin = new URL(target).origin === self.location.origin;
+    if (sameOrigin) {
+      const windows = await self.clients.matchAll({ type: "window", includeUncontrolled: true });
+      for (const client of windows) {
+        if (new URL(client.url).origin !== self.location.origin) continue;
+        await client.focus();
+        if ("navigate" in client) await client.navigate(target);
+        return;
+      }
+    }
+    await self.clients.openWindow(target);
+  })());
 });
 `;
 }

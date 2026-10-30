@@ -1089,6 +1089,33 @@ cp_prune_release_images() {
   fi
 }
 
+# The Remnashop schema is checked by deploy.sh only at install, after a long build.
+# Reads the floor of the selected version and, when the local Remnashop is older,
+# offers to update Remnashop first. A newer Remnashop keeps the old Clean Pay working,
+# so this order is safe; the other order would fail the compatibility check.
+cp_check_remnashop_floor() {
+  local target=$1 floor current
+  floor=$(git -C "$ROOT_DIR" show "$target:deploy/prod/prepare-remnashop-rollout.sh" 2>/dev/null \
+    | sed -n 's/^repository_minimum_revision=\([0-9][0-9]*\)$/\1/p')
+  [ -n "$floor" ] || return 0
+  # Remnashop on another server: deploy.sh checks it at install.
+  container_exists "$RS_DB" || return 0
+  current=$(db_query "$RS_DB" 'SELECT version_num FROM alembic_version' 2>/dev/null || true)
+  case "$current" in ''|*[!0-9]*) return 0 ;; esac
+  [ "$((10#$current))" -lt "$((10#$floor))" ] || { ok "Схема Remnashop $current подходит (нужна не ниже $floor)"; return 0; }
+  warn "Версии $(cp_version_at "$target") нужен Remnashop со схемой не ниже $floor, сейчас $current."
+  note 'Сначала обновите Remnashop: новый Remnashop работает и с текущим Clean Pay,'
+  note 'а установка нового Clean Pay поверх старого Remnashop остановится на проверке совместимости.'
+  ask_yes_no 'Обновить Remnashop сейчас (выберите ветку main), затем продолжить с Clean Pay?' yes \
+    || die 'Обновление Clean Pay отменено, ничего не изменено. Обновите Remnashop пунктом меню и повторите.'
+  ( rs_update ) || die 'Remnashop не обновлён — Clean Pay не тронут. Подробности выше.'
+  current=$(db_query "$RS_DB" 'SELECT version_num FROM alembic_version' 2>/dev/null || true)
+  case "$current" in ''|*[!0-9]*) die 'Не удалось прочитать схему Remnashop после обновления.' ;; esac
+  [ "$((10#$current))" -ge "$((10#$floor))" ] \
+    || die "Схема Remnashop всё ещё $current (нужна $floor). Выберите версию Remnashop main и повторите."
+  ok "Remnashop готов (схема $current) — продолжаю обновление Clean Pay"
+}
+
 cp_update() {
   title 'Обновление Clean Pay' 'Копия → новая версия кода → сборка (сайт работает) → установка (короткий простой)'
   cp_installed || die 'Clean Pay не установлен (нет deploy/prod/.env). Используйте установку.'
@@ -1140,6 +1167,7 @@ cp_update() {
 
   step 2 6 'Проверки перед обновлением'
   cp_check_operation_lock
+  cp_check_remnashop_floor "$target"
   cp_ensure_disk_space "$(cp_env CLEAN_PAY_IMAGE clean-pay-prod-app:local)"
   ask_yes_no "Обновить Clean Pay до $(short "$target")?" no || { note 'Отменено, ничего не изменено.'; return 0; }
 
@@ -1205,6 +1233,7 @@ cp_update() {
     if [ "$traceable" = yes ]; then
       cp_prune_release_images "$target" "${old_image##*:}" "${old_image%:*}" "${old_migration_image%:*}"
     fi
+    rs_push_keys_followup
     note 'Проверьте вход, создание платежа и выдачу подписки.'
     return 0
   fi
@@ -1513,6 +1542,7 @@ rs_update() {
   step 4 6 'Резервная копия'
   require_backup "before-remnashop-$(short "$target")"
   rs_secure_env
+  rs_ensure_push_keys "$image" || true
   compose_before="$LAST_BACKUP_DIR/config/remnashop/docker-compose.yml"
   [ -f "$compose_before" ] || die 'В копии нет compose-файла Remnashop — откат был бы невозможен.'
   if [ "$layout" = upstream ]; then
@@ -1632,6 +1662,116 @@ rs_update() {
   fi
   journal remnashop-update "$(short "$current_rev") -> $(short "$target") ok; previous image $current_id; backup $LAST_BACKUP_DIR"
   ok "Remnashop обновлён до $(short "$target"). Прежний образ сохранён: $current_image"
+  rs_bulk_email_hint
+}
+
+# Web Push needs one VAPID key pair per installation. It is generated once with the
+# new image (no tools needed on the host) and then kept: a new pair would silently
+# cut off every subscribed device. Images without the generator change nothing.
+# Returns 0 only when it wrote a new pair (the caller restarts Remnashop).
+rs_ensure_push_keys() {
+  local image=$1 env="$REMNASHOP_DIR/.env" keys public private subject from domain
+  [ -f "$env" ] || return 1
+  [ -z "$(env_get "$env" WEB_PUSH_VAPID_PUBLIC_KEY)" ] || return 1
+  keys=$(docker run --rm --network none --entrypoint python "$image" \
+    -m src.infrastructure.services.web_push 2>/dev/null) || return 1
+  public=$(printf '%s\n' "$keys" | sed -n 's/^WEB_PUSH_VAPID_PUBLIC_KEY=\([A-Za-z0-9_-]\{80,100\}\)$/\1/p')
+  private=$(printf '%s\n' "$keys" | sed -n 's/^WEB_PUSH_VAPID_PRIVATE_KEY=\([A-Za-z0-9_-]\{40,50\}\)$/\1/p')
+  if [ -z "$public" ] || [ -z "$private" ]; then
+    warn 'Не удалось создать ключи Web Push — push-уведомления останутся выключенными.'
+    return 1
+  fi
+  subject=$(env_get "$env" WEB_PUSH_VAPID_SUBJECT)
+  if [ -z "$subject" ]; then
+    from=$(env_get "$env" EMAIL_FROM_EMAIL)
+    domain=$(env_get "$env" APP_DOMAIN)
+    if [ -n "$from" ]; then subject="mailto:$from"
+    elif [ -n "$domain" ]; then subject="https://$domain"
+    fi
+  fi
+  [ -n "$subject" ] || { warn 'Нет EMAIL_FROM_EMAIL и APP_DOMAIN для контакта VAPID — push останется выключенным.'; return 1; }
+  rs_env_set "$env" WEB_PUSH_VAPID_PUBLIC_KEY "$public"
+  rs_env_set "$env" WEB_PUSH_VAPID_PRIVATE_KEY "$private"
+  rs_env_set "$env" WEB_PUSH_VAPID_SUBJECT "$subject"
+  ok 'Созданы ключи Web Push (VAPID); они сохраняются при следующих обновлениях'
+}
+
+# A Remnashop updated by an older menu has no VAPID keys. After a Clean Pay update
+# they are added to the running image and Remnashop restarts so push works.
+rs_push_keys_followup() {
+  container_exists "$RS_API" && [ -f "$REMNASHOP_DIR/.env" ] || return 0
+  [ -z "$(env_get "$REMNASHOP_DIR/.env" WEB_PUSH_VAPID_PUBLIC_KEY)" ] || return 0
+  [ "$(id -u)" -eq 0 ] || return 0
+  note 'В Remnashop ещё нет ключей Web Push — push-уведомления в приложении выключены.'
+  ask_yes_no 'Создать ключи и перезапустить API, worker и scheduler Remnashop (~30 с)?' yes || return 0
+  rs_ensure_push_keys "$(container_field "$RS_API" '{{.Config.Image}}')" || return 0
+  if rs_compose up -d --no-deps --force-recreate \
+      "$(rs_service_of "$RS_API" remnashop)" \
+      "$(rs_service_of "$RS_WORKER" remnashop-taskiq-worker)" \
+      "$(rs_service_of "$RS_SCHEDULER" remnashop-taskiq-scheduler)" \
+    && rs_wait_healthy; then
+    ok 'Remnashop перезапущен: push-уведомления доступны'
+  else
+    warn 'Remnashop не стал healthy после перезапуска — смотрите «Логи сервисов».'
+  fi
+}
+
+rs_bulk_email_hint() {
+  [ "$(env_get "$REMNASHOP_DIR/.env" BULK_EMAIL_ENABLED)" = true ] && return 0
+  note 'E-mail-копии уведомлений бота и новости выключены: нет отдельного SMTP рассылок.'
+  note 'Включить: пункт меню «SMTP рассылок». Telegram и push работают без него.'
+}
+
+# Menu item: the separate SMTP account for notification copies and news (BULK_EMAIL_*).
+rs_bulk_email() {
+  title 'SMTP рассылок Remnashop' 'Отдельный ящик для копий уведомлений и новостей; коды входа идут через основной SMTP'
+  need_docker
+  local env="$REMNASHOP_DIR/.env" host port security user password from name rate
+  [ -f "$env" ] || die "Не найден $env."
+  [ "$(id -u)" -eq 0 ] || die 'Запустите от root: нужны права на .env Remnashop.'
+  kv 'Сейчас' "$( [ "$(env_get "$env" BULK_EMAIL_ENABLED)" = true ] \
+    && printf 'включён: %s → %s' "$(env_get "$env" BULK_EMAIL_HOST)" "$(env_get "$env" BULK_EMAIL_FROM_EMAIL)" \
+    || printf 'выключен')"
+  note 'Используйте отдельный ящик или сервис рассылок; для домена отправителя настройте SPF, DKIM и DMARC.'
+  if [ "$(env_get "$env" BULK_EMAIL_ENABLED)" = true ] && ask_yes_no 'Выключить e-mail-копии и новости?' no; then
+    backup_create before-bulk-email
+    rs_env_set "$env" BULK_EMAIL_ENABLED false
+  else
+    host=$(ask_value 'SMTP-сервер' "$(env_get "$env" BULK_EMAIL_HOST)")
+    port=$(ask_value 'Порт (587 — STARTTLS, 465 — SSL)' "$(env_get "$env" BULK_EMAIL_PORT 587)")
+    case "$port" in ''|*[!0-9]*) die 'Порт должен быть числом.' ;; esac
+    if [ "$port" = 465 ]; then security=ssl; else security=tls; fi
+    user=$(ask_value 'Логин' "$(env_get "$env" BULK_EMAIL_USERNAME)")
+    password=$(ask_secret 'Пароль (Enter — оставить прежний)')
+    from=$(ask_value 'Адрес отправителя' "$(env_get "$env" BULK_EMAIL_FROM_EMAIL "$user")")
+    name=$(ask_value 'Имя отправителя' "$(env_get "$env" BULK_EMAIL_FROM_NAME "$(env_get "$env" EMAIL_FROM_NAME)")")
+    rate=$(ask_value 'Писем в минуту (осторожно для нового домена)' "$(env_get "$env" BULK_EMAIL_RATE_PER_MINUTE 30)")
+    case "$rate" in ''|*[!0-9]*) die 'Лимит должен быть числом.' ;; esac
+    [ -n "$host" ] && [ -n "$user" ] && [ -n "$from" ] || die 'Сервер, логин и адрес отправителя обязательны. Ничего не изменено.'
+    [ -n "$password" ] || [ -n "$(env_get "$env" BULK_EMAIL_PASSWORD)" ] || die 'Нужен пароль. Ничего не изменено.'
+    backup_create before-bulk-email
+    rs_env_set "$env" BULK_EMAIL_HOST "$host"
+    rs_env_set "$env" BULK_EMAIL_PORT "$port"
+    rs_env_set "$env" BULK_EMAIL_USE_SSL "$( [ "$security" = ssl ] && printf true || printf false)"
+    rs_env_set "$env" BULK_EMAIL_USE_TLS "$( [ "$security" = tls ] && printf true || printf false)"
+    rs_env_set "$env" BULK_EMAIL_USERNAME "$user"
+    [ -z "$password" ] || rs_env_set "$env" BULK_EMAIL_PASSWORD "$password"
+    rs_env_set "$env" BULK_EMAIL_FROM_EMAIL "$from"
+    [ -z "$name" ] || rs_env_set "$env" BULK_EMAIL_FROM_NAME "$name"
+    rs_env_set "$env" BULK_EMAIL_RATE_PER_MINUTE "$rate"
+    rs_env_set "$env" BULK_EMAIL_ENABLED true
+  fi
+  ok "$env обновлён"
+  note 'Перезапуск API, worker и scheduler Remnashop (~30 с)…'
+  if ! rs_compose up -d --no-deps --force-recreate \
+    "$(rs_service_of "$RS_API" remnashop)" \
+    "$(rs_service_of "$RS_WORKER" remnashop-taskiq-worker)" \
+    "$(rs_service_of "$RS_SCHEDULER" remnashop-taskiq-scheduler)" \
+    || ! rs_wait_healthy; then
+    err "Remnashop не стал healthy. Прежний .env — в $LAST_BACKUP_DIR/config/remnashop."
+    return 1
+  fi
+  ok 'Remnashop перезапущен. Если SMTP недоступен, бот сообщит «SMTP рассылок не отвечает» в течение 10 минут.'
 }
 
 # Sets KEY=value in a Remnashop .env (replacing a commented or placeholder line).
@@ -2032,15 +2172,16 @@ main_menu() {
     menu_item 9 'Обновить Remnashop' 'копия'
     menu_item 10 'Установить Remnashop с нуля' 'копия'
     menu_item 11 'Связать с Clean Pay: права .env, общий ключ, проверка'
+    menu_item 12 'SMTP рассылок: копии уведомлений и новости на e-mail' 'копия'
     menu_section "REMNAWAVE (панель ≥ $REMNAWAVE_MIN_VERSION, ноды ≥ $REMNANODE_MIN_VERSION)"
-    menu_item 12 'Обновить Remnawave' 'копия'
+    menu_item 13 'Обновить Remnawave' 'копия'
     menu_section 'РЕЗЕРВНЫЕ КОПИИ'
-    menu_item 13 'Создать полную резервную копию сейчас'
-    menu_item 14 'Список копий и проверка'
-    menu_item 15 'Как восстановить из копии'
+    menu_item 14 'Создать полную резервную копию сейчас'
+    menu_item 15 'Список копий и проверка'
+    menu_item 16 'Как восстановить из копии'
     menu_section 'СПРАВКА'
-    menu_item 16 'Обновление без простоя (zero-downtime)'
-    menu_item 17 'Настройки меню'
+    menu_item 17 'Обновление без простоя (zero-downtime)'
+    menu_item 18 'Настройки меню'
     printf '\n'
     menu_item 0 'Выход'
     printf '\n'
@@ -2060,12 +2201,13 @@ main_menu() {
       9) run_action rs_update ;;
       10) run_action rs_install ;;
       11) run_action rs_link ;;
-      12) run_action rw_update ;;
-      13) run_action backup_create manual ;;
-      14) run_view list_backups ;;
-      15) run_view show_restore ;;
-      16) run_view show_zdt ;;
-      17) edit_settings ;;
+      12) run_action rs_bulk_email ;;
+      13) run_action rw_update ;;
+      14) run_action backup_create manual ;;
+      15) run_view list_backups ;;
+      16) run_view show_restore ;;
+      17) run_view show_zdt ;;
+      18) edit_settings ;;
       0|q|й|exit|выход) say ''; exit 0 ;;
       '') continue ;;
       *) warn 'Нет такого пункта.' ;;
@@ -2091,6 +2233,7 @@ Clean Pay — меню установки, обновления и резерв�
   ./menu.sh remnashop-update   обновить Remnashop
   ./menu.sh remnashop-install  установить Remnashop с нуля
   ./menu.sh remnashop-link     связать Remnashop с Clean Pay (права .env, общий ключ, проверка)
+  ./menu.sh remnashop-bulk-email  SMTP рассылок Remnashop (копии уведомлений и новости)
   ./menu.sh remnawave-update   обновить панель Remnawave
 
   Требования: Remnawave ≥ 2.8.0, ноды remnanode ≥ 2.8.0.
@@ -2110,6 +2253,7 @@ case "${1:-menu}" in
   remnashop-update) run_action rs_update ;;
   remnashop-install) run_action rs_install ;;
   remnashop-link) run_action rs_link ;;
+  remnashop-bulk-email) run_action rs_bulk_email ;;
   remnawave-update) run_action rw_update ;;
   help|-h|--help) usage ;;
   *) usage; exit 1 ;;

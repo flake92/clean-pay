@@ -122,12 +122,16 @@ function parseAuthCommand(value: unknown): ParsedAuthCommand | AuthCommandFailur
       if (input.referralCode !== undefined && !referralCode) {
         return validationError("Реферальная ссылка некорректна.");
       }
+      if (input.newsConsent !== undefined && typeof input.newsConsent !== "boolean") {
+        return validationError("Проверьте согласие на рассылку.");
+      }
       return {
         command: {
           kind: "register",
           ...common,
           password: input.password,
           ...(referralCode ? { referralCode } : {}),
+          ...(input.newsConsent === true ? { newsConsent: true } : {}),
         },
         email,
         turnstileToken,
@@ -174,6 +178,7 @@ export async function executeAuthCommand(commands: AuthCommands, input: unknown)
         email,
         password: command.password,
         ...(command.referralCode ? { referralCode: command.referralCode } : {}),
+        ...(command.newsConsent ? { newsConsent: true } : {}),
         turnstileToken,
       });
     }

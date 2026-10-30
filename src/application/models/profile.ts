@@ -7,11 +7,20 @@ type ProfileUserViewModel = {
 };
 
 export type EmailReminderPreferenceViewModel = {
+  // Subscription-expiry reminders; part of service e-mail.
   enabled: boolean;
   emailEligible: boolean;
   senderEmail: string | null;
   daysBefore: number[];
+  // Account and subscription notifications (on by default).
+  serviceEnabled: boolean;
+  // News broadcasts: advertising, only with explicit consent.
+  newsEnabled: boolean;
+  newsSenderEmail: string | null;
+  pushAvailable: boolean;
 };
+
+export type EmailPreferenceChannel = "service" | "news";
 
 export type EmailReminderPreferenceState =
   | ({ status: "ready" } & EmailReminderPreferenceViewModel)

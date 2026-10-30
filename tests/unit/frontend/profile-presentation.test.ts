@@ -24,6 +24,10 @@ describe("profile presentation selectors", () => {
         emailEligible: true,
         senderEmail: "sender@example.test",
         daysBefore: [7, 1],
+        serviceEnabled: true,
+        newsEnabled: false,
+        newsSenderEmail: null,
+        pushAvailable: false,
       },
     };
 

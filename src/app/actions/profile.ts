@@ -52,9 +52,10 @@ export async function changeProfilePasswordAction(
   return parsed ? changeProfilePassword(productionProfileCommands, parsed) : malformed;
 }
 
-export async function updateEmailReminderPreferenceAction(enabled: unknown) {
+export async function updateEmailReminderPreferenceAction(channel: unknown, enabled: unknown) {
   const result = await updateEmailReminderPreference(
     productionEmailReminderPreferenceCommands,
+    channel,
     enabled,
   );
   if (result.ok) revalidatePath("/profile");

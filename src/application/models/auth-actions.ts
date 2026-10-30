@@ -1,7 +1,7 @@
 export type AuthCommand =
   | { kind: "identify"; email: string; turnstileToken?: string }
   | { kind: "login"; email: string; password: string; turnstileToken?: string }
-  | { kind: "register"; email: string; password: string; turnstileToken?: string }
+  | { kind: "register"; email: string; password: string; newsConsent?: boolean; turnstileToken?: string }
   | { kind: "request-password-reset"; email: string; turnstileToken?: string }
   | { kind: "confirm-password-reset"; email: string; code: string; newPassword: string; turnstileToken?: string };
 

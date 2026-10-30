@@ -27,6 +27,10 @@ const readyModel = {
     emailEligible: true,
     senderEmail: "no-reply@example.com",
     daysBefore: [7, 3, 1],
+    serviceEnabled: true,
+    newsEnabled: false,
+    newsSenderEmail: null,
+    pushAvailable: false,
   },
 };
 
@@ -119,6 +123,10 @@ describe("profile pure transitions", () => {
       emailEligible: true,
       senderEmail: "sender@example.com",
       daysBefore: [3, 1],
+      serviceEnabled: true,
+      newsEnabled: false,
+      newsSenderEmail: null,
+      pushAvailable: false,
     };
     const withPreference = profileControllerReducer(reminderCleared, {
       type: "email-reminders-changed",

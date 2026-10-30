@@ -8,7 +8,7 @@ export type AuthFormStage =
 export type AuthFormCommand =
   | { kind: "identify"; email: string; turnstileToken?: string }
   | { kind: "login"; email: string; password: string; turnstileToken?: string }
-  | { kind: "register"; email: string; password: string; turnstileToken?: string }
+  | { kind: "register"; email: string; password: string; newsConsent?: boolean; turnstileToken?: string }
   | { kind: "request-password-reset"; email: string; turnstileToken?: string }
   | {
       kind: "confirm-password-reset";
@@ -29,7 +29,7 @@ function optionalTurnstileToken(turnstileToken: string | null) {
 
 export function authCommandForStage(
   stage: AuthFormStage,
-  fields: { email: string; password: string; code: string },
+  fields: { email: string; password: string; code: string; newsConsent?: boolean },
   turnstileToken: string | null,
 ): AuthFormCommand {
   const challenge = optionalTurnstileToken(turnstileToken);
@@ -50,6 +50,7 @@ export function authCommandForStage(
       kind: "register",
       email: fields.email,
       password: fields.password,
+      ...(fields.newsConsent ? { newsConsent: true } : {}),
       ...challenge,
     };
   }

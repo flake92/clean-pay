@@ -74,12 +74,16 @@ describe("profile e-mail change feedback", () => {
     });
     mocks.updateReminders.mockResolvedValue({
       ok: true,
-      message: "Напоминания включены.",
+      message: "Вы подписались на новости и рассылки по e-mail.",
       preference: {
         enabled: true,
         emailEligible: true,
         senderEmail: "no-reply@example.com",
         daysBefore: [7, 3, 1],
+        serviceEnabled: true,
+        newsEnabled: true,
+        newsSenderEmail: null,
+        pushAvailable: false,
       },
     });
     vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) =>
@@ -249,7 +253,7 @@ describe("profile e-mail change feedback", () => {
       .toBe("Новый пароль должен отличаться от текущего.");
   });
 
-  it("shows the sender allowlist guidance and enables reminders explicitly", async () => {
+  it("shows the sender allowlist guidance and asks for explicit news consent", async () => {
     await act(async () => {
       root.render(createElement(ProfilePanel, {
         model: {
@@ -269,6 +273,10 @@ describe("profile e-mail change feedback", () => {
             emailEligible: true,
             senderEmail: "no-reply@example.com",
             daysBefore: [7, 3, 1],
+            serviceEnabled: true,
+            newsEnabled: false,
+            newsSenderEmail: null,
+            pushAvailable: false,
           },
         },
       }));
@@ -276,7 +284,9 @@ describe("profile e-mail change feedback", () => {
 
     expect(container.textContent).toContain("не включают автопродление");
     expect(container.textContent).toContain("добавьте no-reply@example.com");
-    const toggle = container.querySelector<HTMLInputElement>('[role="switch"]')!;
+    const service = container.querySelector<HTMLInputElement>("#email-service-notifications")!;
+    expect(service.checked).toBe(true);
+    const toggle = container.querySelector<HTMLInputElement>("#email-news")!;
     expect(toggle.checked).toBe(false);
 
     await act(async () => {
@@ -284,9 +294,9 @@ describe("profile e-mail change feedback", () => {
       await Promise.resolve();
     });
 
-    expect(mocks.updateReminders).toHaveBeenCalledWith(true);
+    expect(mocks.updateReminders).toHaveBeenCalledWith("news", true);
     expect(toggle.checked).toBe(true);
-    expect(container.textContent).toContain("Напоминания включены.");
+    expect(container.textContent).toContain("Вы подписались на новости");
   });
 
   it("explains an unavailable opt-in without exposing provider brands", async () => {
@@ -307,17 +317,24 @@ describe("profile e-mail change feedback", () => {
             emailEligible: false,
             senderEmail: "no-reply@example.com",
             daysBefore: [7, 3, 1],
+            serviceEnabled: true,
+            newsEnabled: false,
+            newsSenderEmail: null,
+            pushAvailable: false,
           },
         },
       }));
     });
 
     expect(container.textContent).toContain(
-      "Нельзя включить напоминания: e-mail не подтверждён или отправка на этот адрес отключена.",
+      "Нельзя включить письма: e-mail не подтверждён или отправка на этот адрес отключена.",
     );
     expect(container.textContent).not.toContain("попробуйте позже");
     expect(container.textContent).not.toMatch(/Remnashop|Remnawave/i);
-    expect(container.querySelector<HTMLInputElement>('[role="switch"]')?.disabled).toBe(true);
+    // Already enabled service mail stays revocable; news cannot be turned on.
+    expect(container.querySelector<HTMLInputElement>("#email-service-notifications")?.disabled)
+      .toBe(false);
+    expect(container.querySelector<HTMLInputElement>("#email-news")?.disabled).toBe(true);
   });
 
   it("synchronizes reminder preferences received by a soft server refresh", async () => {
@@ -351,6 +368,10 @@ describe("profile e-mail change feedback", () => {
             emailEligible: true,
             senderEmail: "no-reply@example.com",
             daysBefore: [7, 3, 1],
+            serviceEnabled: true,
+            newsEnabled: false,
+            newsSenderEmail: null,
+            pushAvailable: false,
           },
         },
       }));

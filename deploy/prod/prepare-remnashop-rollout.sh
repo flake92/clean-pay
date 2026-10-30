@@ -42,7 +42,7 @@ env_value() {
   fi
 }
 
-repository_minimum_revision=0059
+repository_minimum_revision=0060
 minimum_revision=$(env_value REMNASHOP_MINIMUM_ALEMBIC_REVISION "$repository_minimum_revision")
 case "$minimum_revision:$repository_minimum_revision" in
   *[!0-9:]*|:*|*:) fail "Alembic revisions must be numeric (configured=$minimum_revision repository=$repository_minimum_revision)" ;;
@@ -128,6 +128,7 @@ statuses = []
 for path in (
     "/api/v1/public/auth/identify",
     "/api/v1/public/auth/notification-preferences",
+    "/api/v1/public/auth/notifications/push/key",
 ):
     connection = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
     connection.request(
@@ -148,12 +149,12 @@ print(*statuses)
   ) || fail "could not probe the Remnashop notification-preferences API"
 
   case "$contract_statuses" in
-    "422 405") ;;
+    "422 405 405") ;;
     # 405 proves the Clean Pay build is running, so a 401 means only the shared key differs
-    "401 405")
+    "401 405 405")
       fail "Remnashop rejected the Clean Pay service key (401): REMNASHOP_AUTH_SERVICE_KEY in $ENV_FILE must equal APP_AUTH_SERVICE_KEY in $remnashop_env_file, and Remnashop must be restarted after the change. Fix: ./menu.sh remnashop-link" ;;
     *)
-      incompatible "Remnashop auth/API contract returned $contract_statuses; expected 422 405" ;;
+      incompatible "Remnashop auth/API contract returned $contract_statuses; expected 422 405 405 (Remnashop 0060 with the notification channels API)" ;;
   esac
 }
 

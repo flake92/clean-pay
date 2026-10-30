@@ -39,11 +39,15 @@ function reminderCommands(
   return {
     loadActor: vi.fn(async () => ({ context: {}, userId: "user-1" })),
     assertRateLimit: vi.fn(async () => undefined),
-    update: vi.fn(async (_actor, enabled) => ({
-      enabled,
+    update: vi.fn(async (_actor, channel, enabled) => ({
+      enabled: channel === "service" ? enabled : true,
       emailEligible: true,
       senderEmail: "no-reply@example.com",
       daysBefore: [7, 3, 1],
+      serviceEnabled: channel === "service" ? enabled : true,
+      newsEnabled: channel === "news" ? enabled : false,
+      newsSenderEmail: null,
+      pushAvailable: false,
     })),
     ...overrides,
   };
@@ -163,17 +167,17 @@ describe("profile command presentation policy", () => {
   it("updates an explicit e-mail reminder preference after the mutation limit", async () => {
     const commands = reminderCommands();
 
-    await expect(updateEmailReminderPreference(commands, true)).resolves.toMatchObject({
+    await expect(updateEmailReminderPreference(commands, "news", true)).resolves.toMatchObject({
       ok: true,
-      preference: { enabled: true },
+      preference: { newsEnabled: true },
     });
     expect(commands.assertRateLimit).toHaveBeenCalledBefore(vi.mocked(commands.update));
-    expect(commands.update).toHaveBeenCalledWith(expect.anything(), true);
+    expect(commands.update).toHaveBeenCalledWith(expect.anything(), "news", true);
   });
 
   it("rejects malformed or ineligible reminder changes without false success", async () => {
     const invalid = reminderCommands();
-    await expect(updateEmailReminderPreference(invalid, "true")).resolves.toMatchObject({
+    await expect(updateEmailReminderPreference(invalid, "news", "true")).resolves.toMatchObject({
       ok: false,
       code: "VALIDATION_ERROR",
     });
@@ -184,7 +188,7 @@ describe("profile command presentation policy", () => {
         throw new EmailReminderPreferenceGatewayError("EMAIL_NOT_VERIFIED");
       }),
     });
-    await expect(updateEmailReminderPreference(ineligible, true)).resolves.toMatchObject({
+    await expect(updateEmailReminderPreference(ineligible, "service", true)).resolves.toMatchObject({
       ok: false,
       code: "EMAIL_NOT_VERIFIED",
     });
@@ -195,9 +199,13 @@ describe("profile command presentation policy", () => {
         emailEligible: true,
         senderEmail: "no-reply@example.com",
         daysBefore: [7, 3, 1],
+        serviceEnabled: true,
+        newsEnabled: false,
+        newsSenderEmail: null,
+        pushAvailable: false,
       })),
     });
-    await expect(updateEmailReminderPreference(ignored, true)).resolves.toMatchObject({
+    await expect(updateEmailReminderPreference(ignored, "news", true)).resolves.toMatchObject({
       ok: false,
       code: "UPSTREAM_UNAVAILABLE",
     });

@@ -95,6 +95,12 @@ export function useAuthFormController({
     createInitialAuthFormControllerState,
   );
   const requestPendingRef = useRef(false);
+  // News e-mail is advertising: unticked until the user opts in.
+  const [newsConsent, setNewsConsent] = useState(false);
+
+  function changeNewsConsent(event: ChangeEvent<HTMLInputElement>) {
+    setNewsConsent(event.target.checked);
+  }
 
   function changeEmail() {
     dispatch({ type: "email-change-requested" });
@@ -154,7 +160,7 @@ export function useAuthFormController({
     try {
       const command = authCommandForStage(
         state.stage,
-        { email: state.email, password: state.password, code: state.code },
+        { email: state.email, password: state.password, code: state.code, newsConsent },
         turnstileToken,
       );
       const result = await executeAuthAction(command);
@@ -208,6 +214,8 @@ export function useAuthFormController({
     changeCodeInput,
     changeEmail,
     changeEmailInput,
+    changeNewsConsent,
+    newsConsent,
     changePasswordConfirmationInput,
     changePasswordInput,
     requestPasswordRecovery,

@@ -78,10 +78,12 @@ export function LoginForm({
     changeCodeInput,
     changeEmail,
     changeEmailInput,
+    changeNewsConsent,
     changePasswordConfirmationInput,
     changePasswordInput,
     code,
     email,
+    newsConsent,
     password,
     passwordConfirmation,
     requestPasswordRecovery,
@@ -169,6 +171,23 @@ export function LoginForm({
                 value={passwordConfirmation}
                 onChange={changePasswordConfirmationInput}
               />
+            </label>
+          ) : null}
+          {stage === "register" ? (
+            <label className="flex align-items-start gap-2 text-sm text-700 line-height-3" htmlFor="news-consent">
+              <input
+                checked={newsConsent}
+                className="mt-1"
+                id="news-consent"
+                name="newsConsent"
+                onChange={changeNewsConsent}
+                type="checkbox"
+              />
+              <span>
+                Хочу получать новости, акции и рассылки на e-mail. Необязательно: служебные
+                уведомления о подписке включены и без этого; отписаться можно в профиле или
+                из любого письма.
+              </span>
             </label>
           ) : null}
           {view.showPasswordRecovery ? (

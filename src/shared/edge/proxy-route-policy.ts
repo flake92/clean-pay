@@ -15,6 +15,7 @@ const publicPagePaths = new Set([
   "/manifest.webmanifest",
   "/install",
   "/offline",
+  "/unsubscribe",
   "/login",
   "/register",
   "/support",
@@ -31,6 +32,7 @@ const publicApiPaths = new Set([
   "/api/health",
   "/api/health/liveness",
   "/api/health/readiness",
+  "/api/notifications/unsubscribe",
 ]);
 
 // These legacy browser endpoints were removed. Let Next.js resolve them to a

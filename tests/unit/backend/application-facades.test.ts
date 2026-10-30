@@ -541,6 +541,10 @@ describe("application facades", () => {
         emailEligible: true,
         senderEmail: "no-reply@example.com",
         daysBefore: [7, 3, 1],
+        serviceEnabled: true,
+        newsEnabled: false,
+        newsSenderEmail: null,
+        pushAvailable: false,
       })),
     })).resolves.toMatchObject({
       status: "ready",
@@ -573,6 +577,10 @@ describe("application facades", () => {
       emailEligible: true,
       senderEmail: "no-reply@example.com",
       daysBefore: [7, 3, 1],
+      serviceEnabled: true,
+      newsEnabled: false,
+      newsSenderEmail: null,
+      pushAvailable: false,
     }));
     const modelPromise = loadProfileViewModel(
       authGateway({

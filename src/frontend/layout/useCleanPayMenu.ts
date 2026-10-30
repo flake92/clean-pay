@@ -3,6 +3,7 @@
 import type { AppMenuItem } from "@/frontend/types";
 import { getBranding } from "@/shared/branding";
 import { logoutAction } from "@/app/actions/session";
+import { releaseDevicePush } from "@/frontend/lib/push-logout";
 import type { NavigationViewModel } from "@/application/models/navigation";
 import { resetChatwootSession } from "@/frontend/lib/chatwoot";
 
@@ -11,6 +12,7 @@ export function useCleanPayMenu(navigation: NavigationViewModel) {
 
     async function logout() {
         resetChatwootSession();
+        await releaseDevicePush();
         await logoutAction();
     }
 

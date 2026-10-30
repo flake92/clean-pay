@@ -8,6 +8,9 @@ import type {
   ConfirmPasswordResetRequest,
   LoginRequest,
   NotificationPreferencesResponse,
+  PushKeyResponse,
+  PushStatusResponse,
+  PushSubscriptionRequest,
   RegisterRequest,
   RemnashopAuthResponse,
   RemnashopMe,
@@ -15,8 +18,14 @@ import type {
   StartGenericEmailAuthRequest,
   TelegramAuthRequest,
   TelegramWebAppAuthRequest,
+  UnsubscribeResponse,
   UpdateNotificationPreferencesRequest,
 } from "@/backend/integrations/remnashop/contracts";
+import {
+  decodePushKey,
+  decodePushStatus,
+  decodeUnsubscribe,
+} from "@/backend/integrations/remnashop/response-decoders";
 import type {
   RemnashopAuthCookies,
   RemnashopTransport,
@@ -322,6 +331,50 @@ export function createRemnashopEndpointOperations(
     });
   }
 
+  async function getRemnashopPushKey() {
+    return transport.remnashopValidatedRequest<PushKeyResponse>(
+      "/auth/notifications/push/key",
+      { timeoutMs: 3_000 },
+      decodePushKey,
+    );
+  }
+
+  async function getRemnashopPushStatus(accessToken: string) {
+    return transport.remnashopValidatedRequest<PushStatusResponse>(
+      "/auth/notifications/push/subscription",
+      { accessToken, timeoutMs: 3_000 },
+      decodePushStatus,
+    );
+  }
+
+  async function saveRemnashopPushSubscription(
+    accessToken: string,
+    body: PushSubscriptionRequest,
+  ) {
+    return transport.remnashopValidatedRequest<PushStatusResponse>(
+      "/auth/notifications/push/subscription",
+      { method: "POST", accessToken, body },
+      decodePushStatus,
+    );
+  }
+
+  async function deleteRemnashopPushSubscription(accessToken: string, endpoint: string) {
+    return transport.remnashopValidatedRequest<PushStatusResponse>(
+      "/auth/notifications/push/subscription/delete",
+      { method: "POST", accessToken, body: { endpoint } },
+      decodePushStatus,
+    );
+  }
+
+  // No user session: the signed token from the e-mail is the authorization.
+  async function remnashopUnsubscribeEmail(token: string) {
+    return transport.remnashopValidatedRequest<UnsubscribeResponse>(
+      "/auth/notifications/unsubscribe",
+      { method: "POST", body: { token }, timeoutMs: 5_000 },
+      decodeUnsubscribe,
+    );
+  }
+
   async function remnashopLinkTelegram({
     accessToken,
     telegramId,
@@ -362,8 +415,13 @@ export function createRemnashopEndpointOperations(
   }
 
   return {
+    deleteRemnashopPushSubscription,
     getRemnashopMe,
     getRemnashopNotificationPreferences,
+    getRemnashopPushKey,
+    getRemnashopPushStatus,
+    remnashopUnsubscribeEmail,
+    saveRemnashopPushSubscription,
     remnashopAuth,
     remnashopAuthTelegramIdentity,
     remnashopChangePassword,

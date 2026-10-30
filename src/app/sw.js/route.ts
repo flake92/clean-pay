@@ -1,3 +1,4 @@
+import { brandIcons } from "@/app/_composition/brand-assets";
 import { serviceWorkerSource } from "@/shared/pwa/service-worker";
 
 export const dynamic = "force-dynamic";
@@ -12,7 +13,11 @@ export async function GET() {
     });
   }
 
-  return new Response(serviceWorkerSource(buildId), {
+  const icons = brandIcons();
+  return new Response(serviceWorkerSource(buildId, {
+    icon: icons.icon192,
+    badge: icons.icon192,
+  }), {
     headers: {
       "cache-control": "no-cache, no-store, must-revalidate",
       "content-type": "application/javascript; charset=utf-8",

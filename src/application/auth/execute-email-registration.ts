@@ -21,6 +21,7 @@ type EmailRegistrationInput = {
   email: string;
   password: string;
   referralCode?: string;
+  newsConsent?: boolean;
   turnstileToken: string | null;
 };
 
@@ -33,7 +34,7 @@ export async function executeEmailRegistration(
   commands: EmailRegistrationCommands,
   input: EmailRegistrationInput,
 ): Promise<EmailRegistrationResult> {
-  const { email, password, referralCode, turnstileToken } = input;
+  const { email, password, referralCode, newsConsent, turnstileToken } = input;
   await commands.preflightCapacity("auth_command");
   await commands.withUpstreamConcurrency(
     "turnstile_verify",
@@ -56,6 +57,7 @@ export async function executeEmailRegistration(
         email,
         password,
         ...(referralCode ? { referralCode } : {}),
+        ...(newsConsent ? { newsConsent: true } : {}),
       }),
     );
   } catch (error) {

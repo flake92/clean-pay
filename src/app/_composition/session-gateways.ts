@@ -8,6 +8,10 @@ import { createProductionPaymentStatusReader } from "@/backend/integrations/paym
 import { createProductionPaymentWorkflowGateway } from "@/backend/integrations/payments/payment-workflow-gateway";
 import { createProductionProfileCommands } from "@/backend/integrations/profile/profile-adapter";
 import { createEmailReminderPreferenceCommands } from "@/backend/integrations/profile/email-reminder-preferences-adapter";
+import {
+  createEmailUnsubscribeGateway,
+  createPushSubscriptionCommands,
+} from "@/backend/integrations/notifications/notification-channels-adapter";
 import { createProductionChatwootContextGateway } from "@/backend/integrations/support/chatwoot-context-gateway";
 import {
   getAuthorizedRemnashopTokens,
@@ -44,3 +48,8 @@ export const productionEmailReminderPreferenceCommands =
   }));
 export const productionChatwootContextGateway =
   createProductionChatwootContextGateway(getAuthorizedRemnashopTokens);
+export const productionPushSubscriptionCommands =
+  createPushSubscriptionCommands(() => getAuthorizedRemnashopTokens({
+    allowUnverifiedEmail: true,
+  }));
+export const productionEmailUnsubscribeGateway = createEmailUnsubscribeGateway();

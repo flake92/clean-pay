@@ -32,11 +32,15 @@ import {
 } from "@/backend/integrations/profile/email-reminder-preferences-adapter";
 import { ServiceError } from "@/backend/errors/service-error";
 
-const response = (enabled = false) => ({
+const response = (enabled = false, news = false) => ({
   subscription_expiration_email_enabled: enabled,
   email_eligible: true,
   sender_email: "no-reply@example.com",
   days_before: [7, 3, 1],
+  service_email_enabled: true,
+  news_email_enabled: news,
+  bulk_sender_email: null,
+  push_available: false,
 });
 
 const authorization = {
@@ -54,8 +58,8 @@ describe("Remnashop e-mail reminder preference adapter", () => {
     mocks.storedAuthorize.mockResolvedValue(authorization);
     mocks.updatePreferences.mockImplementation(async (
       _token: string,
-      input: { subscription_expiration_email_enabled: boolean },
-    ) => response(input.subscription_expiration_email_enabled));
+      input: { service_email_enabled?: boolean; news_email_enabled?: boolean },
+    ) => response(input.service_email_enabled ?? false, input.news_email_enabled ?? false));
   });
 
   it("uses the production authorization and API adapters by default", async () => {
@@ -68,12 +72,16 @@ describe("Remnashop e-mail reminder preference adapter", () => {
 
     const commands = createEmailReminderPreferenceCommands();
     const actor = await commands.loadActor();
-    await expect(commands.update(actor, true)).resolves.toMatchObject({ enabled: true });
+    await expect(commands.update(actor, "news", true)).resolves.toMatchObject({ newsEnabled: true });
     expect(mocks.sessionAuthorize).toHaveBeenCalledWith({
       allowUnverifiedEmail: true,
     });
     expect(mocks.updatePreferences).toHaveBeenCalledWith("provider-access", {
-      subscription_expiration_email_enabled: true,
+      news_email_enabled: true,
+    });
+    await commands.update(actor, "service", false);
+    expect(mocks.updatePreferences).toHaveBeenLastCalledWith("provider-access", {
+      service_email_enabled: false,
     });
   });
 
@@ -89,6 +97,10 @@ describe("Remnashop e-mail reminder preference adapter", () => {
       emailEligible: true,
       senderEmail: "no-reply@example.com",
       daysBefore: [7, 3, 1],
+      serviceEnabled: true,
+      newsEnabled: false,
+      newsSenderEmail: null,
+      pushAvailable: false,
     });
     expect(api.load).toHaveBeenCalledWith("provider-access");
 
@@ -99,7 +111,7 @@ describe("Remnashop e-mail reminder preference adapter", () => {
   it("rate-limits and audits an exact boolean update", async () => {
     const api = {
       load: vi.fn(),
-      update: vi.fn(async (_token: string, enabled: boolean) => response(enabled)),
+      update: vi.fn(async (_token: string, _channel: string, enabled: boolean) => response(enabled)),
     };
     const commands = createEmailReminderPreferenceCommands(
       vi.fn(async () => authorization),
@@ -108,7 +120,7 @@ describe("Remnashop e-mail reminder preference adapter", () => {
     const actor = await commands.loadActor();
 
     await commands.assertRateLimit(actor);
-    await expect(commands.update(actor, true)).resolves.toMatchObject({ enabled: true });
+    await expect(commands.update(actor, "service", true)).resolves.toMatchObject({ enabled: true });
     expect(mocks.rateLimit).toHaveBeenCalledWith({
       action: "email_reminder_preference",
       sessionId: "session-1",
@@ -118,9 +130,9 @@ describe("Remnashop e-mail reminder preference adapter", () => {
     expect(mocks.auditedMutation).toHaveBeenCalledWith(expect.objectContaining({
       action: "email_reminder_preference",
       userId: "user-1",
-      metadata: { enabled: true },
+      metadata: { channel: "service", enabled: true },
     }));
-    expect(api.update).toHaveBeenCalledWith("provider-access", true);
+    expect(api.update).toHaveBeenCalledWith("provider-access", "service", true);
   });
 
   it("maps provider eligibility and local rate-limit failures", async () => {
@@ -134,7 +146,7 @@ describe("Remnashop e-mail reminder preference adapter", () => {
       { load: vi.fn(), update: vi.fn(async () => { throw providerFailure; }) },
     );
     const actor = await commands.loadActor();
-    await expect(commands.update(actor, true)).rejects.toMatchObject({
+    await expect(commands.update(actor, "service", true)).rejects.toMatchObject({
       code: "EMAIL_NOT_VERIFIED",
     });
 

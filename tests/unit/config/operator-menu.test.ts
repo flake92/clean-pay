@@ -501,5 +501,97 @@ describe("operator menu", () => {
         rmSync(dir, { recursive: true, force: true });
       }
     }, shellIntegrationTimeout);
+
+    it("updates an older Remnashop before building a Clean Pay that needs a newer schema", () => {
+      const dir = mkdtempSync(join(tmpdir(), "cp-floor-"));
+      try {
+        const script = (current: string, answer: string, afterUpdate: string) => [
+          stubs,
+          shellFunctionFrom(menu, "cp_check_remnashop_floor"),
+          'cp_version_at() { printf "0.5.0"; }',
+          'git() { printf "repository_minimum_revision=0060\\n"; }',
+          "container_exists() { return 0; }",
+          `printf %s "${current}" > "$DIR/rev"`,
+          'db_query() { cat "$DIR/rev"; }',
+          `ask_yes_no() { [ "${answer}" = yes ]; }`,
+          `rs_update() { printf "RS_UPDATE\\n"; printf %s "${afterUpdate}" > "$DIR/rev"; }`,
+          'RS_DB=remnashop-db; ROOT_DIR="$DIR"',
+          "cp_check_remnashop_floor target",
+        ].join("\n");
+
+        const fresh = run(dir, script("0060", "no", "0060"));
+        expect(fresh.status, fresh.stdout).toBe(0);
+        expect(fresh.stdout).toContain("Схема Remnashop 0060 подходит");
+        expect(fresh.stdout).not.toContain("RS_UPDATE");
+
+        const declined = run(dir, script("0059", "no", "0059"));
+        expect(declined.status).toBe(1);
+        expect(declined.stdout).toContain("нужен Remnashop со схемой не ниже 0060, сейчас 0059");
+        expect(declined.stdout).toContain("ничего не изменено");
+
+        const updated = run(dir, script("0059", "yes", "0060"));
+        expect(updated.status, updated.stdout).toBe(0);
+        expect(updated.stdout).toContain("RS_UPDATE");
+        expect(updated.stdout).toContain("Remnashop готов (схема 0060)");
+
+        const stillOld = run(dir, script("0059", "yes", "0059"));
+        expect(stillOld.status).toBe(1);
+        expect(stillOld.stdout).toContain("всё ещё 0059");
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    }, shellIntegrationTimeout);
+
+    it("creates the Web Push keys once and never replaces an existing pair", () => {
+      const dir = mkdtempSync(join(tmpdir(), "rs-vapid-"));
+      try {
+        const publicKey = `B${"a".repeat(86)}`;
+        const privateKey = "k".repeat(43);
+        const script = [
+          stubs,
+          shellFunctionFrom(menu, "env_get"),
+          shellFunctionFrom(menu, "rs_env_set"),
+          shellFunctionFrom(menu, "rs_ensure_push_keys"),
+          `docker() { printf "WEB_PUSH_VAPID_PUBLIC_KEY=${publicKey}\\nWEB_PUSH_VAPID_PRIVATE_KEY=${privateKey}\\n"; }`,
+          'REMNASHOP_DIR="$DIR"',
+          "rs_ensure_push_keys remnashop:new",
+        ].join("\n");
+        writeFileSync(join(dir, ".env"), "EMAIL_FROM_EMAIL=support@example.org\n# WEB_PUSH_VAPID_PUBLIC_KEY=\n");
+
+        const first = run(dir, script);
+        expect(first.status, first.stdout + first.stderr).toBe(0);
+        const env = readFileSync(join(dir, ".env"), "utf8");
+        expect(env).toContain(`WEB_PUSH_VAPID_PUBLIC_KEY=${publicKey}`);
+        expect(env).toContain(`WEB_PUSH_VAPID_PRIVATE_KEY=${privateKey}`);
+        expect(env).toContain("WEB_PUSH_VAPID_SUBJECT=mailto:support@example.org");
+
+        writeFileSync(join(dir, ".env"), "WEB_PUSH_VAPID_PUBLIC_KEY=existing\n");
+        const second = run(dir, script);
+        // 1: nothing written, so the caller does not restart Remnashop.
+        expect(second.status).toBe(1);
+        expect(readFileSync(join(dir, ".env"), "utf8")).toBe("WEB_PUSH_VAPID_PUBLIC_KEY=existing\n");
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    }, shellIntegrationTimeout);
+  });
+
+  it("checks the Remnashop schema before the Clean Pay backup and build", () => {
+    const update = functionBody("cp_update");
+    expectBefore(update, 'cp_check_remnashop_floor "$target"', "require_backup");
+    expectBefore(update, 'cp_check_remnashop_floor "$target"', 'sh "$DEPLOY_SCRIPT" build');
+    expectBefore(functionBody("rs_update"), "require_backup", 'rs_ensure_push_keys "$image"');
+    expect(functionBody("rs_update")).toContain("rs_bulk_email_hint");
+    expectBefore(update, 'sh "$DEPLOY_SCRIPT" install', "rs_push_keys_followup");
+  });
+
+  it("configures the separate bulk SMTP from the menu after a backup", () => {
+    expect(menu).toContain("menu_item 12 'SMTP рассылок: копии уведомлений и новости на e-mail'");
+    expect(menu).toContain("12) run_action rs_bulk_email ;;");
+    expect(menu).toContain("remnashop-bulk-email) run_action rs_bulk_email ;;");
+    const body = functionBody("rs_bulk_email");
+    expectBefore(body, "backup_create before-bulk-email", 'rs_env_set "$env" BULK_EMAIL_ENABLED true');
+    expect(body).toContain("ask_secret");
+    expect(body).toContain("rs_wait_healthy");
   });
 });

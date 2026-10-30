@@ -20,7 +20,7 @@ export interface AuthCommands {
   hasPasskey(email: string): Promise<boolean>;
   authenticate(input:
     | { operation: "login"; email: string; password: string }
-    | { operation: "register"; email: string; password: string; referralCode?: string }
+    | { operation: "register"; email: string; password: string; referralCode?: string; newsConsent?: boolean }
     | { operation: "confirm-password-reset"; email: string; password: string; code: string }
   ): Promise<AuthProviderSession>;
   establishSession(

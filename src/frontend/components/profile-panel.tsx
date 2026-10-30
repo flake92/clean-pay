@@ -6,6 +6,7 @@ import { Tag } from "primereact/tag";
 import { LinkButton } from "@/frontend/components/prime/link-button";
 import { ProfileEmailChangeFields } from "@/frontend/components/profile-email-change-fields";
 import { ProfilePasswordChangeFields } from "@/frontend/components/profile-password-change-fields";
+import { PushNotificationsCard } from "@/frontend/components/push-notifications-card";
 import { Message } from "@/frontend/components/sakai/form-foundation";
 import type { ProfileViewModel } from "@/application/models/profile";
 import {
@@ -35,8 +36,9 @@ function ProfilePanelContent({
     changeCurrentPassword,
     changeEmail,
     changeEmailInput,
-    changeEmailReminders,
     changeNewPassword,
+    changeNewsEmails,
+    changeServiceEmails,
     changePassword,
     currentPassword,
     email,
@@ -109,59 +111,89 @@ function ProfilePanelContent({
         </div>
       </Card>
 
-      <Card title="Напоминания об окончании подписки">
+      <Card title="Уведомления по e-mail">
         {emailReminders ? (
           <div className="flex flex-column gap-3">
             <p className="m-0 line-height-3 text-600">
-              При включённой настройке мы отправим письма{
+              Письма приходят на подтверждённый адрес{
               " "
-              }{profileReminderDaysLabel(emailReminders.daysBefore)} до окончания подписки на
-              подтверждённый адрес <strong>{user.email ?? "из профиля"}</strong>. Письма не
-              запускают оплату и не включают автопродление.
+              }<strong>{user.email ?? "из профиля"}</strong>. В каждом письме есть ссылка, чтобы
+              отписаться в один клик.
             </p>
             {emailReminderMessage ? (
               <Message severity={emailReminderSeverity} text={emailReminderMessage} />
             ) : null}
-            <label className="flex align-items-center gap-3" htmlFor="email-expiration-reminders">
+            <label className="flex align-items-start gap-3" htmlFor="email-service-notifications">
               <input
-                aria-describedby="email-expiration-reminders-help"
-                checked={emailReminders.enabled}
+                aria-describedby="email-service-notifications-help"
+                checked={emailReminders.serviceEnabled}
+                className="mt-1"
                 disabled={
                   pendingAction !== null
-                  || (
-                    !emailReminders.enabled
-                    && !emailReminders.emailEligible
-                  )
+                  || (!emailReminders.serviceEnabled && !emailReminders.emailEligible)
                 }
-                id="email-expiration-reminders"
-                onChange={changeEmailReminders}
+                id="email-service-notifications"
+                onChange={changeServiceEmails}
                 role="switch"
                 type="checkbox"
               />
-              <span className="font-medium">Получать напоминания по e-mail</span>
+              <span className="flex flex-column gap-1">
+                <span className="font-medium">Служебные уведомления</span>
+                <span className="text-sm text-600 line-height-3" id="email-service-notifications-help">
+                  Окончание подписки ({profileReminderDaysLabel(emailReminders.daysBefore)} до
+                  срока), трафик, оплаты и реферальные начисления. Письма не запускают оплату и
+                  не включают автопродление.
+                </span>
+              </span>
+            </label>
+            <label className="flex align-items-start gap-3" htmlFor="email-news">
+              <input
+                aria-describedby="email-news-help"
+                checked={emailReminders.newsEnabled}
+                className="mt-1"
+                disabled={
+                  pendingAction !== null
+                  || (!emailReminders.newsEnabled && !emailReminders.emailEligible)
+                }
+                id="email-news"
+                onChange={changeNewsEmails}
+                role="switch"
+                type="checkbox"
+              />
+              <span className="flex flex-column gap-1">
+                <span className="font-medium">Новости и рассылки</span>
+                <span className="text-sm text-600 line-height-3" id="email-news-help">
+                  Новые тарифы, акции и новости сервиса. Включая, вы соглашаетесь получать
+                  рекламные рассылки; отписаться можно здесь или из любого письма.
+                </span>
+              </span>
             </label>
             {!emailReminders.emailEligible ? (
               <Message
                 severity="warn"
-                text="Нельзя включить напоминания: e-mail не подтверждён или отправка на этот адрес отключена. Подтвердите адрес; если он уже подтверждён, обратитесь в поддержку. Уже сохранённую настройку можно отключить."
+                text="Нельзя включить письма: e-mail не подтверждён или отправка на этот адрес отключена. Подтвердите адрес; если он уже подтверждён, обратитесь в поддержку. Уже включённые письма можно отключить."
               />
             ) : null}
-            <p className="m-0 line-height-3 text-sm text-600" id="email-expiration-reminders-help">
+            <p className="m-0 line-height-3 text-sm text-600">
               Если письмо попадёт в папку «Спам», отметьте его как «Не спам» и добавьте{
               " "
-              }{emailReminders.senderEmail ? <code>{emailReminders.senderEmail}</code> : "адрес отправителя"}{
+              }{emailReminders.senderEmail ? <code>{emailReminders.senderEmail}</code> : "адрес отправителя"}
+              {emailReminders.newsSenderEmail && emailReminders.newsSenderEmail !== emailReminders.senderEmail ? (
+                <> и <code>{emailReminders.newsSenderEmail}</code></>
+              ) : null}{
               " "
-              }в контакты или белый список. Так следующие напоминания с большей вероятностью
-              попадут во «Входящие».
+              }в контакты или белый список.
             </p>
           </div>
         ) : (
           <Message
             severity="warn"
-            text="Настройки e-mail-напоминаний временно недоступны. Их текущее состояние не изменено."
+            text="Настройки e-mail-уведомлений временно недоступны. Их текущее состояние не изменено."
           />
         )}
       </Card>
+
+      <PushNotificationsCard available={emailReminders?.pushAvailable ?? false} />
 
       {isTelegramOnly ? (
         <Card title="Добавить e-mail и пароль">

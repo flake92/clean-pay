@@ -13,7 +13,7 @@ import {
   requestProfileEmailVerificationAction,
   updateEmailReminderPreferenceAction,
 } from "@/app/actions/profile";
-import type { ProfileViewModel } from "@/application/models/profile";
+import type { EmailPreferenceChannel, ProfileViewModel } from "@/application/models/profile";
 import {
   profileEmailTurnstileAction,
   selectProfilePresentation,
@@ -218,13 +218,20 @@ export function useProfileController({
     }
   }
 
-  async function changeEmailReminders(event: ChangeEvent<HTMLInputElement>) {
-    const enabled = event.target.checked;
+  function changeServiceEmails(event: ChangeEvent<HTMLInputElement>) {
+    return changeEmailPreference("service", event.target.checked);
+  }
+
+  function changeNewsEmails(event: ChangeEvent<HTMLInputElement>) {
+    return changeEmailPreference("news", event.target.checked);
+  }
+
+  async function changeEmailPreference(channel: EmailPreferenceChannel, enabled: boolean) {
     if (!beginPendingAction("email-reminders")) return;
     dispatch({ type: "email-reminder-message-cleared" });
 
     try {
-      const result = await updateEmailReminderPreferenceAction(enabled);
+      const result = await updateEmailReminderPreferenceAction(channel, enabled);
       if (!result.ok) {
         dispatch({
           type: "email-reminder-message-shown",
@@ -290,7 +297,8 @@ export function useProfileController({
     changeCurrentPassword,
     changeEmail,
     changeEmailInput,
-    changeEmailReminders,
+    changeNewsEmails,
+    changeServiceEmails,
     changeNewPassword,
     changePassword,
     setTurnstile,

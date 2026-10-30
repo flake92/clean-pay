@@ -20,6 +20,8 @@ export type RegisterRequest = {
   password: string;
   name?: string;
   referral_code?: string;
+  // Explicit opt-in to news e-mail (advertising); omitted means no consent.
+  email_news_consent?: boolean;
 };
 
 export type LoginRequest = {
@@ -69,10 +71,35 @@ export type NotificationPreferencesResponse = {
   email_eligible: boolean;
   sender_email: string | null;
   days_before: number[];
+  service_email_enabled: boolean;
+  news_email_enabled: boolean;
+  bulk_sender_email: string | null;
+  push_available: boolean;
 };
 
 export type UpdateNotificationPreferencesRequest = {
-  subscription_expiration_email_enabled: boolean;
+  subscription_expiration_email_enabled?: boolean;
+  service_email_enabled?: boolean;
+  news_email_enabled?: boolean;
+};
+
+export type PushKeyResponse = {
+  enabled: boolean;
+  public_key: string | null;
+};
+
+export type PushStatusResponse = {
+  devices: number;
+};
+
+export type PushSubscriptionRequest = {
+  endpoint: string;
+  keys: { p256dh: string; auth: string };
+  user_agent?: string;
+};
+
+export type UnsubscribeResponse = {
+  category: "SERVICE" | "NEWS";
 };
 
 export type ChangeEmailResponse = {

@@ -17,8 +17,13 @@ export const {
 } = remnashopTransport;
 
 export const {
+  deleteRemnashopPushSubscription,
   getRemnashopMe,
   getRemnashopNotificationPreferences,
+  getRemnashopPushKey,
+  getRemnashopPushStatus,
+  remnashopUnsubscribeEmail,
+  saveRemnashopPushSubscription,
   remnashopAuth,
   remnashopAuthTelegramIdentity,
   remnashopChangePassword,

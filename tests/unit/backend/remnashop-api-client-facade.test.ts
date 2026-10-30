@@ -6,9 +6,12 @@ import * as apiClient from "@/backend/integrations/remnashop/api-client";
 import * as compatibilityClient from "@/backend/integrations/remnashop/client";
 
 const expectedExports = [
+  "deleteRemnashopPushSubscription",
   "getJwtExpiresAt",
   "getRemnashopMe",
   "getRemnashopNotificationPreferences",
+  "getRemnashopPushKey",
+  "getRemnashopPushStatus",
   "getRemnashopUserIdFromAccessToken",
   "protectRemnashopToken",
   "remnashopAdminRequestResult",
@@ -23,7 +26,9 @@ const expectedExports = [
   "remnashopRequest",
   "remnashopRequestPasswordReset",
   "remnashopRequestResult",
+  "remnashopUnsubscribeEmail",
   "revealRemnashopToken",
+  "saveRemnashopPushSubscription",
   "updateRemnashopNotificationPreferences",
 ] as const;
 

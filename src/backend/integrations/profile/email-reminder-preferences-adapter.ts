@@ -1,4 +1,7 @@
-import type { EmailReminderPreferenceViewModel } from "@/application/models/profile";
+import type {
+  EmailPreferenceChannel,
+  EmailReminderPreferenceViewModel,
+} from "@/application/models/profile";
 import {
   EmailReminderPreferenceGatewayError,
   type EmailReminderPreferenceActor,
@@ -24,14 +27,21 @@ type PreferenceAuthorizer = () => Promise<AuthorizedPreferenceSession>;
 
 type PreferenceApi = {
   load(accessToken: string): Promise<unknown>;
-  update(accessToken: string, enabled: boolean): Promise<unknown>;
+  update(
+    accessToken: string,
+    channel: EmailPreferenceChannel,
+    enabled: boolean,
+  ): Promise<unknown>;
 };
 
 const productionApi: PreferenceApi = {
   load: getRemnashopNotificationPreferences,
-  update: (accessToken, enabled) => updateRemnashopNotificationPreferences(accessToken, {
-    subscription_expiration_email_enabled: enabled,
-  }),
+  update: (accessToken, channel, enabled) => updateRemnashopNotificationPreferences(
+    accessToken,
+    channel === "news"
+      ? { news_email_enabled: enabled }
+      : { service_email_enabled: enabled },
+  ),
 };
 
 function parsePreference(value: unknown): EmailReminderPreferenceViewModel {
@@ -58,12 +68,25 @@ function parsePreference(value: unknown): EmailReminderPreferenceViewModel {
     ? senderEmail
     : null;
   const normalizedDaysBefore = daysBefore as number[];
+  const bulkSender = candidate.bulk_sender_email;
+  if (
+    typeof candidate.service_email_enabled !== "boolean"
+    || typeof candidate.news_email_enabled !== "boolean"
+    || typeof candidate.push_available !== "boolean"
+    || (bulkSender !== null && typeof bulkSender !== "string")
+  ) {
+    throw new EmailReminderPreferenceGatewayError("UPSTREAM_UNAVAILABLE");
+  }
 
   return {
     enabled: candidate.subscription_expiration_email_enabled,
     emailEligible: candidate.email_eligible,
     senderEmail: normalizedSenderEmail,
     daysBefore: [...normalizedDaysBefore],
+    serviceEnabled: candidate.service_email_enabled,
+    newsEnabled: candidate.news_email_enabled,
+    newsSenderEmail: typeof bulkSender === "string" && bulkSender.trim() ? bulkSender : null,
+    pushAvailable: candidate.push_available,
   };
 }
 
@@ -137,15 +160,15 @@ export function createEmailReminderPreferenceCommands(
         throw gatewayFailure(error);
       }
     },
-    async update(actor, enabled) {
+    async update(actor, channel, enabled) {
       const authorized = actorContext(actor);
       try {
         return await auditedMutation({
           action: "email_reminder_preference",
           userId: actor.userId,
-          metadata: { enabled },
+          metadata: { channel, enabled },
           mutate: async () => parsePreference(
-            await api.update(authorized.accessToken, enabled),
+            await api.update(authorized.accessToken, channel, enabled),
           ),
         });
       } catch (error) {

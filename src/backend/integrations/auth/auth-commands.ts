@@ -64,6 +64,7 @@ export function createProductionAuthCommands(): AuthCommands {
                     email: input.email,
                     password: input.password,
                     ...(input.referralCode ? { referral_code: input.referralCode } : {}),
+                    ...(input.newsConsent ? { email_news_consent: true } : {}),
                   }
                 : { email: input.email, password: input.password },
             );
