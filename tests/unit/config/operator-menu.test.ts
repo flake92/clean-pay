@@ -583,6 +583,8 @@ describe("operator menu", () => {
     expectBefore(functionBody("rs_update"), "require_backup", 'rs_ensure_push_keys "$image"');
     expect(functionBody("rs_update")).toContain("rs_bulk_email_hint");
     expectBefore(update, 'sh "$DEPLOY_SCRIPT" install', "rs_push_keys_followup");
+    expectBefore(functionBody("rs_link"), "rs_sync_auth_key restart", "rs_push_keys_followup");
+    expect(functionBody("print_summary")).toContain("нет ключей Web Push");
   });
 
   it("configures the separate bulk SMTP from the menu after a backup", () => {

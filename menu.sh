@@ -353,6 +353,14 @@ print_summary() {
   fi
   summary_component 'Clean Pay' "$app" "${rev:+версия $rev}"
   summary_component 'Remnashop' "$RS_API" "${rs_rev:+версия $rs_rev}"
+  # A Remnashop updated by an older menu has no VAPID keys: push stays off.
+  if [ -n "$rs_rev" ] && [ -r "$REMNASHOP_DIR/.env" ] \
+    && [ -z "$(env_get "$REMNASHOP_DIR/.env" WEB_PUSH_VAPID_PUBLIC_KEY)" ] \
+    && [ "$(db_query "$RS_DB" 'SELECT version_num FROM alembic_version' 2>/dev/null || true)" \
+      \> 0059 ]; then
+    printf '  %s %sнет ключей Web Push — пункт 11 «Связать с Clean Pay» создаст их%s\n' \
+      "$(pad 'Push' 11)" "$C_YELLOW" "$C_RESET"
+  fi
   if docker_ok && container_exists "$RW_CONTAINER"; then
     summary_component 'Remnawave' "$RW_CONTAINER" "$(rw_version_text "$rw_ver")"
   fi
@@ -1841,13 +1849,14 @@ rs_sync_auth_key() {
 
 # Menu item: everything Clean Pay needs from the local Remnashop, then the real check.
 rs_link() {
-  title 'Связь Clean Pay ↔ Remnashop' 'Права .env → общий ключ → проверка совместимости'
+  title 'Связь Clean Pay ↔ Remnashop' 'Права .env → общий ключ → ключи Web Push → проверка совместимости'
   need_docker
   cp_installed || die 'Clean Pay не установлен (нет deploy/prod/.env).'
   [ -f "$REMNASHOP_DIR/.env" ] || die "Не найден $REMNASHOP_DIR/.env."
   [ "$(id -u)" -eq 0 ] || die 'Запустите от root: нужны права на .env Remnashop.'
   rs_secure_env
   rs_sync_auth_key restart || return 1
+  rs_push_keys_followup
   [ -f "$REMNASHOP_CHECK_SCRIPT" ] || return 0
   note 'Проверка совместимости с Clean Pay…'
   if sh "$REMNASHOP_CHECK_SCRIPT" "$ENV_FILE" check; then ok 'Clean Pay и Remnashop совместимы'
