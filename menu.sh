@@ -1687,8 +1687,10 @@ rs_ensure_push_keys() {
   local image=$1 env="$REMNASHOP_DIR/.env" keys public private subject from domain
   [ -f "$env" ] || return 1
   [ -z "$(env_get "$env" WEB_PUSH_VAPID_PUBLIC_KEY)" ] || return 1
-  keys=$(docker run --rm --network none --entrypoint python "$image" \
-    -m src.infrastructure.services.web_push 2>/dev/null) || return 1
+  # The Remnashop package validates its settings on import, so the generator needs its .env.
+  keys=$(docker run --rm --network none --env-file "$env" --entrypoint python "$image" \
+    -m src.infrastructure.services.web_push 2>/dev/null) \
+    || { warn 'Не удалось создать ключи Web Push — push-уведомления останутся выключенными.'; return 1; }
   public=$(printf '%s\n' "$keys" | sed -n 's/^WEB_PUSH_VAPID_PUBLIC_KEY=\([A-Za-z0-9_-]\{80,100\}\)$/\1/p')
   private=$(printf '%s\n' "$keys" | sed -n 's/^WEB_PUSH_VAPID_PRIVATE_KEY=\([A-Za-z0-9_-]\{40,50\}\)$/\1/p')
   if [ -z "$public" ] || [ -z "$private" ]; then
