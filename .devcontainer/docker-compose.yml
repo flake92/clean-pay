@@ -231,11 +231,11 @@ services:
 
   remnashop:
     build:
-      context: ${REMNASHOP_BUILD_CONTEXT:-https://github.com/flake92/remnashop.git#7d27eeefffefb65af702e1c6ef7ed5fc985873c2}
+      context: ${REMNASHOP_BUILD_CONTEXT:-https://github.com/flake92/remnashop.git#7a20b242cdeb6a1dba6fbda123b8da5cb19d9c7b}
       dockerfile: Dockerfile
       args:
         BUILD_BRANCH: codex/email-reminders-default-deploy-20260913
-        BUILD_COMMIT: ${REMNASHOP_BUILD_REVISION:-7d27eeefffefb65af702e1c6ef7ed5fc985873c2}
+        BUILD_COMMIT: ${REMNASHOP_BUILD_REVISION:-7a20b242cdeb6a1dba6fbda123b8da5cb19d9c7b}
     image: ${CLEAN_PAY_DEVCONTAINER_REMNASHOP_IMAGE:-${COMPOSE_PROJECT_NAME:-clean-pay-dev}-remnashop:latest}
     restart: unless-stopped
     environment:

@@ -54,7 +54,9 @@ describe("Remnashop payment rollout deployment", () => {
     expect(rollout).toContain("repository_minimum_revision=0060");
     expect(rollout.indexOf("repository_minimum_revision=0060"))
       .toBeLessThan(rollout.indexOf("run_remnashop_env_preflight"));
-    expect(rollout).toContain("below the repository-required floor");
+    expect(rollout).toContain(
+      'if [ "$minimum_revision" -lt "$repository_minimum_revision" ]; then\n  minimum_revision=$repository_minimum_revision',
+    );
     expect(rollout.indexOf("run_remnashop_env_preflight"))
       .toBeLessThan(rollout.indexOf('docker inspect "$container"'));
     expect(rollout).toContain("API, worker and scheduler must use the same image");

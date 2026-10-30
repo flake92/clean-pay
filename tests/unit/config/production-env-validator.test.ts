@@ -333,13 +333,13 @@ describe("production env validator", () => {
       COMPOSE_PROJECT_NAME: "clean-pay_prod",
       CLEAN_PAY_EDGE_NETWORK: "remnawave-network",
       REMNASHOP_API_CONTAINER: "Remnashop.api-1",
-      REMNASHOP_MINIMUM_ALEMBIC_REVISION: "0060",
+      REMNASHOP_MINIMUM_ALEMBIC_REVISION: "0059",
       LOG_LEVEL: "DEBUG",
     })).not.toThrow();
     expect(() => validateProductionEnvironment({
       ...validEnv,
-      REMNASHOP_MINIMUM_ALEMBIC_REVISION: "0059",
-    })).toThrow("must be at least 0060");
+      REMNASHOP_MINIMUM_ALEMBIC_REVISION: "0058",
+    })).toThrow("must be at least 0059");
     expect(() => validateProductionEnvironment({
       ...validEnv,
       REMNASHOP_MINIMUM_ALEMBIC_REVISION: "0060",

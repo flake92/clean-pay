@@ -1097,6 +1097,12 @@ cp_prune_release_images() {
   fi
 }
 
+# Alembic revision as a plain number ("0060" -> 60, anything else -> 0); POSIX sh
+# has no 10# prefix.
+rev_num() {
+  case "$1" in ''|*[!0-9]*) printf 0 ;; *) printf '%s' "$1" | sed 's/^0*//; s/^$/0/' ;; esac
+}
+
 # The Remnashop schema is checked by deploy.sh only at install, after a long build.
 # Reads the floor of the selected version and, when the local Remnashop is older,
 # offers to update Remnashop first. A newer Remnashop keeps the old Clean Pay working,
@@ -1110,7 +1116,7 @@ cp_check_remnashop_floor() {
   container_exists "$RS_DB" || return 0
   current=$(db_query "$RS_DB" 'SELECT version_num FROM alembic_version' 2>/dev/null || true)
   case "$current" in ''|*[!0-9]*) return 0 ;; esac
-  [ "$((10#$current))" -lt "$((10#$floor))" ] || { ok "Схема Remnashop $current подходит (нужна не ниже $floor)"; return 0; }
+  [ "$(rev_num "$current")" -lt "$(rev_num "$floor")" ] || { ok "Схема Remnashop $current подходит (нужна не ниже $floor)"; return 0; }
   warn "Версии $(cp_version_at "$target") нужен Remnashop со схемой не ниже $floor, сейчас $current."
   note 'Сначала обновите Remnashop: новый Remnashop работает и с текущим Clean Pay,'
   note 'а установка нового Clean Pay поверх старого Remnashop остановится на проверке совместимости.'
@@ -1119,7 +1125,7 @@ cp_check_remnashop_floor() {
   ( rs_update ) || die 'Remnashop не обновлён — Clean Pay не тронут. Подробности выше.'
   current=$(db_query "$RS_DB" 'SELECT version_num FROM alembic_version' 2>/dev/null || true)
   case "$current" in ''|*[!0-9]*) die 'Не удалось прочитать схему Remnashop после обновления.' ;; esac
-  [ "$((10#$current))" -ge "$((10#$floor))" ] \
+  [ "$(rev_num "$current")" -ge "$(rev_num "$floor")" ] \
     || die "Схема Remnashop всё ещё $current (нужна $floor). Выберите версию Remnashop main и повторите."
   ok "Remnashop готов (схема $current) — продолжаю обновление Clean Pay"
 }

@@ -521,7 +521,7 @@ workers не редактируйте вручную.
 | `REMNASHOP_API_KEY` | ключ приложения в Remnashop |
 | `REMNASHOP_AUTH_SERVICE_KEY` | ключ auth-сервиса; то же значение задаётся в `APP_AUTH_SERVICE_KEY` Remnashop |
 | `REMNASHOP_API_CONTAINER`, `REMNASHOP_WORKER_CONTAINER`, `REMNASHOP_SCHEDULER_CONTAINER`, `REMNASHOP_POSTGRES_CONTAINER` | имена контейнеров Remnashop для проверок при установке |
-| `REMNASHOP_MINIMUM_ALEMBIC_REVISION` | минимальная схема Remnashop, не ниже `0060` |
+| `REMNASHOP_MINIMUM_ALEMBIC_REVISION` | минимальная схема Remnashop, не ниже `0059`; проверка совместимости при деплое всё равно требует не ниже `0060` |
 | `REMNASHOP_ENV_FILE`, `REMNASHOP_ENV_EXPECTED_UID`, `REMNASHOP_ENV_EXPECTED_GID` | путь к `.env` Remnashop и ожидаемый владелец |
 | `REMNAWAVE_API_BASE_URL`, `REMNAWAVE_TOKEN` | API панели Remnawave |
 | `REMNAWAVE_COOKIE` | только если панель ставилась скриптом eGames и закрыта секретной cookie: то же значение `ключ=значение`, что `REMNAWAVE_COOKIE` в `.env` Remnashop. Без неё nginx панели отвечает 404, и установка останавливается на «dependencies are not ready: remnawave» |
@@ -732,8 +732,11 @@ PostgreSQL и проверьте его checksum и список объекто�
 одноразовых флага принятия базы до старта runtime. Частично выставленные флаги
 отклоняются.
 
-Мастер обновления записывает `REMNASHOP_MINIMUM_ALEMBIC_REVISION=0060`, а
-preflight не позволит запустить Clean Pay с более старой схемой Remnashop.
+Мастер обновления записывает `REMNASHOP_MINIMUM_ALEMBIC_REVISION=0059`, а
+preflight берёт большее из этого значения и требования текущей версии кода
+(`0060`) и не позволит запустить Clean Pay с более старой схемой Remnashop.
+Значение в `.env` не повышается, чтобы откат к прежней версии Clean Pay
+оставался рабочим.
 Revision `0059` не выполняет data backfill и не меняет существующие значения
 переключателя. Новое подтверждение e-mail получает default-on, повторный вход
 уже подтверждённого пользователя сохраняет его предыдущий выбор.

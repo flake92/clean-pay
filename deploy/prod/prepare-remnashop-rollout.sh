@@ -47,8 +47,11 @@ minimum_revision=$(env_value REMNASHOP_MINIMUM_ALEMBIC_REVISION "$repository_min
 case "$minimum_revision:$repository_minimum_revision" in
   *[!0-9:]*|:*|*:) fail "Alembic revisions must be numeric (configured=$minimum_revision repository=$repository_minimum_revision)" ;;
 esac
-[ "$minimum_revision" -ge "$repository_minimum_revision" ] \
-  || fail "REMNASHOP_MINIMUM_ALEMBIC_REVISION=$minimum_revision is below the repository-required floor $repository_minimum_revision; upgrade Remnashop first"
+# Existing installations keep an older floor in .env so that a rollback to the
+# previous Clean Pay still validates; this code requires at least the repository floor.
+if [ "$minimum_revision" -lt "$repository_minimum_revision" ]; then
+  minimum_revision=$repository_minimum_revision
+fi
 
 script_dir=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
 remnashop_env_file=$(env_value REMNASHOP_ENV_FILE /opt/remnashop/.env)

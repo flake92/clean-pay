@@ -507,6 +507,7 @@ describe("operator menu", () => {
       try {
         const script = (current: string, answer: string, afterUpdate: string) => [
           stubs,
+          shellFunctionFrom(menu, "rev_num"),
           shellFunctionFrom(menu, "cp_check_remnashop_floor"),
           'cp_version_at() { printf "0.5.0"; }',
           'git() { printf "repository_minimum_revision=0060\\n"; }',
