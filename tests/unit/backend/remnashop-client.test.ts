@@ -98,6 +98,11 @@ import {
   remnashopRequestPasswordReset,
   remnashopRequestResult,
   updateRemnashopNotificationPreferences,
+  deleteRemnashopPushSubscription,
+  getRemnashopPushKey,
+  getRemnashopPushStatus,
+  remnashopUnsubscribeEmail,
+  saveRemnashopPushSubscription,
 } from "@/backend/integrations/remnashop/client";
 import {
   getAuthorizedRemnashopTokens,
@@ -458,6 +463,50 @@ describe("remnashop client", () => {
         }),
       }),
     );
+  });
+
+  it("calls the push and unsubscribe endpoints and rejects malformed answers", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(response({ body: { enabled: true, public_key: "BKey" } }))
+      .mockResolvedValueOnce(response({ body: { devices: 0 } }))
+      .mockResolvedValueOnce(response({ body: { devices: 1 } }))
+      .mockResolvedValueOnce(response({ body: { devices: 0 } }))
+      .mockResolvedValueOnce(response({ body: { category: "NEWS" } }));
+    const subscription = {
+      endpoint: "https://fcm.googleapis.com/fcm/send/abc",
+      keys: { p256dh: "p256", auth: "auth" },
+    };
+
+    await expect(getRemnashopPushKey())
+      .resolves.toEqual({ enabled: true, public_key: "BKey" });
+    await expect(getRemnashopPushStatus("access-1")).resolves.toEqual({ devices: 0 });
+    await expect(saveRemnashopPushSubscription("access-1", subscription))
+      .resolves.toEqual({ devices: 1 });
+    await expect(deleteRemnashopPushSubscription("access-1", subscription.endpoint))
+      .resolves.toEqual({ devices: 0 });
+    await expect(remnashopUnsubscribeEmail("35.N.sig")).resolves.toEqual({ category: "NEWS" });
+
+    const base = "http://remnashop:5000/api/v1/public/auth/notifications";
+    expect(fetchMock).toHaveBeenNthCalledWith(3, `${base}/push/subscription`, expect.objectContaining({
+      method: "POST",
+      body: JSON.stringify(subscription),
+      headers: expect.objectContaining({ cookie: "access_token=access-1" }),
+    }));
+    expect(fetchMock).toHaveBeenNthCalledWith(4, `${base}/push/subscription/delete`, expect.objectContaining({
+      body: JSON.stringify({ endpoint: subscription.endpoint }),
+    }));
+    expect(fetchMock).toHaveBeenNthCalledWith(5, `${base}/unsubscribe`, expect.objectContaining({
+      method: "POST",
+      body: JSON.stringify({ token: "35.N.sig" }),
+    }));
+
+    fetchMock
+      .mockResolvedValueOnce(response({ body: { devices: -1 } }))
+      .mockResolvedValueOnce(response({ body: { category: "OTHER" } }));
+    await expect(getRemnashopPushStatus("access-1"))
+      .rejects.toMatchObject({ code: "UPSTREAM_UNAVAILABLE" });
+    await expect(remnashopUnsubscribeEmail("35.N.sig"))
+      .rejects.toMatchObject({ code: "UPSTREAM_UNAVAILABLE" });
   });
 
   it("supports password reset, token refresh and password change endpoints", async () => {

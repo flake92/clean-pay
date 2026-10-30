@@ -113,6 +113,29 @@ describe("push subscription commands", () => {
     expect(mocks.savePush).not.toHaveBeenCalled();
   });
 
+  it("turns every provider failure into a gateway error code", async () => {
+    const expired = createPushSubscriptionCommands(async () => {
+      throw new ServiceError("UNAUTHORIZED", 401, "expired");
+    });
+    await expect(expired.loadActor()).rejects.toMatchObject({ code: "UNAUTHORIZED" });
+
+    const commands = createPushSubscriptionCommands(async () => authorization);
+    const actor = await commands.loadActor();
+    const outage = new Error("socket hang up");
+    mocks.rateLimit.mockRejectedValueOnce(new ServiceError("RATE_LIMITED", 429, "slow down"));
+    await expect(commands.assertRateLimit(actor)).rejects.toMatchObject({ code: "RATE_LIMITED" });
+    mocks.pushKey.mockRejectedValueOnce(outage);
+    await expect(commands.publicKey()).rejects.toMatchObject({ code: "UPSTREAM_UNAVAILABLE" });
+    mocks.pushStatus.mockRejectedValueOnce(outage);
+    await expect(commands.devices(actor)).rejects.toMatchObject({ code: "UPSTREAM_UNAVAILABLE" });
+    mocks.deletePush.mockRejectedValueOnce(outage);
+    await expect(commands.remove(actor, subscription.endpoint))
+      .rejects.toMatchObject({ code: "UPSTREAM_UNAVAILABLE" });
+
+    mocks.pushKey.mockResolvedValueOnce({ enabled: false, public_key: null });
+    await expect(commands.publicKey()).resolves.toBeNull();
+  });
+
   it("maps provider refusals to user-facing codes", async () => {
     const commands = createPushSubscriptionCommands(async () => authorization);
     mocks.savePush.mockRejectedValueOnce(new ServiceError("VALIDATION_ERROR", 422, "push service"));

@@ -356,8 +356,8 @@ print_summary() {
   # A Remnashop updated by an older menu has no VAPID keys: push stays off.
   if [ -n "$rs_rev" ] && [ -r "$REMNASHOP_DIR/.env" ] \
     && [ -z "$(env_get "$REMNASHOP_DIR/.env" WEB_PUSH_VAPID_PUBLIC_KEY)" ] \
-    && [ "$(db_query "$RS_DB" 'SELECT version_num FROM alembic_version' 2>/dev/null || true)" \
-      \> 0059 ]; then
+    && [ "$(rev_num "$(db_query "$RS_DB" 'SELECT version_num FROM alembic_version' 2>/dev/null || true)")" \
+      -ge 60 ]; then
     printf '  %s %sнет ключей Web Push — пункт 11 «Связать с Clean Pay» создаст их%s\n' \
       "$(pad 'Push' 11)" "$C_YELLOW" "$C_RESET"
   fi
