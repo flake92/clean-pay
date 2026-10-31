@@ -281,7 +281,7 @@ if (
       throw new Error("usage: role-env.mjs materialize AUTHORITATIVE_ENV");
     }
     materializeProductionRoleEnvironmentFiles(process.argv[3]);
-    process.stdout.write("Файлы настроек для ролей созданы.\n");
+    process.stdout.write("Role-scoped production environment files materialized.\n");
   } catch (error) {
     process.stderr.write(
       `Role environment materialization failed: ${error instanceof Error ? error.message : String(error)}\n`,
