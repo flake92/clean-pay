@@ -32,6 +32,8 @@ describe("IosInstallGuide", () => {
     const dialog = document.querySelector<HTMLElement>('[role="dialog"]');
     expect(dialog?.parentElement).toBe(document.body);
     expect(container.children).toHaveLength(0);
+    // The support chat launcher sits at 2147483001.
+    expect(Number(dialog?.style.zIndex)).toBeGreaterThan(2147483001);
     expect(dialog?.querySelector<HTMLElement>(":scope > div")?.style.background)
       .toBe("var(--surface-card)");
     expect(dialog?.textContent).toContain("•••");

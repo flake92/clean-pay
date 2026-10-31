@@ -109,7 +109,8 @@ export function IosInstallGuide({ onClose }: IosInstallGuideProps) {
         justifyContent: "center",
         padding: "max(0.75rem, env(safe-area-inset-top)) 0.75rem max(0.75rem, env(safe-area-inset-bottom))",
         position: "fixed",
-        zIndex: 1100,
+        // Above the support chat launcher (_chatwoot.scss).
+        zIndex: 2147483002,
       }}
     >
       <div
