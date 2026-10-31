@@ -11,11 +11,11 @@ import { dynamic } from "@/app/install/page";
   .IS_REACT_ACT_ENVIRONMENT = true;
 
 describe("IosInstallGuide", () => {
-  let root: Root;
+  let root: Root | undefined;
   const container = document.createElement("div");
 
   afterEach(async () => {
-    await act(async () => root.unmount());
+    await act(async () => root?.unmount());
     container.remove();
   });
 
@@ -27,7 +27,7 @@ describe("IosInstallGuide", () => {
     const onClose = vi.fn();
     document.body.append(container);
     root = createRoot(container);
-    await act(async () => root.render(createElement(IosInstallGuide, { onClose })));
+    await act(async () => root?.render(createElement(IosInstallGuide, { onClose })));
 
     const dialog = document.querySelector<HTMLElement>('[role="dialog"]');
     expect(dialog?.parentElement).toBe(document.body);
