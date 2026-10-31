@@ -20,7 +20,10 @@ export function useCleanPayMenu(navigation: NavigationViewModel) {
     const shouldShowLinkAccount = navigation.authenticated;
     const accountItems: AppMenuItem[] = [
         ...(navigation.authenticated
-            ? [{ label: "Профиль", icon: "pi pi-fw pi-user", to: "/profile" }]
+            ? [
+                { label: "Уведомления", icon: "pi pi-fw pi-bell", to: "/notifications" },
+                { label: "Профиль", icon: "pi pi-fw pi-user", to: "/profile" },
+            ]
             : []),
         ...(shouldShowVerifyEmail
             ? [{ label: "Подтвердить e-mail", icon: "pi pi-fw pi-envelope", to: "/verify-email" }]

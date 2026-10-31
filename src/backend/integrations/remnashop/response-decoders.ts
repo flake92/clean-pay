@@ -155,6 +155,56 @@ export function decodePushStatus(value: unknown) {
   return { devices };
 }
 
+function countField(input: Record<string, unknown>, field: string) {
+  const value = numberField(input, field);
+  if (!Number.isSafeInteger(value) || value < 0) {
+    throw new TypeError(`${field} must be a non-negative integer`);
+  }
+  return value;
+}
+
+function decodeFeedButtons(value: unknown) {
+  if (!Array.isArray(value)) throw new TypeError("buttons must be an array");
+  return value.map((row) => {
+    if (!Array.isArray(row)) throw new TypeError("buttons row must be an array");
+    return row.map((button) => {
+      const input = record(button, "Remnashop feed button");
+      return { text: stringField(input, "text"), url: stringField(input, "url") };
+    });
+  });
+}
+
+function decodeFeedItem(value: unknown) {
+  const input = record(value, "Remnashop feed item");
+  const category = stringField(input, "category");
+  if (category !== "SERVICE" && category !== "NEWS") {
+    throw new TypeError("category must be SERVICE or NEWS");
+  }
+  return {
+    id: countField(input, "id"),
+    category,
+    text_html: stringField(input, "text_html"),
+    buttons: decodeFeedButtons(input.buttons),
+    media_type: nullableStringField(input, "media_type"),
+    created_at: stringField(input, "created_at"),
+    read: booleanField(input, "read"),
+  } as const;
+}
+
+export function decodeFeedPage(value: unknown) {
+  const input = record(value, "Remnashop feed page");
+  if (!Array.isArray(input.items)) throw new TypeError("items must be an array");
+  return {
+    items: input.items.map(decodeFeedItem),
+    unread_count: countField(input, "unread_count"),
+    next_before_id: input.next_before_id === null ? null : countField(input, "next_before_id"),
+  };
+}
+
+export function decodeFeedUnread(value: unknown) {
+  return { unread_count: countField(record(value, "Remnashop feed unread"), "unread_count") };
+}
+
 export function decodeUnsubscribe(value: unknown) {
   const input = record(value, "Remnashop unsubscribe response");
   const category = stringField(input, "category");

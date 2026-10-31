@@ -7,12 +7,16 @@ import * as compatibilityClient from "@/backend/integrations/remnashop/client";
 
 const expectedExports = [
   "deleteRemnashopPushSubscription",
+  "fetchRemnashopFeedMedia",
   "getJwtExpiresAt",
+  "getRemnashopFeed",
+  "getRemnashopFeedUnread",
   "getRemnashopMe",
   "getRemnashopNotificationPreferences",
   "getRemnashopPushKey",
   "getRemnashopPushStatus",
   "getRemnashopUserIdFromAccessToken",
+  "markRemnashopFeedRead",
   "protectRemnashopToken",
   "remnashopAdminRequestResult",
   "remnashopAuth",

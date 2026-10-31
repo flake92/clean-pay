@@ -9,6 +9,7 @@ Only contracts that must be reached by infrastructure outside the React applicat
 | `GET /api/health` | Public process health summary |
 | `GET /api/health/liveness` | Container liveness probe |
 | `GET /api/health/readiness` | Public cached readiness result |
+| `GET /api/notifications/media/[id]` | Photo or video of a notification feed item of the signed-in user |
 | `POST /api/notifications/unsubscribe` | One-click e-mail unsubscribe (RFC 8058); the signed token is the authorization |
 | `GET /api/internal/health/readiness` | Secret-protected detailed readiness probe |
 | `GET /api/internal/metrics` | Secret-protected Prometheus operational metrics |

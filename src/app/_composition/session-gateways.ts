@@ -10,6 +10,7 @@ import { createProductionProfileCommands } from "@/backend/integrations/profile/
 import { createEmailReminderPreferenceCommands } from "@/backend/integrations/profile/email-reminder-preferences-adapter";
 import {
   createEmailUnsubscribeGateway,
+  createNotificationFeedGateway,
   createPushSubscriptionCommands,
 } from "@/backend/integrations/notifications/notification-channels-adapter";
 import { createProductionChatwootContextGateway } from "@/backend/integrations/support/chatwoot-context-gateway";
@@ -50,6 +51,10 @@ export const productionChatwootContextGateway =
   createProductionChatwootContextGateway(getAuthorizedRemnashopTokens);
 export const productionPushSubscriptionCommands =
   createPushSubscriptionCommands(() => getAuthorizedRemnashopTokens({
+    allowUnverifiedEmail: true,
+  }));
+export const productionNotificationFeedGateway =
+  createNotificationFeedGateway(() => getAuthorizedRemnashopTokens({
     allowUnverifiedEmail: true,
   }));
 export const productionEmailUnsubscribeGateway = createEmailUnsubscribeGateway();

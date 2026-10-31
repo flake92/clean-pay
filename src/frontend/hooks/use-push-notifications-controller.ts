@@ -18,6 +18,37 @@ import {
   isStandaloneInstallMode,
 } from "@/frontend/lib/install-app-transitions";
 
+const SETUP_CACHE_MS = 10 * 60 * 1000;
+const SYNC_KEY_PREFIX = "clean-pay:push-synced:";
+let cachedSetup: {
+  at: number;
+  value: ReturnType<typeof loadPushSetupAction>;
+} | null = null;
+
+// The check runs on every page, so one answer serves a whole visit.
+function pushSetup() {
+  if (!cachedSetup || Date.now() - cachedSetup.at > SETUP_CACHE_MS) {
+    cachedSetup = { at: Date.now(), value: loadPushSetupAction() };
+  }
+  return cachedSetup.value;
+}
+
+function syncedInThisTab(endpoint: string) {
+  try {
+    return window.sessionStorage.getItem(SYNC_KEY_PREFIX + endpoint) !== null;
+  } catch {
+    return false;
+  }
+}
+
+function rememberSynced(endpoint: string) {
+  try {
+    window.sessionStorage.setItem(SYNC_KEY_PREFIX + endpoint, "1");
+  } catch {
+    // Without storage the next page repeats a harmless save.
+  }
+}
+
 async function serviceWorkerRegistration() {
   await navigator.serviceWorker.register("/sw.js", { scope: "/", updateViaCache: "none" });
   return navigator.serviceWorker.ready;
@@ -73,7 +104,7 @@ export function usePushNotificationsController(serverAvailable: boolean) {
       setEnv(nextEnv);
       if (!pushSupported || nextEnv.permission === "denied") return;
       try {
-        const setup = await loadPushSetupAction();
+        const setup = await pushSetup();
         if (cancelled) return;
         if (setup.status !== "ready") {
           setEnv((current) => ({ ...current, serverAvailable: false }));
@@ -90,10 +121,19 @@ export function usePushNotificationsController(serverAvailable: boolean) {
           await existing.unsubscribe();
           existing = null;
         }
-        if (existing && Notification.permission === "granted") {
-          // Re-register on every visit: the server drops subscriptions that
+        if (Notification.permission === "granted") {
+          // Permission stays but the browser dropped the subscription (or the
+          // key rotated): restore it without bothering the user.
+          existing ??= await registration.pushManager.subscribe({
+            userVisibleOnly: true,
+            applicationServerKey: applicationServerKey(setup.publicKey) as BufferSource,
+          });
+          // Re-register once a visit: the server drops subscriptions that
           // expired or moved to another account on this device.
-          await savePushSubscriptionAction(subscriptionPayload(existing));
+          if (!syncedInThisTab(existing.endpoint)) {
+            const saved = await savePushSubscriptionAction(subscriptionPayload(existing));
+            if (saved.ok) rememberSynced(existing.endpoint);
+          }
         }
         if (!cancelled) setSubscribed(Boolean(existing));
       } catch {

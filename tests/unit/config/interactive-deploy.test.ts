@@ -30,9 +30,9 @@ describe("interactive owner deployment", () => {
     expect(setup.indexOf("prepare_compose")).toBeGreaterThan(
       setup.indexOf("DNS и HTTPS reverse proxy"),
     );
-    expect(productionEnvExample).toContain("REMNASHOP_MINIMUM_ALEMBIC_REVISION=0060");
+    expect(productionEnvExample).toContain("REMNASHOP_MINIMUM_ALEMBIC_REVISION=0061");
     expect(deploy).toContain(
-      "required_remnashop_revision=$(env_value REMNASHOP_MINIMUM_ALEMBIC_REVISION 0060)",
+      "required_remnashop_revision=$(env_value REMNASHOP_MINIMUM_ALEMBIC_REVISION 0061)",
     );
   });
 

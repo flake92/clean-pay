@@ -1,5 +1,7 @@
 import type {
   EmailUnsubscribeCategory,
+  NotificationFeedPage,
+  NotificationMedia,
   PushSubscriptionInput,
 } from "@/application/models/notifications";
 
@@ -15,6 +17,14 @@ export interface PushSubscriptionCommands {
   devices(actor: PushActor): Promise<number>;
   save(actor: PushActor, input: PushSubscriptionInput): Promise<number>;
   remove(actor: PushActor, endpoint: string): Promise<number>;
+}
+
+export interface NotificationFeedGateway {
+  loadActor(): Promise<PushActor>;
+  page(actor: PushActor, beforeId?: number): Promise<NotificationFeedPage>;
+  unread(actor: PushActor): Promise<number>;
+  markRead(actor: PushActor, upToId: number): Promise<number>;
+  media(actor: PushActor, itemId: number): Promise<NotificationMedia>;
 }
 
 export interface EmailUnsubscribeGateway {

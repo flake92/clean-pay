@@ -18,6 +18,7 @@ const mocks = vi.hoisted(() => ({
   setLayoutState: vi.fn(),
 }));
 
+vi.mock("@/frontend/components/push-reminder", () => ({ PushReminder: () => null }));
 vi.mock("next/navigation", () => ({ usePathname: () => "/cabinet" }));
 vi.mock("primereact/hooks", () => ({
   useEventListener: () => [vi.fn(), vi.fn()],

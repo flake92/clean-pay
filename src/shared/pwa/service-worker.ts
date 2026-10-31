@@ -89,6 +89,16 @@ self.addEventListener("push", (event) => {
     data = { body: event.data ? event.data.text() : "" };
   }
   const title = typeof data.title === "string" && data.title ? data.title : "Уведомление";
+  // A deleted broadcast. Browsers require every push to show a notification,
+  // so the delivered one is replaced by its tag and closed at once.
+  if (typeof data.revoke === "string" && data.revoke) {
+    event.waitUntil((async () => {
+      await self.registration.showNotification(title, { tag: data.revoke, silent: true });
+      const shown = await self.registration.getNotifications({ tag: data.revoke });
+      for (const notification of shown) notification.close();
+    })());
+    return;
+  }
   event.waitUntil(self.registration.showNotification(title, {
     body: typeof data.body === "string" ? data.body : "",
     icon: NOTIFICATION_ICON,

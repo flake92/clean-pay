@@ -18,6 +18,10 @@ export const {
 
 export const {
   deleteRemnashopPushSubscription,
+  fetchRemnashopFeedMedia,
+  getRemnashopFeed,
+  getRemnashopFeedUnread,
+  markRemnashopFeedRead,
   getRemnashopMe,
   getRemnashopNotificationPreferences,
   getRemnashopPushKey,

@@ -51,8 +51,8 @@ describe("Remnashop payment rollout deployment", () => {
     expect(rollout).toContain("node or python3 is required for credential metadata preflight");
     expect(rollout.indexOf("run_remnashop_env_preflight"))
       .toBeLessThan(rollout.indexOf("command -v docker"));
-    expect(rollout).toContain("repository_minimum_revision=0060");
-    expect(rollout.indexOf("repository_minimum_revision=0060"))
+    expect(rollout).toContain("repository_minimum_revision=0061");
+    expect(rollout.indexOf("repository_minimum_revision=0061"))
       .toBeLessThan(rollout.indexOf("run_remnashop_env_preflight"));
     expect(rollout).toContain(
       'if [ "$minimum_revision" -lt "$repository_minimum_revision" ]; then\n  minimum_revision=$repository_minimum_revision',
@@ -72,7 +72,7 @@ describe("Remnashop payment rollout deployment", () => {
     expect(rollout).toContain("= 2");
     expect(rollout).toContain("/api/v1/public/auth/notification-preferences");
     expect(rollout).toContain('"422 405 405") ;;');
-    expect(rollout).toContain("/api/v1/public/auth/notifications/push/key");
+    expect(rollout).toContain("/api/v1/public/auth/notifications/feed");
     // a 401 next to the 405 is a key mismatch on the fork, not an upstream image
     expect(rollout).toContain('"401 405 405")');
     expect(rollout).toContain("./menu.sh remnashop-link");

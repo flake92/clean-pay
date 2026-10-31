@@ -8,6 +8,8 @@ import type {
   ConfirmPasswordResetRequest,
   LoginRequest,
   NotificationPreferencesResponse,
+  FeedPageResponse,
+  FeedUnreadResponse,
   PushKeyResponse,
   PushStatusResponse,
   PushSubscriptionRequest,
@@ -22,6 +24,8 @@ import type {
   UpdateNotificationPreferencesRequest,
 } from "@/backend/integrations/remnashop/contracts";
 import {
+  decodeFeedPage,
+  decodeFeedUnread,
   decodePushKey,
   decodePushStatus,
   decodeUnsubscribe,
@@ -331,6 +335,42 @@ export function createRemnashopEndpointOperations(
     });
   }
 
+  async function getRemnashopFeed(accessToken: string, beforeId?: number) {
+    const query = new URLSearchParams({ limit: "30" });
+    if (beforeId) query.set("before_id", String(beforeId));
+    return transport.remnashopValidatedRequest<FeedPageResponse>(
+      `/auth/notifications/feed?${query}`,
+      { accessToken, timeoutMs: 5_000 },
+      decodeFeedPage,
+    );
+  }
+
+  async function getRemnashopFeedUnread(accessToken: string) {
+    return transport.remnashopValidatedRequest<FeedUnreadResponse>(
+      "/auth/notifications/feed/unread",
+      { accessToken, timeoutMs: 3_000 },
+      decodeFeedUnread,
+    );
+  }
+
+  async function markRemnashopFeedRead(accessToken: string, upToId: number) {
+    return transport.remnashopValidatedRequest<FeedUnreadResponse>(
+      "/auth/notifications/feed/read",
+      { method: "POST", accessToken, body: { up_to_id: upToId }, timeoutMs: 5_000 },
+      decodeFeedUnread,
+    );
+  }
+
+  // Binary: the caller streams the body or cancels it.
+  async function fetchRemnashopFeedMedia(accessToken: string, itemId: number) {
+    return transport.fetchRemnashop(`/auth/notifications/feed/${itemId}/media`, {
+      method: "GET",
+      headers: { cookie: `access_token=${accessToken}` },
+      cache: "no-store",
+      signal: AbortSignal.timeout(45_000),
+    });
+  }
+
   async function getRemnashopPushKey() {
     return transport.remnashopValidatedRequest<PushKeyResponse>(
       "/auth/notifications/push/key",
@@ -416,6 +456,10 @@ export function createRemnashopEndpointOperations(
 
   return {
     deleteRemnashopPushSubscription,
+    fetchRemnashopFeedMedia,
+    getRemnashopFeed,
+    getRemnashopFeedUnread,
+    markRemnashopFeedRead,
     getRemnashopMe,
     getRemnashopNotificationPreferences,
     getRemnashopPushKey,

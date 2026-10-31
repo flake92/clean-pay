@@ -5,12 +5,17 @@ import type {
 import {
   NotificationChannelGatewayError,
   type EmailUnsubscribeGateway,
+  type NotificationFeedGateway,
   type PushActor,
   type PushSubscriptionCommands,
 } from "@/application/notifications/ports/notification-channels";
 import { ServiceError } from "@/backend/errors/service-error";
 import {
   deleteRemnashopPushSubscription,
+  fetchRemnashopFeedMedia,
+  getRemnashopFeed,
+  getRemnashopFeedUnread,
+  markRemnashopFeedRead,
   getRemnashopPushKey,
   getRemnashopPushStatus,
   remnashopUnsubscribeEmail,
@@ -36,6 +41,7 @@ function gatewayFailure(error: unknown): NotificationChannelGatewayError {
       return new NotificationChannelGatewayError("UNSUPPORTED_PUSH_SERVICE");
     }
     if (error.status === 400) return new NotificationChannelGatewayError("INVALID_TOKEN");
+    if (error.status === 404) return new NotificationChannelGatewayError("NOT_FOUND");
   }
   return new NotificationChannelGatewayError("UPSTREAM_UNAVAILABLE");
 }
@@ -111,6 +117,58 @@ export function createPushSubscriptionCommands(authorize: Authorizer): PushSubsc
         throw gatewayFailure(error);
       }
     },
+  };
+}
+
+export function createNotificationFeedGateway(authorize: Authorizer): NotificationFeedGateway {
+  async function guarded<T>(work: () => Promise<T>) {
+    try {
+      return await work();
+    } catch (error) {
+      throw gatewayFailure(error);
+    }
+  }
+
+  return {
+    loadActor: () => guarded(async () => {
+      const authorized = await authorize();
+      return { context: authorized, userId: authorized.session.userId };
+    }),
+    page: (actor, beforeId) => guarded(async () => {
+      const page = await getRemnashopFeed(context(actor).accessToken, beforeId);
+      return {
+        items: page.items.map((item) => ({
+          id: item.id,
+          category: item.category,
+          html: item.text_html,
+          buttons: item.buttons,
+          mediaType: item.media_type,
+          createdAt: item.created_at,
+          read: item.read,
+        })),
+        unreadCount: page.unread_count,
+        nextBeforeId: page.next_before_id,
+      };
+    }),
+    unread: (actor) => guarded(async () => (
+      await getRemnashopFeedUnread(context(actor).accessToken)
+    ).unread_count),
+    markRead: (actor, upToId) => guarded(async () => (
+      await markRemnashopFeedRead(context(actor).accessToken, upToId)
+    ).unread_count),
+    media: (actor, itemId) => guarded(async () => {
+      const response = await fetchRemnashopFeedMedia(context(actor).accessToken, itemId);
+      if (!response.ok || !response.body) {
+        await response.body?.cancel().catch(() => undefined);
+        throw new NotificationChannelGatewayError(
+          response.status === 404 ? "NOT_FOUND" : "UPSTREAM_UNAVAILABLE",
+        );
+      }
+      return {
+        body: response.body,
+        contentType: response.headers.get("content-type") ?? "application/octet-stream",
+      };
+    }),
   };
 }
 

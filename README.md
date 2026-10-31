@@ -310,7 +310,7 @@ Node.js на сервере необязателен: при его отсутс
 совпадать с [`.node-version`](.node-version).
 
 Для новой установки сначала обновите Remnashop минимум до Alembic revision
-`0060` (пункт меню «Обновить Remnashop», версия `main`; если Remnashop ещё нет —
+`0061` (пункт меню «Обновить Remnashop», версия `main`; если Remnashop ещё нет —
 «Установить Remnashop с нуля»). Remnashop, поставленный по инструкции апстрима
 snoups, меню переведёт на сборку Clean Pay тем же пунктом; теги `v0.x` — это
 релизы апстрима без интеграции, меню их отклоняет. Проверено на сервере с
@@ -369,7 +369,7 @@ Production запускается из зафиксированного тега
 ветки.
 
 ```bash
-RELEASE_REF='refs/tags/v0.4.3'
+RELEASE_REF='refs/tags/v0.5.0'
 sudo mkdir -p /opt/clean-pay
 sudo chown "$USER":"$USER" /opt/clean-pay
 git clone https://github.com/flake92/clean-pay.git /opt/clean-pay
@@ -521,7 +521,7 @@ workers не редактируйте вручную.
 | `REMNASHOP_API_KEY` | ключ приложения в Remnashop |
 | `REMNASHOP_AUTH_SERVICE_KEY` | ключ auth-сервиса; то же значение задаётся в `APP_AUTH_SERVICE_KEY` Remnashop |
 | `REMNASHOP_API_CONTAINER`, `REMNASHOP_WORKER_CONTAINER`, `REMNASHOP_SCHEDULER_CONTAINER`, `REMNASHOP_POSTGRES_CONTAINER` | имена контейнеров Remnashop для проверок при установке |
-| `REMNASHOP_MINIMUM_ALEMBIC_REVISION` | минимальная схема Remnashop, не ниже `0059`; проверка совместимости при деплое всё равно требует не ниже `0060` |
+| `REMNASHOP_MINIMUM_ALEMBIC_REVISION` | минимальная схема Remnashop, не ниже `0059`; проверка совместимости при деплое всё равно требует не ниже `0061` |
 | `REMNASHOP_ENV_FILE`, `REMNASHOP_ENV_EXPECTED_UID`, `REMNASHOP_ENV_EXPECTED_GID` | путь к `.env` Remnashop и ожидаемый владелец |
 | `REMNAWAVE_API_BASE_URL`, `REMNAWAVE_TOKEN` | API панели Remnawave |
 | `REMNAWAVE_COOKIE` | только если панель ставилась скриптом eGames и закрыта секретной cookie: то же значение `ключ=значение`, что `REMNAWAVE_COOKIE` в `.env` Remnashop. Без неё nginx панели отвечает 404, и установка останавливается на «dependencies are not ready: remnawave» |
@@ -645,7 +645,7 @@ workers не редактируйте вручную.
 
 ```bash
 cd /opt/clean-pay
-git fetch -q origin tag v0.4.3 && CLEAN_PAY_MENU_ROOT="$PWD" bash <(git show v0.4.3:menu.sh) update
+git fetch -q origin tag v0.5.0 && CLEAN_PAY_MENU_ROOT="$PWD" bash <(git show v0.5.0:menu.sh) update
 ```
 
 Ручной порядок для тех, кто работает без меню:
@@ -668,7 +668,7 @@ workers. Если миграция завершается ошибкой, runtim
 
 ```bash
 cd /opt/clean-pay
-RELEASE_REF='refs/tags/v0.4.3'
+RELEASE_REF='refs/tags/v0.5.0'
 git fetch --depth=1 origin "$RELEASE_REF"
 RELEASE_SHA=$(git rev-parse FETCH_HEAD)
 git checkout --detach "$RELEASE_SHA"
@@ -708,10 +708,11 @@ volume и с сохранением существующей locale; база н
 запятую. Команда сохраняет существующие секреты, создаёт отдельные роли БД и
 оставляет очистку платёжных данных выключенной до отдельного решения.
 
-Обновите Remnashop минимум до revision `0060`. Revision `0059` исправляет DB-trigger,
+Обновите Remnashop минимум до revision `0061`. Revision `0059` исправляет DB-trigger,
 чтобы первое успешное подтверждение e-mail могло атомарно сохранить включённые
 по умолчанию напоминания. Существующие настройки она не переписывает: явный
 opt-out остаётся выключенным, а неподтверждённые адреса не получают напоминания.
+Revision `0061` добавляет ленту уведомлений кабинета и отзыв push удалённой рассылки.
 Revision `0060` добавляет каналы уведомлений (служебные письма включены у всех,
 новости — только с согласия) и очередь e-mail и push.
 
@@ -734,7 +735,7 @@ PostgreSQL и проверьте его checksum и список объекто�
 
 Мастер обновления записывает `REMNASHOP_MINIMUM_ALEMBIC_REVISION=0059`, а
 preflight берёт большее из этого значения и требования текущей версии кода
-(`0060`) и не позволит запустить Clean Pay с более старой схемой Remnashop.
+(`0061`) и не позволит запустить Clean Pay с более старой схемой Remnashop.
 Значение в `.env` не повышается, чтобы откат к прежней версии Clean Pay
 оставался рабочим.
 Revision `0059` не выполняет data backfill и не меняет существующие значения

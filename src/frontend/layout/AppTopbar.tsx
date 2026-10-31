@@ -13,11 +13,13 @@ import { AppTopbarRef } from "@/frontend/types";
 import { getBranding } from "@/shared/branding";
 import { LayoutContext } from "./context/layoutcontext";
 import { useCleanPayMenu } from "./useCleanPayMenu";
+import { useUnreadNotifications } from "@/frontend/hooks/use-unread-notifications";
 import type { NavigationViewModel } from "@/application/models/navigation";
 
 const AppTopbar = forwardRef<AppTopbarRef, { navigation: NavigationViewModel }>(({ navigation }, ref) => {
     const { layoutState, onMenuToggle, showProfileSidebar } = useContext(LayoutContext);
     const { flatItems } = useCleanPayMenu(navigation);
+    const unread = useUnreadNotifications(navigation.authenticated);
     const menubuttonRef = useRef(null);
     const topbarmenuRef = useRef(null);
     const topbarmenubuttonRef = useRef(null);
@@ -59,6 +61,23 @@ const AppTopbar = forwardRef<AppTopbarRef, { navigation: NavigationViewModel }>(
             >
                 <i className="pi pi-bars" aria-hidden="true" />
             </button>
+
+            {navigation.authenticated ? (
+                <Link
+                    aria-label={unread > 0 ? `Уведомления: новых ${unread}` : "Уведомления"}
+                    className="p-link layout-topbar-button notification-bell"
+                    href="/notifications"
+                    prefetch={false}
+                    title="Уведомления"
+                >
+                    <i aria-hidden="true" className="pi pi-bell" />
+                    {unread > 0 ? (
+                        <span aria-hidden="true" className="notification-bell__badge">
+                            {unread > 99 ? "99+" : unread}
+                        </span>
+                    ) : null}
+                </Link>
+            ) : null}
 
             <button
                 ref={topbarmenubuttonRef}

@@ -83,6 +83,26 @@ export type UpdateNotificationPreferencesRequest = {
   news_email_enabled?: boolean;
 };
 
+export type FeedItemResponse = {
+  id: number;
+  category: "SERVICE" | "NEWS";
+  text_html: string;
+  buttons: Array<Array<{ text: string; url: string }>>;
+  media_type: string | null;
+  created_at: string;
+  read: boolean;
+};
+
+export type FeedPageResponse = {
+  items: FeedItemResponse[];
+  unread_count: number;
+  next_before_id: number | null;
+};
+
+export type FeedUnreadResponse = {
+  unread_count: number;
+};
+
 export type PushKeyResponse = {
   enabled: boolean;
   public_key: string | null;
