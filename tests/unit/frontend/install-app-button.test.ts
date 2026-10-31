@@ -227,13 +227,13 @@ describe("InstallAppButton", () => {
       );
     });
 
-    expect(container.querySelector('[role="dialog"]')).not.toBeNull();
+    expect(document.body.querySelector('[role="dialog"]')).not.toBeNull();
     expect(document.activeElement?.textContent).toBe("Понятно");
 
     await act(async () => {
       document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
     });
-    expect(container.querySelector('[role="dialog"]')).toBeNull();
+    expect(document.body.querySelector('[role="dialog"]')).toBeNull();
     expect(document.activeElement).toBe(installButton);
   });
 });

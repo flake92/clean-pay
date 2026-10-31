@@ -24,7 +24,7 @@
         margin: .5rem 0;
 
         span {
-            background: color-mix(in srgb, var(--surface-900) 45%, transparent);
+            background: var(--tg-overlay, rgba(15, 23, 42, .45));
             border-radius: 999px;
             color: #fff;
             font-size: .8125rem;
@@ -125,7 +125,7 @@
 }
 
 .tg-button {
-    background: color-mix(in srgb, var(--surface-900) 40%, transparent);
+    background: var(--tg-overlay, rgba(15, 23, 42, .45));
     border-radius: 8px;
     color: #fff;
     flex: 1 1 0;
@@ -137,7 +137,7 @@
     text-align: center;
 
     &:hover {
-        background: color-mix(in srgb, var(--surface-900) 55%, transparent);
+        background: var(--tg-overlay-hover, rgba(15, 23, 42, .6));
         color: #fff;
     }
 }
@@ -161,6 +161,13 @@
         right: .25rem;
         top: .25rem;
     }
+}
+
+// The bell takes the free space, so the controls after it stay next to it
+// instead of splitting the bar in two.
+.layout-topbar .notification-bell ~ .layout-topbar-menu,
+.layout-topbar .notification-bell ~ .layout-topbar-menu-button {
+    margin-left: 0;
 }
 
 .push-reminder {

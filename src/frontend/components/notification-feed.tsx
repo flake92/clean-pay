@@ -63,7 +63,7 @@ function Media({ item }: { item: NotificationFeedItemView }) {
     return <img alt="" className="tg-bubble__media" loading="lazy" src={src} />;
   }
   if (item.mediaType === "VIDEO") {
-    return <video className="tg-bubble__media" controls preload="metadata" src={src} />;
+    return <video className="tg-bubble__media" controls playsInline preload="metadata" src={src} />;
   }
   if (item.mediaType === "GIF") {
     return <video autoPlay className="tg-bubble__media" loop muted playsInline src={src} />;

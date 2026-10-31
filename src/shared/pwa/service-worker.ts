@@ -117,9 +117,15 @@ self.addEventListener("notificationclick", (event) => {
       const windows = await self.clients.matchAll({ type: "window", includeUncontrolled: true });
       for (const client of windows) {
         if (new URL(client.url).origin !== self.location.origin) continue;
-        await client.focus();
-        if ("navigate" in client) await client.navigate(target);
-        return;
+        // Safari refuses to navigate a window this worker does not control;
+        // a new window still brings the person to the message.
+        try {
+          await client.focus();
+          if ("navigate" in client) await client.navigate(target);
+          return;
+        } catch {
+          break;
+        }
       }
     }
     await self.clients.openWindow(target);

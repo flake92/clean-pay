@@ -1,6 +1,7 @@
 "use client";
 
 import Image from "next/image";
+import { createPortal } from "react-dom";
 
 import { useModalDialogFocus } from "@/frontend/hooks/use-modal-dialog-focus";
 import { getBranding } from "@/shared/branding";
@@ -10,8 +11,8 @@ type IosInstallGuideProps = {
 };
 
 const panelStyle = {
-  background: "#f8fafc",
-  border: "1px solid #e2e8f0",
+  background: "var(--surface-ground)",
+  border: "1px solid var(--surface-border)",
   borderRadius: "1rem",
   padding: "1rem",
 } as const;
@@ -23,19 +24,19 @@ function ShareToolbarPreview({ brandName }: { brandName: string }) {
         <span className="text-600" style={{ fontSize: "1.35rem" }}>‹</span>
         <div
           className="flex align-items-center justify-content-center gap-2 flex-1"
-          style={{ background: "white", borderRadius: "1.25rem", minHeight: "2.75rem", padding: "0.5rem 0.75rem" }}
+          style={{ background: "var(--surface-card)", borderRadius: "1.25rem", minHeight: "2.75rem", padding: "0.5rem 0.75rem" }}
         >
           <i className="pi pi-lock text-500" />
           <span className="text-700 text-sm">{brandName}</span>
         </div>
         <span
           className="flex align-items-center justify-content-center"
-          style={{ background: "#e0e7ff", border: "2px solid #6366f1", borderRadius: "50%", height: "2.75rem", width: "2.75rem" }}
+          style={{ background: "color-mix(in srgb, #6366f1 18%, transparent)", border: "2px solid #6366f1", borderRadius: "50%", height: "2.75rem", width: "2.75rem" }}
         >
-          <i className="pi pi-upload text-primary" style={{ fontSize: "1.2rem" }} />
+          <i className="pi pi-ellipsis-h text-primary" style={{ fontSize: "1.2rem" }} />
         </span>
       </div>
-      <div className="text-center text-primary font-semibold text-sm mt-2">Нажмите значок «Поделиться»</div>
+      <div className="text-center text-primary font-semibold text-sm mt-2">Нажмите «•••», затем «Поделиться»</div>
     </div>
   );
 }
@@ -43,7 +44,7 @@ function ShareToolbarPreview({ brandName }: { brandName: string }) {
 function HomeScreenMenuPreview() {
   return (
     <div aria-hidden="true" style={panelStyle}>
-      <div className="flex align-items-center gap-3" style={{ background: "white", borderRadius: "0.8rem", padding: "0.9rem" }}>
+      <div className="flex align-items-center gap-3" style={{ background: "var(--surface-card)", borderRadius: "0.8rem", padding: "0.9rem" }}>
         <span
           className="flex align-items-center justify-content-center flex-shrink-0"
           style={{ border: "2px solid #6366f1", borderRadius: "0.45rem", height: "2rem", width: "2rem" }}
@@ -51,9 +52,6 @@ function HomeScreenMenuPreview() {
           <i className="pi pi-plus text-primary" />
         </span>
         <span className="font-semibold text-900">На экран «Домой»</span>
-      </div>
-      <div className="text-600 text-sm line-height-3 mt-2">
-        Если пункта не видно, прокрутите список действий вниз.
       </div>
     </div>
   );
@@ -77,6 +75,15 @@ function ConfirmationPreview({ brandName }: { brandName: string }) {
         </div>
         <span className="text-primary font-semibold">Добавить</span>
       </div>
+      <div className="flex align-items-center justify-content-between gap-3 mt-3">
+        <span className="text-900 text-sm">Открыть как веб‑приложение</span>
+        <span
+          className="flex-shrink-0"
+          style={{ background: "#22c55e", borderRadius: "1rem", display: "block", height: "1.5rem", padding: "0.125rem 0.125rem 0.125rem 1.125rem", width: "2.5rem" }}
+        >
+          <span style={{ background: "white", borderRadius: "50%", display: "block", height: "1.25rem", width: "1.25rem" }} />
+        </span>
+      </div>
     </div>
   );
 }
@@ -85,7 +92,9 @@ export function IosInstallGuide({ onClose }: IosInstallGuideProps) {
   const branding = getBranding();
   const dialogRef = useModalDialogFocus(onClose);
 
-  return (
+  // On <body>: the animated auth card would otherwise become the containing
+  // block of this fixed overlay and squeeze it into the card.
+  return createPortal(
     <div
       role="dialog"
       aria-modal="true"
@@ -105,12 +114,13 @@ export function IosInstallGuide({ onClose }: IosInstallGuideProps) {
     >
       <div
         style={{
-          background: "white",
+          background: "var(--surface-card)",
           borderRadius: "1.5rem",
           boxShadow: "0 24px 70px rgba(15, 23, 42, 0.3)",
-          maxHeight: "calc(100dvh - 1.5rem)",
+          maxHeight: "100%",
           maxWidth: "31rem",
           overflowY: "auto",
+          overscrollBehavior: "contain",
           padding: "1.25rem",
           textAlign: "left",
           width: "100%",
@@ -132,7 +142,7 @@ export function IosInstallGuide({ onClose }: IosInstallGuideProps) {
         </h2>
 
         <p className="mt-0 mb-4 text-600 line-height-3">
-          Установка выполняется средствами Safari. Ярлык будет открывать личный кабинет с названием и логотипом {branding.name}.
+          Установка выполняется средствами Safari. Значок будет открывать личный кабинет как отдельное приложение с названием и логотипом {branding.name}.
         </p>
 
         <ol className="list-none p-0 m-0 flex flex-column gap-4">
@@ -142,7 +152,7 @@ export function IosInstallGuide({ onClose }: IosInstallGuideProps) {
               <strong className="text-900 text-lg">Откройте меню Safari</strong>
             </div>
             <p className="text-600 line-height-3 mt-0 mb-2">
-              Нажмите кнопку <strong>«Поделиться»</strong> — квадрат со стрелкой вверх. Она находится в нижней или верхней панели Safari.
+              Нажмите <strong>«•••»</strong> рядом с адресной строкой, затем <strong>«Поделиться»</strong>. Если кнопки «•••» нет, сразу нажмите значок «Поделиться» — квадрат со стрелкой вверх на панели Safari.
             </p>
             <ShareToolbarPreview brandName={branding.name} />
           </li>
@@ -153,7 +163,7 @@ export function IosInstallGuide({ onClose }: IosInstallGuideProps) {
               <strong className="text-900 text-lg">Выберите нужное действие</strong>
             </div>
             <p className="text-600 line-height-3 mt-0 mb-2">
-              В открывшемся меню прокрутите список вниз и нажмите <strong>«На экран “Домой”»</strong>.
+              Прокрутите список вниз и нажмите <strong>«На экран “Домой”»</strong>.
             </p>
             <HomeScreenMenuPreview />
           </li>
@@ -164,16 +174,16 @@ export function IosInstallGuide({ onClose }: IosInstallGuideProps) {
               <strong className="text-900 text-lg">Подтвердите добавление</strong>
             </div>
             <p className="text-600 line-height-3 mt-0 mb-2">
-              Проверьте название <strong>{branding.name}</strong>, затем нажмите <strong>«Добавить»</strong>. Ярлык появится на экране «Домой».
+              Проверьте, что переключатель <strong>«Открыть как веб‑приложение»</strong> включён: без него не будет уведомлений. Затем нажмите <strong>«Добавить»</strong>, и значок {branding.name} появится на экране «Домой».
             </p>
             <ConfirmationPreview brandName={branding.name} />
           </li>
         </ol>
 
-        <div className="mt-4 p-3 border-round-lg" style={{ background: "#eef2ff" }}>
+        <div className="mt-4 p-3 border-round-lg" style={{ background: "color-mix(in srgb, #6366f1 12%, var(--surface-card))" }}>
           <div className="font-semibold text-900 mb-1">Пункта «На экран “Домой”» нет?</div>
           <div className="text-600 text-sm line-height-3">
-            Убедитесь, что страница открыта именно в Safari, а не во встроенном окне Telegram. Внизу списка также может быть пункт «Изменить действия», где нужное действие можно включить.
+            Убедитесь, что страница открыта именно в Safari, а не во встроенном окне Telegram. Если пункта всё равно нет, прокрутите список до конца, нажмите «Редактировать действия» и добавьте «На экран “Домой”».
           </div>
         </div>
 
@@ -181,6 +191,7 @@ export function IosInstallGuide({ onClose }: IosInstallGuideProps) {
           <span className="p-button-label">Понятно</span>
         </button>
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }

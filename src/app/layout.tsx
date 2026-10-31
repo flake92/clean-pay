@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import "primereact/resources/primereact.css";
 import "primeicons/primeicons.css";
 import "primeflex/primeflex.css";
@@ -29,6 +29,14 @@ export const metadata: Metadata = {
     ],
     apple: [{ ...icons.apple, type: "image/png" }],
   },
+};
+
+// Colors the iOS status bar of the installed app to match the page.
+export const viewport: Viewport = {
+  themeColor: [
+    { media: "(prefers-color-scheme: light)", color: "#f6f7ff" },
+    { media: "(prefers-color-scheme: dark)", color: "#0b1020" },
+  ],
 };
 
 export default function RootLayout({

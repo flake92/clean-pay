@@ -93,6 +93,9 @@ const AppTopbar = forwardRef<AppTopbarRef, { navigation: NavigationViewModel }>(
 
             <div id="app-topbar-menu" ref={topbarmenuRef} className={classNames("layout-topbar-menu", { "layout-topbar-menu-mobile-active": layoutState.profileSidebarVisible })}>
                 {flatItems.map((item) => {
+                    // The bell with its unread badge already leads there.
+                    if (item.to === "/notifications") return null;
+
                     if (item.to) {
                         return (
                             <Link key={`${item.label}-${item.to}`} href={item.to} prefetch={false} className="p-link layout-topbar-button" title={item.label}>
