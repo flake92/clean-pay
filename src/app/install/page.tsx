@@ -2,6 +2,10 @@ import { InstallAppButton } from "@/frontend/components/install-app-button";
 import { AuthShell } from "@/frontend/components/auth-shell";
 import { getBranding } from "@/shared/branding";
 
+// A prerendered page has no CSP nonce: opened by a direct link, its scripts are
+// blocked and the install button stays dead.
+export const dynamic = "force-dynamic";
+
 export default function InstallPage() {
   const branding = getBranding();
 

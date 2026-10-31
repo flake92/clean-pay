@@ -5,6 +5,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { IosInstallGuide } from "@/frontend/components/ios-install-guide";
+import { dynamic } from "@/app/install/page";
 
 (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean })
   .IS_REACT_ACT_ENVIRONMENT = true;
@@ -16,6 +17,10 @@ describe("IosInstallGuide", () => {
   afterEach(async () => {
     await act(async () => root.unmount());
     container.remove();
+  });
+
+  it("keeps the install page dynamic so its scripts get the CSP nonce", () => {
+    expect(dynamic).toBe("force-dynamic");
   });
 
   it("opens on the body, outside the animated card, and follows the theme", async () => {
