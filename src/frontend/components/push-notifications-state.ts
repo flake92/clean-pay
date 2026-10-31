@@ -29,6 +29,18 @@ export function pushCardStatus(
   return setup.subscribed ? "on" : "off";
 }
 
+// Browsers show the permission prompt only inside a click. A link within the
+// cabinet keeps the page alive; "Pay" and "Log out" leave it, which would hide
+// the prompt, and Chrome counts that as a refusal.
+export function isPushPromptClick(target: EventTarget | null) {
+  if (!(target instanceof Element)) return false;
+  const link = target.closest('a[href^="/"]');
+  return link !== null
+    && !link.closest(".push-reminder")
+    && !link.getAttribute("href")?.startsWith("//")
+    && link.getAttribute("target") !== "_blank";
+}
+
 export function applicationServerKey(base64url: string): Uint8Array {
   const padded = base64url + "=".repeat((4 - (base64url.length % 4)) % 4);
   const binary = atob(padded.replaceAll("-", "+").replaceAll("_", "/"));
