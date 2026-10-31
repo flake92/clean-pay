@@ -213,7 +213,7 @@ describe("credential-file metadata guards", () => {
       ], { encoding: "utf8", shell: false });
       expect(accepted.error).toBeUndefined();
       expect(accepted.status).toBe(0);
-      expect(accepted.stdout).toContain("metadata passed");
+      expect(accepted.stdout).toContain("в порядке");
       expect(accepted.stdout).not.toContain("SYNTHETIC_CANARY");
 
       chmodSync(file, 0o644);
