@@ -42,6 +42,7 @@ function errorResult(error: unknown): AuthExecutionResult {
     VALIDATION_ERROR: "Проверьте введённые данные.",
     EMAIL_CODE_INVALID: "Код не подошёл. Проверьте его и попробуйте снова.",
     EMAIL_CODE_EXPIRED: "Код истёк. Запросите новый.",
+    PASSWORD_UNCHANGED: "Это ваш текущий пароль: войдите с ним или придумайте другой.",
     FORBIDDEN: "Действие недоступно.",
     SECURITY_CHECK_FAILED: securityCheckFailedMessage,
     UPSTREAM_UNAVAILABLE: "Сервис временно недоступен. Попробуйте позже.",

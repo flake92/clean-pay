@@ -521,6 +521,25 @@ describe("server application flows", () => {
     expect(commands.audit).toHaveBeenCalledWith({ action: "password_reset_success", userId: "user-1" });
   });
 
+  it("says plainly that the new password equals the current one", async () => {
+    const commands = authCommands({
+      authenticate: vi.fn(async () => {
+        throw new AuthGatewayError("PASSWORD_UNCHANGED");
+      }),
+    });
+
+    await expect(executeAuthCommand(commands, {
+      kind: "confirm-password-reset",
+      email: "user@example.com",
+      code: "123456",
+      newPassword: "current-password",
+      turnstileToken: "human-token",
+    })).resolves.toMatchObject({
+      ok: false,
+      message: "Это ваш текущий пароль: войдите с ним или придумайте другой.",
+    });
+  });
+
   it("returns explicit e-mail verification outcomes", async () => {
     const commands: EmailVerificationCommands = {
       verifyHuman: vi.fn(async () => undefined),

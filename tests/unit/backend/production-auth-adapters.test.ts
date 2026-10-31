@@ -253,6 +253,18 @@ describe("production auth and profile adapters", () => {
       new_password: "new-password",
     });
 
+    mocks.remnashopAuth
+      .mockRejectedValueOnce(new ServiceError("CONFLICT", 409, "New password must be different from current password"))
+      .mockRejectedValueOnce(new ServiceError("CONFLICT", 409, "Password reset is already in progress"));
+    for (const code of ["PASSWORD_UNCHANGED", "CONFLICT"]) {
+      await expect(productionAuthCommands.authenticate({
+        operation: "confirm-password-reset",
+        email: "u@example.com",
+        code: "123456",
+        password: "new-password",
+      })).rejects.toMatchObject({ code });
+    }
+
     await productionAuthCommands.audit({ action: "auth_success", userId: "user-1" });
     expect(mocks.auditLog).toHaveBeenCalledWith({ action: "auth_success", userId: "user-1" });
   });

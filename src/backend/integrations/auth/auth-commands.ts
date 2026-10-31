@@ -32,6 +32,12 @@ function emailAlreadyExists(error: unknown) {
     && String(error.debug?.message ?? error.message).toLowerCase().includes("email already exists");
 }
 
+function passwordUnchanged(error: unknown) {
+  return error instanceof ServiceError
+    && error.code === "CONFLICT"
+    && String(error.debug?.message ?? error.message).toLowerCase().includes("must be different");
+}
+
 async function adapt<T>(work: () => Promise<T>): Promise<T> {
   try {
     return await work();
@@ -72,6 +78,9 @@ export function createProductionAuthCommands(): AuthCommands {
       } catch (error) {
         if (input.operation === "register" && emailAlreadyExists(error)) {
           throw new AuthGatewayError("EMAIL_ALREADY_EXISTS");
+        }
+        if (input.operation === "confirm-password-reset" && passwordUnchanged(error)) {
+          throw new AuthGatewayError("PASSWORD_UNCHANGED");
         }
         if (error instanceof ServiceError) throw new AuthGatewayError(error.code);
         throw new AuthGatewayError("INTERNAL_ERROR");
