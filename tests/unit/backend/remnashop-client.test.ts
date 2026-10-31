@@ -99,6 +99,10 @@ import {
   remnashopRequestResult,
   updateRemnashopNotificationPreferences,
   deleteRemnashopPushSubscription,
+  fetchRemnashopFeedMedia,
+  getRemnashopFeed,
+  getRemnashopFeedUnread,
+  markRemnashopFeedRead,
   getRemnashopPushKey,
   getRemnashopPushStatus,
   remnashopUnsubscribeEmail,
@@ -507,6 +511,55 @@ describe("remnashop client", () => {
       .rejects.toMatchObject({ code: "UPSTREAM_UNAVAILABLE" });
     await expect(remnashopUnsubscribeEmail("35.N.sig"))
       .rejects.toMatchObject({ code: "UPSTREAM_UNAVAILABLE" });
+  });
+
+  it("reads and marks the notification feed and rejects malformed answers", async () => {
+    const page = {
+      items: [{
+        id: 7,
+        category: "NEWS",
+        text_html: "<b>Новость</b>",
+        buttons: [[{ text: "Поддержка", url: "https://t.me/support" }]],
+        media_type: null,
+        created_at: "2026-10-31T10:00:00Z",
+        read: false,
+      }],
+      unread_count: 1,
+      next_before_id: null,
+    };
+    const fetchMock = vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(response({ body: page }))
+      .mockResolvedValueOnce(response({ body: { unread_count: 1 } }))
+      .mockResolvedValueOnce(response({ body: { unread_count: 0 } }))
+      .mockResolvedValueOnce(new Response("image", { headers: { "content-type": "image/jpeg" } }));
+
+    await expect(getRemnashopFeed("access-1", 9)).resolves.toEqual(page);
+    await expect(getRemnashopFeedUnread("access-1")).resolves.toEqual({ unread_count: 1 });
+    await expect(markRemnashopFeedRead("access-1", 7)).resolves.toEqual({ unread_count: 0 });
+    const media = await fetchRemnashopFeedMedia("access-1", 7);
+    await expect(media.text()).resolves.toBe("image");
+
+    const base = "http://remnashop:5000/api/v1/public/auth/notifications/feed";
+    expect(fetchMock).toHaveBeenNthCalledWith(1, `${base}?limit=30&before_id=9`, expect.anything());
+    expect(fetchMock).toHaveBeenNthCalledWith(3, `${base}/read`, expect.objectContaining({
+      method: "POST",
+      body: JSON.stringify({ up_to_id: 7 }),
+    }));
+    expect(fetchMock).toHaveBeenNthCalledWith(4, `${base}/7/media`, expect.objectContaining({
+      headers: expect.objectContaining({ cookie: "access_token=access-1" }),
+    }));
+
+    for (const body of [
+      { ...page, items: "none" },
+      { ...page, items: [{ ...page.items[0], category: "OTHER" }] },
+      { ...page, items: [{ ...page.items[0], buttons: "none" }] },
+      { ...page, items: [{ ...page.items[0], buttons: ["none"] }] },
+      { ...page, unread_count: -1 },
+    ]) {
+      fetchMock.mockResolvedValueOnce(response({ body }));
+      await expect(getRemnashopFeed("access-1"))
+        .rejects.toMatchObject({ code: "UPSTREAM_UNAVAILABLE" });
+    }
   });
 
   it("supports password reset, token refresh and password change endpoints", async () => {

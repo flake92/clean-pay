@@ -159,7 +159,7 @@ export function createNotificationFeedGateway(authorize: Authorizer): Notificati
     media: (actor, itemId) => guarded(async () => {
       const response = await fetchRemnashopFeedMedia(context(actor).accessToken, itemId);
       if (!response.ok || !response.body) {
-        await response.body?.cancel().catch(() => undefined);
+        await response.body?.cancel();
         throw new NotificationChannelGatewayError(
           response.status === 404 ? "NOT_FOUND" : "UPSTREAM_UNAVAILABLE",
         );
