@@ -110,6 +110,24 @@ describe("PushReminder permission prompt", () => {
     expect(controller.enable).not.toHaveBeenCalled();
   });
 
+  it("hides the hint for a week after a refusal and then shows it", async () => {
+    controller.status = "denied";
+    window.localStorage.setItem(
+      "clean-pay:push-prompt-asked-at",
+      String(Date.now() - 6 * 24 * 60 * 60 * 1000),
+    );
+    await mount();
+    expect(document.querySelector(".push-reminder")).toBeNull();
+    await act(async () => root.unmount());
+
+    window.localStorage.setItem(
+      "clean-pay:push-prompt-asked-at",
+      String(Date.now() - 8 * 24 * 60 * 60 * 1000),
+    );
+    await mount();
+    expect(document.querySelector(".push-reminder")).not.toBeNull();
+  });
+
   it("asks again after a week without an answer", async () => {
     window.localStorage.setItem(
       "clean-pay:push-prompt-asked-at",

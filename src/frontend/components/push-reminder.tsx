@@ -12,13 +12,19 @@ const ASKED_KEY = "clean-pay:push-prompt-asked-at";
 const DISMISS_MS = 7 * 24 * 60 * 60 * 1000;
 
 // Without storage the visit cannot remember the question, so it is not asked.
-function claimPromptOnce() {
+function askedRecently() {
   try {
-    if (Date.now() - Number(window.localStorage.getItem(ASKED_KEY)) < DISMISS_MS) return false;
-    window.localStorage.setItem(ASKED_KEY, String(Date.now()));
-    return true;
+    return Date.now() - Number(window.localStorage.getItem(ASKED_KEY)) < DISMISS_MS;
   } catch {
-    return false;
+    return true;
+  }
+}
+
+function rememberAsked() {
+  try {
+    window.localStorage.setItem(ASKED_KEY, String(Date.now()));
+  } catch {
+    // Reading fails the same way, so the question is not repeated.
   }
 }
 
@@ -59,7 +65,9 @@ export function PushReminder() {
   useEffect(() => {
     if (dismissed || status !== "off") return;
     const onClick = (event: MouseEvent) => {
-      if (isPushPromptClick(event.target) && claimPromptOnce()) void enableRef.current();
+      if (!isPushPromptClick(event.target) || askedRecently()) return;
+      rememberAsked();
+      void enableRef.current();
     };
     document.addEventListener("click", onClick, { capture: true });
     return () => document.removeEventListener("click", onClick, { capture: true });
@@ -75,6 +83,9 @@ export function PushReminder() {
   }
 
   if (dismissed || !["off", "ios-install", "denied"].includes(status)) return null;
+  // After "Block" the browser never shows its prompt again, so a week later
+  // only this hint can point to the settings.
+  if (status === "denied" && askedRecently()) return null;
 
   return (
     <aside aria-label="Уведомления" className="push-reminder">
@@ -95,7 +106,10 @@ export function PushReminder() {
             disabled={pending}
             label="Включить"
             loading={pending}
-            onClick={() => void enable()}
+            onClick={() => {
+              rememberAsked();
+              void enable();
+            }}
             size="small"
           />
         ) : null}
