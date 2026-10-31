@@ -28,7 +28,7 @@ function InstallInstructionsDialog({
       ref={dialogRef}
       role="dialog"
       tabIndex={-1}
-      style={{ background: "rgba(0, 0, 0, 0.45)", inset: 0, padding: "1rem", position: "fixed", zIndex: 2147483002 }}
+      style={{ background: "rgba(0, 0, 0, 0.45)", inset: 0, padding: "1rem", position: "fixed", zIndex: 1100 }}
     >
       <div style={{ background: "var(--surface-card)", borderRadius: "12px", margin: "20vh auto", maxWidth: "28rem", padding: "1.5rem" }}>
         <h2 className="mt-0" id={titleId}>{title}</h2>
