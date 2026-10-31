@@ -104,12 +104,12 @@ def main(args: list[str]) -> None:
         {0o400, 0o600},
         "file",
     )
-    print("Remnashop environment-file metadata passed.")
+    print("Права на файл настроек Remnashop в порядке.")
 
 
 if __name__ == "__main__":
     try:
         main(sys.argv[1:])
     except (OSError, ValueError) as error:
-        print(f"Remnashop environment-file preflight failed: {error}", file=sys.stderr)
+        print(f"Проверка файла настроек Remnashop не пройдена: {error}", file=sys.stderr)
         raise SystemExit(1) from None

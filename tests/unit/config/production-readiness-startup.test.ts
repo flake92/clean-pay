@@ -79,7 +79,7 @@ describe("production readiness startup gate", () => {
       + "style-src 'self' 'unsafe-inline'; object-src 'none'",
     );
     expect(styleInline.status, styleInline.stderr).toBe(0);
-    expect(styleInline.stdout).toContain("External HTTPS security headers are valid.");
+    expect(styleInline.stdout).toContain("Защитные заголовки HTTPS в порядке.");
 
     const scriptInline = runExternalSecurityHeaderCheck(
       "default-src 'self'; script-src 'self' 'nonce-test-nonce' 'unsafe-inline'; "
@@ -87,7 +87,7 @@ describe("production readiness startup gate", () => {
     );
     expect(scriptInline.status).not.toBe(0);
     expect(scriptInline.stderr).toContain(
-      "External script CSP still permits unsafe-inline.",
+      "CSP сайта разрешает unsafe-inline.",
     );
   });
 

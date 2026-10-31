@@ -4,26 +4,30 @@ set -eu
 ENV_FILE=${1:-}
 PHASE=${2:-finalize}
 
+# fail "что случилось" ["что делать"]
 fail() {
-  printf '%s\n' "Remnashop rollout preparation failed: $*" >&2
+  printf '%s\n' "Проверка Remnashop не пройдена: $1" >&2
+  if [ -n "${2:-}" ]; then
+    printf '%s\n' "Что делать: $2" >&2
+  fi
   exit 1
 }
 
 # The upstream snoups releases (tags v0.x) lack the Clean Pay integration.
 incompatible() {
-  fail "$*. Remnashop must run the flake92/remnashop main branch: ./menu.sh -> update Remnashop -> main (the v0.x tags are upstream releases without the Clean Pay integration)"
+  fail "$*." "./menu.sh → «Обновить Remnashop» → ветка main, затем повторите обновление Clean Pay. Нужна именно ветка main репозитория flake92/remnashop: в тегах v0.x нет интеграции с Clean Pay."
 }
 
 info() {
-  printf '%s\n' "Remnashop rollout: $*"
+  printf '%s\n' "Remnashop: $*"
 }
 
-[ -n "$ENV_FILE" ] || fail "an environment file path is required"
-[ -f "$ENV_FILE" ] || fail "environment file not found: $ENV_FILE"
+[ -n "$ENV_FILE" ] || fail "не указан путь к файлу настроек" "запускайте проверку через ./menu.sh или ./deploy.sh."
+[ -f "$ENV_FILE" ] || fail "файл настроек не найден: $ENV_FILE" "создайте его: ./deploy.sh init."
 
 case "$PHASE" in
   check|finalize) ;;
-  *) fail "phase must be check or finalize" ;;
+  *) fail "неизвестный этап проверки, нужен check или finalize" ;;
 esac
 
 env_value() {
@@ -45,7 +49,7 @@ env_value() {
 repository_minimum_revision=0061
 minimum_revision=$(env_value REMNASHOP_MINIMUM_ALEMBIC_REVISION "$repository_minimum_revision")
 case "$minimum_revision:$repository_minimum_revision" in
-  *[!0-9:]*|:*|*:) fail "Alembic revisions must be numeric (configured=$minimum_revision repository=$repository_minimum_revision)" ;;
+  *[!0-9:]*|:*|*:) fail "версии схемы должны быть числами (в настройках $minimum_revision, в коде $repository_minimum_revision)" "исправьте REMNASHOP_MINIMUM_ALEMBIC_REVISION в $ENV_FILE." ;;
 esac
 # Existing installations keep an older floor in .env so that a rollback to the
 # previous Clean Pay still validates; this code requires at least the repository floor.
@@ -59,11 +63,11 @@ remnashop_env_expected_uid=$(env_value REMNASHOP_ENV_EXPECTED_UID 0)
 remnashop_env_expected_gid=$(env_value REMNASHOP_ENV_EXPECTED_GID 0)
 
 case "$remnashop_env_expected_uid:$remnashop_env_expected_gid" in
-  *[!0-9:]*) fail "REMNASHOP_ENV_EXPECTED_UID and REMNASHOP_ENV_EXPECTED_GID must be numeric ids" ;;
+  *[!0-9:]*) fail "REMNASHOP_ENV_EXPECTED_UID и REMNASHOP_ENV_EXPECTED_GID должны быть числами" "исправьте их в $ENV_FILE." ;;
 esac
 case "$remnashop_env_file" in
   /*) ;;
-  *) fail "REMNASHOP_ENV_FILE must be an absolute path" ;;
+  *) fail "REMNASHOP_ENV_FILE должен быть абсолютным путём" "исправьте его в $ENV_FILE, например /opt/remnashop/.env." ;;
 esac
 
 # This metadata-only guard deliberately runs before the first Docker access.
@@ -86,19 +90,19 @@ run_remnashop_env_preflight() {
       "$remnashop_env_expected_gid"
     return
   fi
-  fail "node or python3 is required for credential metadata preflight"
+  fail "для проверки прав на файл настроек нужен node или python3" "установите python3: apt install python3."
 }
 
 run_remnashop_env_preflight \
-  || fail "Remnashop environment-file metadata is unsafe. Fix: chmod 750 $(dirname -- "$remnashop_env_file") && chmod 600 $remnashop_env_file (owner uid $remnashop_env_expected_uid, gid $remnashop_env_expected_gid), or run ./menu.sh remnashop-link"
+  || fail "небезопасные права на файл настроек Remnashop: $remnashop_env_file" "выполните ./menu.sh remnashop-link или chmod 750 $(dirname -- "$remnashop_env_file") && chmod 600 $remnashop_env_file (владелец uid $remnashop_env_expected_uid, gid $remnashop_env_expected_gid)."
 
-command -v docker >/dev/null 2>&1 || fail "docker is not installed or is not available in PATH"
+command -v docker >/dev/null 2>&1 || fail "Docker не установлен или недоступен" "установите его: curl -fsSL https://get.docker.com | sh."
 
 container_image() {
   container="$1"
   running=$(docker inspect "$container" --format '{{.State.Running}}' 2>/dev/null) \
-    || fail "required container '$container' was not found"
-  [ "$running" = "true" ] || fail "required container '$container' is not running"
+    || fail "контейнер $container не найден" "установите Remnashop: ./menu.sh → «Обновить Remnashop» → ветка main. Если имена контейнеров другие, задайте их в $ENV_FILE."
+  [ "$running" = "true" ] || fail "контейнер $container не запущен" "запустите Remnashop (cd /opt/remnashop && docker compose up -d) и посмотрите журнал: docker logs $container."
   docker inspect "$container" --format '{{.Image}}'
 }
 
@@ -111,7 +115,7 @@ database_query() {
 probe_notification_preferences_contract() {
   service_key=$(env_value REMNASHOP_AUTH_SERVICE_KEY)
   [ -n "$service_key" ] \
-    || fail "REMNASHOP_AUTH_SERVICE_KEY is required for the Remnashop API contract probe"
+    || fail "в настройках нет REMNASHOP_AUTH_SERVICE_KEY" "свяжите Clean Pay и Remnashop: ./menu.sh remnashop-link."
 
   # First validate the shared service credential against an unauthenticated
   # endpoint: a correct key plus an empty body yields 422, a wrong key yields
@@ -149,15 +153,15 @@ for path in (
     connection.close()
 print(*statuses)
 ' 2>/dev/null
-  ) || fail "could not probe the Remnashop notification-preferences API"
+  ) || fail "не удалось обратиться к API Remnashop" "проверьте, что он запущен и здоров: docker ps и docker logs $api_container."
 
   case "$contract_statuses" in
     "422 405 405") ;;
     # 405 proves the Clean Pay build is running, so a 401 means only the shared key differs
     "401 405 405")
-      fail "Remnashop rejected the Clean Pay service key (401): REMNASHOP_AUTH_SERVICE_KEY in $ENV_FILE must equal APP_AUTH_SERVICE_KEY in $remnashop_env_file, and Remnashop must be restarted after the change. Fix: ./menu.sh remnashop-link" ;;
+      fail "Remnashop отклонил ключ Clean Pay (401): REMNASHOP_AUTH_SERVICE_KEY в $ENV_FILE не совпадает с APP_AUTH_SERVICE_KEY в $remnashop_env_file" "выполните ./menu.sh remnashop-link: команда выровняет ключи и перезапустит Remnashop." ;;
     *)
-      incompatible "Remnashop auth/API contract returned $contract_statuses; expected 422 405 405 (Remnashop 0061 with the notification feed API)" ;;
+      incompatible "API Remnashop устарел: ответы $contract_statuses вместо 422 405 405 (нужна схема 0061 с лентой уведомлений)" ;;
   esac
 }
 
@@ -172,7 +176,7 @@ scheduler_image=$(container_image "$scheduler_container")
 container_image "$postgres_container" >/dev/null
 
 if [ "$api_image" != "$worker_image" ] || [ "$api_image" != "$scheduler_image" ]; then
-  fail "API, worker and scheduler must use the same image (api=$api_image worker=$worker_image scheduler=$scheduler_image)"
+  fail "API, worker и scheduler Remnashop запущены из разных образов (api=$api_image worker=$worker_image scheduler=$scheduler_image)" "повторите обновление, оно перезапустит все три: ./menu.sh → «Обновить Remnashop» → ветка main."
 fi
 
 schema_ready=$(database_query -c "
@@ -192,19 +196,19 @@ schema_ready=$(database_query -c "
         )
     ) = 2;
 ")
-[ "$schema_ready" = "t" ] || incompatible "required payment and subscription-email rollout schema is missing"
+[ "$schema_ready" = "t" ] || incompatible "в базе Remnashop нет нужных таблиц и полей платежей и напоминаний"
 
 current_revision=$(database_query -c "SELECT version_num FROM alembic_version;")
 case "$current_revision:$minimum_revision" in
-  *[!0-9:]*|:*|*:) fail "Alembic revisions must be numeric (current=$current_revision minimum=$minimum_revision)" ;;
+  *[!0-9:]*|:*|*:) fail "версии схемы должны быть числами (сейчас $current_revision, нужна $minimum_revision)" "проверьте таблицу alembic_version в базе Remnashop." ;;
 esac
 [ "$current_revision" -ge "$minimum_revision" ] \
-  || incompatible "Alembic revision $current_revision is older than required revision $minimum_revision"
+  || incompatible "схема Remnashop $current_revision старше требуемой $minimum_revision"
 
 probe_notification_preferences_contract
 
 if [ "$PHASE" = "check" ]; then
-  info "compatibility preflight passed (Alembic revision $current_revision, image $api_image)"
+  info "совместимость подтверждена (схема $current_revision, образ $api_image)"
   exit 0
 fi
 
@@ -233,7 +237,7 @@ BEGIN
 
     IF payment_operation_count <> 0 THEN
       RAISE EXCEPTION
-        'Refusing to disable payment rollout gate with % payment operations',
+        'Защитный режим платежей не снят: уже есть операции (%). Обратитесь к разделу о запуске Remnashop в README',
         payment_operation_count;
     END IF;
 
@@ -245,7 +249,7 @@ BEGIN
 
     IF active_fulfillment_count <> 0 THEN
       RAISE EXCEPTION
-        'Refusing to disable payment rollout gate with % active fulfillments',
+        'Защитный режим платежей не снят: есть незавершённые выдачи (%). Дождитесь их завершения и повторите',
         active_fulfillment_count;
     END IF;
 
@@ -260,7 +264,7 @@ BEGIN
     WHERE id = 1
       AND legacy_rollout_gate_active
   ) THEN
-    RAISE EXCEPTION 'Payment rollout gate remained active';
+    RAISE EXCEPTION 'Защитный режим платежей остался включён. Повторите обновление';
   END IF;
 END
 $$;
@@ -268,4 +272,4 @@ $$;
 COMMIT;
 SQL
 
-info "payment rollout gate is disabled (Alembic revision $current_revision, image $api_image)"
+info "защитный режим платежей снят (схема $current_revision, образ $api_image)"

@@ -440,7 +440,7 @@ if (
     const path = process.argv[3];
     if (command === "check" && process.argv.length === 4) {
       assertV011UpgradePreparationNotRequired(path);
-      process.stdout.write("Production configuration does not require v0.1.1 preparation.\n");
+      process.stdout.write("Настройкам не нужна подготовка v0.1.1.\n");
     } else if (command === "prepare-v0.1.1" && process.argv.length === 7) {
       const result = prepareV011ProductionEnvironment(path, {
         subscriptionOrigins: process.argv[4],

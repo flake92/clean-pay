@@ -353,6 +353,12 @@ print_summary() {
   fi
   summary_component 'Clean Pay' "$app" "${rev:+версия $rev}"
   summary_component 'Remnashop' "$RS_API" "${rs_rev:+версия $rs_rev}"
+  if [ -n "$rs_rev" ] && [ -r "$REMNASHOP_DIR/.env" ]; then
+    local bulk_problem
+    bulk_problem=$(rs_bulk_email_problem "$REMNASHOP_DIR/.env")
+    [ -z "$bulk_problem" ] || printf '  %s %s%s — пункт 12 «SMTP рассылок»%s\n' \
+      "$(pad 'Рассылка' 11)" "$C_YELLOW" "$bulk_problem" "$C_RESET"
+  fi
   # A Remnashop updated by an older menu has no VAPID keys: push stays off.
   if [ -n "$rs_rev" ] && [ -r "$REMNASHOP_DIR/.env" ] \
     && [ -z "$(env_get "$REMNASHOP_DIR/.env" WEB_PUSH_VAPID_PUBLIC_KEY)" ] \
@@ -1732,10 +1738,23 @@ rs_push_keys_followup() {
   fi
 }
 
+# Prints what is wrong with the news mailbox in a Remnashop .env; nothing if it is fine.
+rs_bulk_email_problem() {
+  local env="$1" from
+  from=$(env_get "$env" BULK_EMAIL_FROM_EMAIL)
+  if [ "$(env_get "$env" BULK_EMAIL_ENABLED)" != true ] || [ -z "$from" ]; then
+    printf 'для новостной рассылки не указан отдельный почтовый ящик'
+  elif [ "$from" = "$(env_get "$env" EMAIL_FROM_EMAIL)" ]; then
+    printf 'рассылка идёт с того же ящика, что и коды входа (%s)' "$from"
+  fi
+}
+
 rs_bulk_email_hint() {
-  [ "$(env_get "$REMNASHOP_DIR/.env" BULK_EMAIL_ENABLED)" = true ] && return 0
-  note 'E-mail-копии уведомлений бота и новости выключены: нет отдельного SMTP рассылок.'
-  note 'Включить: пункт меню «SMTP рассылок». Telegram и push работают без него.'
+  local problem
+  problem=$(rs_bulk_email_problem "$REMNASHOP_DIR/.env")
+  [ -n "$problem" ] || return 0
+  warn "Внимание: $problem. Письма рассылки не уйдут, либо жалобы на них отправят коды входа в спам."
+  note 'Что делать: создайте отдельный ящик и укажите его в пункте меню 12 «SMTP рассылок». Telegram и push работают без него.'
 }
 
 # Menu item: the separate SMTP account for notification copies and news (BULK_EMAIL_*).
@@ -1765,6 +1784,10 @@ rs_bulk_email() {
     case "$rate" in ''|*[!0-9]*) die 'Лимит должен быть числом.' ;; esac
     [ -n "$host" ] && [ -n "$user" ] && [ -n "$from" ] || die 'Сервер, логин и адрес отправителя обязательны. Ничего не изменено.'
     [ -n "$password" ] || [ -n "$(env_get "$env" BULK_EMAIL_PASSWORD)" ] || die 'Нужен пароль. Ничего не изменено.'
+    if [ "$from" = "$(env_get "$env" EMAIL_FROM_EMAIL)" ]; then
+      warn "Это тот же ящик, что и для кодов входа ($from): жалобы на рассылку могут отправить коды в спам."
+      ask_yes_no 'Всё равно использовать его?' no || die 'Ничего не изменено. Создайте отдельный ящик и повторите.'
+    fi
     backup_create before-bulk-email
     rs_env_set "$env" BULK_EMAIL_HOST "$host"
     rs_env_set "$env" BULK_EMAIL_PORT "$port"

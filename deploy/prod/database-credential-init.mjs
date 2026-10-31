@@ -217,7 +217,7 @@ if (
     process.stdout.write(
       result.updatedNames.length > 0
         ? `Generated database credentials: ${result.updatedNames.join(", ")}\n`
-        : "Database credentials already use five distinct identities.\n",
+        : "Учётные данные базы уже разделены на пять ролей.\n",
     );
   } catch (error) {
     process.stderr.write(

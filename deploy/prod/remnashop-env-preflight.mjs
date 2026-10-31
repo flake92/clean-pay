@@ -45,7 +45,7 @@ function main(args) {
     expectedUid: numericIdentity(rawUid, "expected uid"),
     expectedGid: numericIdentity(rawGid, "expected gid"),
   });
-  process.stdout.write("Remnashop environment-file metadata passed.\n");
+  process.stdout.write("Права на файл настроек Remnashop в порядке.\n");
 }
 
 const invokedPath = process.argv[1]?.replaceAll("\\", "/");
@@ -54,7 +54,7 @@ if (invokedPath?.endsWith("/remnashop-env-preflight.mjs")) {
     main(process.argv.slice(2));
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    process.stderr.write(`Remnashop environment-file preflight failed: ${message}\n`);
+    process.stderr.write(`Проверка файла настроек Remnashop не пройдена: ${message}\n`);
     process.exitCode = 1;
   }
 }

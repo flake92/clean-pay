@@ -48,7 +48,7 @@ describe("Remnashop payment rollout deployment", () => {
     expect(rollout).toContain("REMNASHOP_ENV_EXPECTED_UID 0");
     expect(rollout).toContain("REMNASHOP_ENV_EXPECTED_GID 0");
     expect(rollout).toContain('python3 "$script_dir/remnashop-env-preflight.py"');
-    expect(rollout).toContain("node or python3 is required for credential metadata preflight");
+    expect(rollout).toContain("для проверки прав на файл настроек нужен node или python3");
     expect(rollout.indexOf("run_remnashop_env_preflight"))
       .toBeLessThan(rollout.indexOf("command -v docker"));
     expect(rollout).toContain("repository_minimum_revision=0061");
@@ -59,7 +59,9 @@ describe("Remnashop payment rollout deployment", () => {
     );
     expect(rollout.indexOf("run_remnashop_env_preflight"))
       .toBeLessThan(rollout.indexOf('docker inspect "$container"'));
-    expect(rollout).toContain("API, worker and scheduler must use the same image");
+    expect(rollout).toContain("API, worker и scheduler Remnashop запущены из разных образов");
+    expect(rollout).toContain("Что делать: $2");
+    expect(rollout).toContain("«Обновить Remnashop» → ветка main");
     expect(rollout).toContain("current_revision");
     expect(rollout).toContain('to_regclass(\'public.payment_runtime_control\')');
     expect(rollout).toContain('to_regclass(\'public.subscription_email_reminders\')');
@@ -90,6 +92,6 @@ describe("Remnashop payment rollout deployment", () => {
   it("is idempotent and verifies that the gate is disabled", () => {
     expect(rollout).toContain("IF rollout_gate_active THEN");
     expect(rollout).toContain("SET legacy_rollout_gate_active = false");
-    expect(rollout).toContain("Payment rollout gate remained active");
+    expect(rollout).toContain("Защитный режим платежей остался включён");
   });
 });

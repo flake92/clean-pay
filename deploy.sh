@@ -35,7 +35,7 @@ operation_lock_owned=0
 
 . "$ROOT_DIR/deploy/prod/redis-host-safety.sh"
 
-die() { printf 'ERROR: %s\n' "$*" >&2; exit 1; }
+die() { printf 'ОШИБКА: %s\n' "$*" >&2; exit 1; }
 info() { printf '\n%s\n' "$*"; }
 ok() { printf 'OK: %s\n' "$*"; }
 
@@ -61,13 +61,13 @@ confirm() {
 }
 
 need_docker() {
-  command -v docker >/dev/null 2>&1 || die "Docker is not installed. Install it with: curl -fsSL https://get.docker.com | sh"
-  docker compose version >/dev/null 2>&1 || die "Docker Compose v2 plugin is not installed."
+  command -v docker >/dev/null 2>&1 || die "Docker не установлен. Что делать: curl -fsSL https://get.docker.com | sh"
+  docker compose version >/dev/null 2>&1 || die "Нет плагина Docker Compose v2. Что делать: apt install docker-compose-plugin"
 }
 
 need_deployment_compose_capabilities() {
   sh "$COMPOSE_CAPABILITY_SCRIPT" \
-    || die "Docker or Docker Compose lacks a required production capability."
+    || die "Docker или Docker Compose не поддерживает нужные возможности. Что делать: обновите Docker (curl -fsSL https://get.docker.com | sh) и повторите."
 }
 
 assert_private_env_file() {
@@ -77,14 +77,14 @@ assert_private_env_file() {
   fi
 
   if [ -L "$ENV_FILE" ] || [ ! -f "$ENV_FILE" ]; then
-    die "Production environment file must be a regular non-symlink file."
+    die "Файл настроек должен быть обычным файлом, не ссылкой. Что делать: замените ссылку копией файла $ENV_FILE."
   fi
   command -v stat >/dev/null 2>&1 \
-    || die "node or stat is required to validate production environment metadata."
+    || die "Для проверки прав на файл настроек нужен node или stat. Что делать: apt install coreutils."
   [ "$(stat -c '%a' "$ENV_FILE")" = "600" ] \
-    || die "Production environment file permissions must be exactly 600."
+    || die "Права на файл настроек должны быть 600. Что делать: chmod 600 $ENV_FILE"
   [ "$(stat -c '%u' "$ENV_FILE")" = "$(id -u)" ] \
-    || die "Production environment file must be owned by the current operator."
+    || die "Файл настроек принадлежит другому пользователю. Что делать: chown \"$(id -u):$(id -g)\" $ENV_FILE или запустите от владельца."
 }
 
 env_value() {
@@ -180,18 +180,18 @@ replace_env() {
   value=$2
   assert_private_env_file
   case "$value" in
-    *'$'*|*'#'*) die "$name contains a value that is unsafe for an env file." ;;
+    *'$'*|*'#'*) die "$name содержит символы $ или #, недопустимые в файле настроек. Что делать: задайте другое значение." ;;
     *'
-'*) die "$name contains a newline that is unsafe for an env file." ;;
+'*) die "$name содержит перевод строки. Что делать: задайте значение одной строкой." ;;
   esac
   if printf '%s' "$value" | LC_ALL=C grep -q '[[:cntrl:]]'; then
-    die "$name contains a control character that is unsafe for an env file."
+    die "$name содержит управляющий символ. Что делать: введите значение заново без него."
   fi
 
   if command -v node >/dev/null 2>&1; then
     printf '%s' "$value" \
       | node "$CREDENTIAL_FILE_GUARD_SCRIPT" env-set "$ENV_FILE" "$name" \
-      || die "Could not safely update $name in the production environment file."
+      || die "Не удалось безопасно записать $name в файл настроек. Что делать: проверьте место на диске и права на $ENV_FILE."
   else
     need_docker
     printf '%s' "$value" \
@@ -208,7 +208,7 @@ replace_env() {
         "$NODE_TOOLING_IMAGE" \
         node deploy/prod/credential-file-guard.mjs env-set \
           deploy/prod/.env "$name" \
-      || die "Could not safely update $name in the production environment file."
+      || die "Не удалось безопасно записать $name в файл настроек. Что делать: проверьте место на диске и права на $ENV_FILE."
   fi
   assert_private_env_file
 }
@@ -223,7 +223,7 @@ generate_internal_secret() {
     printf '\n'
     return
   fi
-  die "openssl or /dev/urandom with od is required to generate a missing internal secret."
+  die "Для создания секретов нужен openssl. Что делать: apt install openssl."
 }
 
 ensure_generated_secret() {
@@ -377,7 +377,7 @@ init() {
     assert_v011_upgrade_prepared
     initialize_database_credentials
     ensure_internal_secrets
-    printf 'Configuration already exists: %s\nExisting values were preserved; missing internal secrets were generated.\n' "$ENV_FILE"
+    printf 'Настройки уже есть: %s\nТекущие значения сохранены, недостающие внутренние секреты созданы.\n' "$ENV_FILE"
     return
   fi
   cp "$ENV_EXAMPLE" "$ENV_FILE"
@@ -385,13 +385,13 @@ init() {
   assert_private_env_file
   initialize_database_credentials
   ensure_internal_secrets
-  printf '\nCreated %s and generated local secrets.\n' "$ENV_FILE"
-  printf 'Run ./deploy.sh setup to continue in the interactive installer.\n'
+  printf '\nСоздан %s и локальные секреты.\n' "$ENV_FILE"
+  printf 'Чтобы продолжить, запустите ./deploy.sh setup.\n'
 }
 
 require_env() {
   [ -e "$ENV_FILE" ] || [ -L "$ENV_FILE" ] \
-    || die "Configuration is missing. Run ./deploy.sh init first."
+    || die "Настроек нет. Что делать: ./deploy.sh init."
   assert_private_env_file
 }
 
@@ -416,7 +416,7 @@ prompt_value() {
   printf '  [%s]: ' "$current"
   IFS= read -r answer || answer=''
   [ -n "$answer" ] || answer=$current
-  [ -n "$answer" ] || die "$name is required."
+  [ -n "$answer" ] || die "Не указано обязательное значение $name. Что делать: запустите настройку заново и введите его."
   replace_env "$name" "$answer"
 }
 
@@ -442,7 +442,7 @@ prompt_secret() {
 
   if [ -z "$answer" ]; then
     case "$current" in
-      ''|*change-me*) die "$name is required." ;;
+      ''|*change-me*) die "Не указано обязательное значение $name. Что делать: запустите настройку заново и введите его." ;;
       *) return ;;
     esac
   fi
@@ -477,7 +477,7 @@ prompt_optional_secret() {
 }
 
 configure() {
-  is_interactive || die "Interactive configuration requires a terminal. Use ./deploy.sh init and edit deploy/prod/.env manually."
+  is_interactive || die "Для диалоговой настройки нужен терминал. Что делать: ./deploy.sh init и правка deploy/prod/.env вручную."
   init
 
   info '[1/3] Настройка Clean Pay'
@@ -553,9 +553,9 @@ assert_required_env() {
   required_names='APP_URL NEXT_PUBLIC_APP_URL REMNASHOP_API_BASE_URL REMNASHOP_ADMIN_API_BASE_URL REMNASHOP_API_KEY REMNASHOP_AUTH_SERVICE_KEY REMNAWAVE_API_BASE_URL REMNAWAVE_TOKEN REMNAWAVE_SUBSCRIPTION_ORIGINS TELEGRAM_OIDC_CLIENT_ID TELEGRAM_OIDC_CLIENT_SECRET TELEGRAM_BOT_TOKEN TURNSTILE_SITE_KEY TURNSTILE_SECRET_KEY'
   for name in $required_names; do
     value=$(env_value "$name")
-    [ -n "$value" ] || die "$name is empty. Run ./deploy.sh setup."
+    [ -n "$value" ] || die "$name не заполнен. Что делать: ./deploy.sh setup."
     case "$value" in
-      *change-me*|*example.com*) die "$name still contains a placeholder. Run ./deploy.sh setup." ;;
+      *change-me*|*example.com*) die "$name содержит значение-заглушку. Что делать: ./deploy.sh setup." ;;
     esac
   done
 }
@@ -608,7 +608,7 @@ prepare_compose() {
   need_deployment_compose_capabilities
   assert_required_env
   info '[2/3] Подготовка Docker Compose'
-  [ -f "$COMPOSE_PATH" ] || die "Compose file is missing: $COMPOSE_PATH"
+  [ -f "$COMPOSE_PATH" ] || die "Нет файла Compose: $COMPOSE_PATH. Что делать: проверьте, что код получен полностью (git status)."
   validate_env_file
   materialize_role_env_files
   ensure_redis_host_memory_policy
@@ -625,21 +625,21 @@ available_disk_kb() {
 ensure_build_disk_space() {
   min_mb=$(env_value CLEAN_PAY_MIN_FREE_DISK_MB 8192)
   case "$min_mb" in
-    ''|*[!0-9]*) die "CLEAN_PAY_MIN_FREE_DISK_MB must be a positive integer." ;;
+    ''|*[!0-9]*) die "CLEAN_PAY_MIN_FREE_DISK_MB должен быть целым числом больше нуля. Что делать: исправьте его в $ENV_FILE." ;;
   esac
-  [ "$min_mb" -gt 0 ] || die "CLEAN_PAY_MIN_FREE_DISK_MB must be greater than zero."
+  [ "$min_mb" -gt 0 ] || die "CLEAN_PAY_MIN_FREE_DISK_MB должен быть больше нуля. Что делать: исправьте его в $ENV_FILE."
   min_kb=$((min_mb * 1024))
   available_kb=$(available_disk_kb)
-  [ -n "$available_kb" ] || die "Could not determine available disk space."
+  [ -n "$available_kb" ] || die "Не удалось определить свободное место на диске. Что делать: проверьте df -k и повторите."
 
   if [ "$available_kb" -lt "$min_kb" ]; then
-    printf 'Only %s MB is free. Removing unused Docker build cache and dangling images...\n' "$((available_kb / 1024))"
+    printf 'Свободно только %s МБ. Удаляю кэш сборки Docker и неиспользуемые образы...\n' "$((available_kb / 1024))"
     docker builder prune -af >/dev/null
     docker image prune -f >/dev/null
     available_kb=$(available_disk_kb)
   fi
 
-  [ "$available_kb" -ge "$min_kb" ] || die "Only $((available_kb / 1024)) MB is free after safe Docker cleanup; at least ${min_mb} MB is required before a build."
+  [ "$available_kb" -ge "$min_kb" ] || die "После очистки Docker свободно $((available_kb / 1024)) МБ, для сборки нужно не меньше ${min_mb} МБ. Что делать: освободите место (docker system df, du -xh / | sort -h | tail) и повторите."
 }
 
 deployment_source() {
@@ -657,11 +657,11 @@ prepare_images() {
         "$deploy_source" \
         "$(env_value CLEAN_PAY_RELEASE local)" \
         "$(env_value CLEAN_PAY_REVISION local)"
-      printf 'Building reviewed Clean Pay application and migration images...\n'
+      printf 'Собираю образы приложения и миграций Clean Pay...\n'
       compose build migration app
       ;;
     pull)
-      printf 'Pulling digest-pinned Clean Pay application and migration images...\n'
+      printf 'Загружаю образы приложения и миграций Clean Pay...\n'
       compose pull migration app
       ;;
     *)
@@ -808,7 +808,7 @@ prepare_runtime_dependencies() {
 }
 
 stop_runtime_services() {
-  printf 'Stopping application runtimes for the database migration; PostgreSQL and Redis stay running...\n'
+  printf 'Останавливаю приложение для миграции базы; PostgreSQL и Redis продолжают работать...\n'
   compose stop reconciliation-worker retention-worker app
   compose --profile operations rm -f -s retention-hold db-grant-sync db-role-provision migration
 }
@@ -934,14 +934,14 @@ restart_runtime_services() {
   # leave an old container (and its old secret) behind.
   if ! compose rm -f -s reconciliation-worker retention-worker app \
     || ! start_verified_runtimes; then
-    printf '\nRuntime recreation failed. Recent logs:\n' >&2
+    printf '\nНе удалось пересоздать контейнеры. Что делать: найдите причину в журнале ниже и повторите. Последние записи:\n' >&2
     compose logs --tail=200 >&2 || true
     die 'Updated role environments were not applied successfully.'
   fi
 
   cleanup_verified_images
   verify_detailed_readiness
-  printf 'Clean Pay runtime containers were recreated with the updated role environments and are healthy.\n'
+  printf 'Контейнеры Clean Pay пересозданы с новыми настройками и работают.\n'
 }
 
 cleanup_build_artifacts() {
@@ -953,31 +953,31 @@ cleanup_build_artifacts() {
 
 verify_external_security_headers() {
   app_url=$(env_value APP_URL)
-  [ -n "$app_url" ] || die "APP_URL is required for the external security-header check."
-  command -v curl >/dev/null 2>&1 || die "curl is required for the external security-header check."
+  [ -n "$app_url" ] || die "Для внешней проверки нужен APP_URL. Что делать: задайте его в $ENV_FILE."
+  command -v curl >/dev/null 2>&1 || die "Для внешней проверки нужен curl. Что делать: apt install curl."
   headers=$(curl --fail --show-error --silent --head --max-time 15 "${app_url%/}/api/health/liveness") \
-    || die "External HTTPS liveness check failed."
+    || die "Сайт не отвечает по HTTPS снаружи. Что делать: проверьте DNS, Caddy и доступность портов 80 и 443."
   hsts=$(printf '%s\n' "$headers" | tr -d '\r' | awk 'BEGIN{IGNORECASE=1} /^strict-transport-security:/{sub(/^[^:]*:[[:space:]]*/, ""); print; exit}')
   csp=$(printf '%s\n' "$headers" | tr -d '\r' | awk 'BEGIN{IGNORECASE=1} /^content-security-policy:/{sub(/^[^:]*:[[:space:]]*/, ""); print; exit}')
 
   hsts_max_age=$(printf '%s' "$hsts" | sed -n 's/.*[Mm][Aa][Xx]-[Aa][Gg][Ee]=\([0-9][0-9]*\).*/\1/p')
   case "$hsts_max_age" in
-    ''|*[!0-9]*) die "External HTTPS response is missing a one-year HSTS policy." ;;
+    ''|*[!0-9]*) die "В ответе сайта нет HSTS на год. Что делать: проверьте, что запрос идёт через настроенный Caddy и прокси не убирает заголовки." ;;
   esac
   [ "$hsts_max_age" -ge 31536000 ] \
-    || die "External HTTPS response is missing a one-year HSTS policy."
+    || die "В ответе сайта нет HSTS на год. Что делать: проверьте, что запрос идёт через настроенный Caddy и прокси не убирает заголовки."
   script_policy=$(printf '%s' "$csp" | tr ';' '\n' | awk 'BEGIN{IGNORECASE=1} /^[[:space:]]*script-src[[:space:]]/{sub(/^[[:space:]]*script-src[[:space:]]*/, ""); print; exit}')
   printf '%s' "$script_policy" | grep -Eq "'nonce-[^']+'" \
-    || die "External HTTPS response is missing a nonce-based script CSP."
+    || die "В ответе сайта нет CSP с nonce. Что делать: проверьте, что прокси не подменяет заголовки приложения."
   if printf '%s' "$script_policy" | grep -Fiq "'unsafe-inline'"; then
-    die "External script CSP still permits unsafe-inline."
+    die "CSP сайта разрешает unsafe-inline. Что делать: уберите подмену заголовка на прокси."
   fi
 
-  printf 'External HTTPS security headers are valid.\n'
+  printf 'Защитные заголовки HTTPS в порядке.\n'
 }
 
 verify_detailed_readiness() {
-  printf 'Checking all application dependencies...\n'
+  printf 'Проверяю все зависимости приложения...\n'
   compose exec -T app node -e "fetch('http://127.0.0.1:4000/api/internal/health/readiness',{headers:{'x-clean-pay-readiness-secret':process.env.READINESS_INTERNAL_SECRET},signal:AbortSignal.timeout(15000)}).then(async r=>{const text=await r.text();let body;try{body=JSON.parse(text)}catch{throw new Error('readiness returned invalid JSON')}const checks=body&&body.checks&&typeof body.checks==='object'&&!Array.isArray(body.checks)?Object.entries(body.checks):[];const failed=checks.filter(([,check])=>!check||check.status!=='ok').map(([name])=>name);if(!r.ok||body.status!=='ok'||checks.length===0||failed.length)throw new Error('dependencies are not ready: '+(failed.join(', ')||body.status||r.status));console.log('Detailed readiness is healthy')}).catch(error=>{console.error(error.message);process.exit(1)})"
 }
 
@@ -988,11 +988,11 @@ install_services() {
   preflight_images
   prepare_runtime_dependencies
   stop_runtime_services
-  printf 'Running the verified one-shot migration before any application runtime starts...\n'
+  printf 'Запускаю проверенную миграцию до старта приложения...\n'
   if ! run_verified_migration \
     || ! clear_database_adoption_authorization \
     || ! start_verified_runtimes; then
-    printf '\nStartup failed. Recent logs:\n' >&2
+    printf '\nПриложение не запустилось. Что делать: найдите причину в журнале ниже и повторите. Последние записи:\n' >&2
     compose logs --tail=200 >&2 || true
     exit 1
   fi
@@ -1015,8 +1015,8 @@ build_images_only() {
   prepare_images
   preflight_images
   cleanup_verified_images
-  printf 'Clean Pay application and migration images are prepared and verified.\n'
-  printf 'No container was stopped or replaced and no database migration was run.\n'
+  printf 'Образы приложения и миграций Clean Pay подготовлены и проверены.\n'
+  printf 'Контейнеры не остановлены и не заменены, миграции не запускались.\n'
 }
 
 migrate_only() {
@@ -1035,7 +1035,7 @@ migrate_only() {
   if [ "$deploy_source" = "build" ]; then
     cleanup_build_artifacts
   fi
-  printf 'Verified database migration completed; application runtimes remain stopped.\n'
+  printf 'Миграция базы завершена, приложение пока остановлено.\n'
 }
 
 resolve_rolled_back_migration() {
@@ -1106,7 +1106,7 @@ resolve_rolled_back_migration() {
   if [ "$deploy_source" = "build" ]; then
     cleanup_build_artifacts
   fi
-  printf 'Verified failed migration was marked rolled back; runtimes remain stopped. Run ./deploy.sh migrate next.\n'
+  printf 'Неудачная миграция отмечена как откаченная, приложение остановлено. Что делать: ./deploy.sh migrate.\n'
 }
 
 up() {

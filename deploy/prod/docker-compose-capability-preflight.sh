@@ -2,7 +2,7 @@
 set -eu
 
 fail() {
-  printf '%s\n' "Docker Compose capability preflight failed: $*" >&2
+  printf '%s\n' "Docker Compose не подходит: $*. Что делать: обновите Docker (curl -fsSL https://get.docker.com | sh)." >&2
   exit 1
 }
 
@@ -37,4 +37,4 @@ require_option rm --force
 require_option rm --stop
 require_option config --quiet
 
-printf '%s\n' "Docker Compose supports the required production deployment options."
+printf '%s\n' "Docker Compose поддерживает нужные возможности."
