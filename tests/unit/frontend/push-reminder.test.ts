@@ -98,10 +98,10 @@ describe("PushReminder permission prompt", () => {
     expect(controller.enable).not.toHaveBeenCalled();
   });
 
-  it("stays quiet for 30 days after asking, across visits", async () => {
+  it("stays quiet for a week after asking, across visits", async () => {
     window.localStorage.setItem(
       "clean-pay:push-prompt-asked-at",
-      String(Date.now() - 29 * 24 * 60 * 60 * 1000),
+      String(Date.now() - 6 * 24 * 60 * 60 * 1000),
     );
     await mount();
 
@@ -110,10 +110,10 @@ describe("PushReminder permission prompt", () => {
     expect(controller.enable).not.toHaveBeenCalled();
   });
 
-  it("asks again after 30 days without an answer", async () => {
+  it("asks again after a week without an answer", async () => {
     window.localStorage.setItem(
       "clean-pay:push-prompt-asked-at",
-      String(Date.now() - 31 * 24 * 60 * 60 * 1000),
+      String(Date.now() - 8 * 24 * 60 * 60 * 1000),
     );
     await mount();
 

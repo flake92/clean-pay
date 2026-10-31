@@ -10,12 +10,11 @@ import { usePushNotificationsController } from "@/frontend/hooks/use-push-notifi
 const DISMISS_KEY = "clean-pay:push-reminder-dismissed-at";
 const ASKED_KEY = "clean-pay:push-prompt-asked-at";
 const DISMISS_MS = 7 * 24 * 60 * 60 * 1000;
-const ASK_AGAIN_MS = 30 * 24 * 60 * 60 * 1000;
 
 // Without storage the visit cannot remember the question, so it is not asked.
 function claimPromptOnce() {
   try {
-    if (Date.now() - Number(window.localStorage.getItem(ASKED_KEY)) < ASK_AGAIN_MS) return false;
+    if (Date.now() - Number(window.localStorage.getItem(ASKED_KEY)) < DISMISS_MS) return false;
     window.localStorage.setItem(ASKED_KEY, String(Date.now()));
     return true;
   } catch {
@@ -55,7 +54,7 @@ export function PushReminder() {
   });
 
   // The first click on a cabinet link also asks for the permission, at most
-  // once in 30 days and never after an answer: the status is then no longer
+  // once a week and never after an answer: the status is then no longer
   // "off". The click itself goes on as usual.
   useEffect(() => {
     if (dismissed || status !== "off") return;
