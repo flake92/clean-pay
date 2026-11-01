@@ -369,7 +369,7 @@ Production запускается из зафиксированного тега
 ветки.
 
 ```bash
-RELEASE_REF='refs/tags/v0.5.0'
+RELEASE_REF='refs/tags/v0.5.1'
 sudo mkdir -p /opt/clean-pay
 sudo chown "$USER":"$USER" /opt/clean-pay
 git clone https://github.com/flake92/clean-pay.git /opt/clean-pay
@@ -645,7 +645,7 @@ workers не редактируйте вручную.
 
 ```bash
 cd /opt/clean-pay
-git fetch -q origin tag v0.5.0 && CLEAN_PAY_MENU_ROOT="$PWD" bash <(git show v0.5.0:menu.sh) update
+git fetch -q origin tag v0.5.1 && CLEAN_PAY_MENU_ROOT="$PWD" bash <(git show v0.5.1:menu.sh) update
 ```
 
 Ручной порядок для тех, кто работает без меню:
@@ -668,7 +668,7 @@ workers. Если миграция завершается ошибкой, runtim
 
 ```bash
 cd /opt/clean-pay
-RELEASE_REF='refs/tags/v0.5.0'
+RELEASE_REF='refs/tags/v0.5.1'
 git fetch --depth=1 origin "$RELEASE_REF"
 RELEASE_SHA=$(git rev-parse FETCH_HEAD)
 git checkout --detach "$RELEASE_SHA"
