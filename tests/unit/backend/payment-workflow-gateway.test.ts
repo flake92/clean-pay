@@ -75,23 +75,34 @@ describe("productionPaymentWorkflowGateway", () => {
     mocks.getCurrentSession.mockResolvedValueOnce(null).mockResolvedValueOnce({
       userId: "user-1",
       user: { email: "u@example.com", emailVerified: true, telegramId: "777" },
+    }).mockResolvedValueOnce({
+      userId: "user-2",
+      user: { email: undefined, emailVerified: false, telegramId: "888" },
     });
 
     await expect(gateway.loadActor()).resolves.toBeNull();
     await expect(gateway.loadActor()).resolves.toEqual({
       userId: "user-1", email: "u@example.com", emailVerified: true, telegramId: "777",
     });
+    // A Telegram-only account has no e-mail yet: it is reported as null.
+    await expect(gateway.loadActor()).resolves.toEqual({
+      userId: "user-2", email: null, emailVerified: false, telegramId: "888",
+    });
   });
 
-  it("applies distinct per-user purchase and extension rate limits", async () => {
+  it("applies distinct per-user purchase, extension and gift rate limits", async () => {
     await gateway.rateLimit({ kind: "PURCHASE", userId: "user-1" });
     await gateway.rateLimit({ kind: "EXTEND", userId: "user-1" });
+    await gateway.rateLimit({ kind: "GIFT", userId: "user-1" });
 
     expect(mocks.assertTargetRateLimit).toHaveBeenNthCalledWith(1, {
       action: "subscription_purchase", sessionId: "user:user-1", limit: 10, windowSeconds: 900,
     });
     expect(mocks.assertTargetRateLimit).toHaveBeenNthCalledWith(2, {
       action: "subscription_extend", sessionId: "user:user-1", limit: 10, windowSeconds: 900,
+    });
+    expect(mocks.assertTargetRateLimit).toHaveBeenNthCalledWith(3, {
+      action: "subscription_gift", sessionId: "user:user-1", limit: 10, windowSeconds: 900,
     });
   });
 
@@ -109,6 +120,7 @@ describe("productionPaymentWorkflowGateway", () => {
   it.each([
     ["PURCHASE" as const, "/subscription/purchase", { plan_code: "pro", duration_days: 30, gateway_type: "CARD", return_url: "https://pay.test/payment/op-1" }],
     ["EXTEND" as const, "/subscription/extend", { duration_days: 30, gateway_type: "CARD", return_url: "https://pay.test/payment/op-1" }],
+    ["GIFT" as const, "/subscription/gift/purchase", { plan_code: "pro", duration_days: 30, gateway_type: "CARD", return_url: "https://pay.test/payment/op-1" }],
   ])("dispatches %s with a bound return URL", async (kind, endpoint, body) => {
     const providerResponse = { raw: true };
     const payment = { payment_id: "payment-1", return_url: "https://pay.test/payment/op-1" };
@@ -118,9 +130,9 @@ describe("productionPaymentWorkflowGateway", () => {
       duration_days: 30, gateway_type: "CARD", confirmed_amount: "100",
       confirmed_currency: "RUB", offer_version: "v1",
     };
-    const operation = kind === "PURCHASE"
-      ? { kind, request: { ...commonRequest, plan_code: "pro" } }
-      : { kind, request: commonRequest };
+    const operation = kind === "EXTEND"
+      ? { kind, request: commonRequest }
+      : { kind, request: { ...commonRequest, plan_code: "pro" } };
 
     await expect(gateway.dispatch({
       authorization,
@@ -157,7 +169,9 @@ describe("productionPaymentWorkflowGateway", () => {
     await gateway.auditSuccess({ kind: "PURCHASE", userId: "user-1", operationId: "op-1", gatewayType: "CARD", durationDays: 30 });
     await gateway.auditSuccess({ kind: "EXTEND", userId: "user-1", operationId: "op-2", gatewayType: "CARD", durationDays: 60 });
     expect(mocks.auditLog).toHaveBeenNthCalledWith(1, expect.objectContaining({ action: "subscription_purchase_created" }));
+    await gateway.auditSuccess({ kind: "GIFT", userId: "user-1", operationId: "op-3", gatewayType: "CARD", durationDays: 30 });
     expect(mocks.auditLog).toHaveBeenNthCalledWith(2, expect.objectContaining({ action: "subscription_extend_created" }));
+    expect(mocks.auditLog).toHaveBeenNthCalledWith(3, expect.objectContaining({ action: "subscription_gift_created" }));
   });
 
   it("normalizes provider-shaped failures before settlement", async () => {
@@ -170,6 +184,16 @@ describe("productionPaymentWorkflowGateway", () => {
     }));
     expect(mocks.settlePaymentOperationAfterDispatchFailure).toHaveBeenCalledWith(expect.objectContaining({
       error: expect.any(ServiceError),
+    }));
+
+    await gateway.settleBeforeDispatch({
+      operationId: "op-4",
+      claimToken: "claim",
+      error: { code: "RATE_LIMITED", status: 429, message: 42 },
+      final: false,
+    });
+    expect(mocks.settlePaymentOperationBeforeDispatchFailure).toHaveBeenLastCalledWith(expect.objectContaining({
+      error: expect.objectContaining({ code: "RATE_LIMITED", status: 429 }),
     }));
 
     const existing = new ServiceError("RATE_LIMITED", 429);
