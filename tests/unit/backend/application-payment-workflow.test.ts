@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { executePaymentWorkflow } from "@/application/payments/execute-payment-workflow";
 import type { PaymentWorkflowGateway } from "@/application/payments/ports/payment-workflow";
-import { confirmedPaymentOffer } from "@/shared/domain/payment-offer";
+import { confirmedPaymentOffer, giftPrice } from "@/shared/domain/payment-offer";
 
 const price = {
   gateway_type: "YOOKASSA",
@@ -122,6 +122,82 @@ describe("application payment workflow", () => {
     await expect(executePaymentWorkflow(port, { kind: "EXTEND", request: extendRequest }, "key-extend"))
       .resolves.toMatchObject({ status: "completed" });
     expect(port.rateLimit).toHaveBeenCalledWith(expect.objectContaining({ kind: "EXTEND" }));
+  });
+
+  it("dispatches a gift confirmed at the list price, not the buyer's discounted price", async () => {
+    const discounted = { ...price, discount_percent: 20, final_amount: "80.00" };
+    const discountedPlan = { ...plan, durations: [{ days: 30, prices: [discounted] }] };
+    const giftRequest = {
+      plan_code: plan.public_code,
+      duration_days: 30,
+      gateway_type: price.gateway_type,
+      ...confirmedPaymentOffer(discountedPlan, 30, giftPrice(discounted)),
+    };
+    const port = gateway({
+      loadOffers: vi.fn(async () => ({
+        gateways: [],
+        plans: [discountedPlan],
+        has_current_subscription: true,
+        current_subscription_status: "ACTIVE",
+      })),
+    });
+
+    await expect(executePaymentWorkflow(port, { kind: "GIFT", request: giftRequest }, "key-gift"))
+      .resolves.toMatchObject({ status: "completed" });
+    expect(giftRequest.confirmed_amount).toBe("100.00");
+    expect(port.rateLimit).toHaveBeenCalledWith({ kind: "GIFT", userId: "user-1" });
+    expect(port.beginOperation).toHaveBeenCalledWith(expect.objectContaining({
+      operation: { kind: "GIFT", payload: giftRequest },
+    }));
+    expect(port.dispatch).toHaveBeenCalledWith(expect.objectContaining({
+      operation: { kind: "GIFT", request: giftRequest },
+    }));
+  });
+
+  it("refuses a gift confirmed at the discounted own-purchase price", async () => {
+    const discounted = { ...price, discount_percent: 20, final_amount: "80.00" };
+    const discountedPlan = { ...plan, durations: [{ days: 30, prices: [discounted] }] };
+    const port = gateway({
+      loadOffers: vi.fn(async () => ({
+        gateways: [],
+        plans: [discountedPlan],
+        has_current_subscription: false,
+        current_subscription_status: null,
+      })),
+    });
+    const staleRequest = {
+      plan_code: plan.public_code,
+      duration_days: 30,
+      gateway_type: price.gateway_type,
+      ...confirmedPaymentOffer(discountedPlan, 30, discounted),
+    };
+
+    await expect(executePaymentWorkflow(port, { kind: "GIFT", request: staleRequest }, "key-gift"))
+      .rejects.toMatchObject({ code: "OFFER_CHANGED" });
+    expect(port.dispatch).not.toHaveBeenCalled();
+  });
+
+  it("never sells a free plan as a gift", async () => {
+    const free = { ...price, original_amount: "0.00", final_amount: "0.00", is_free: true };
+    const freePlan = { ...plan, durations: [{ days: 30, prices: [free] }] };
+    const port = gateway({
+      loadOffers: vi.fn(async () => ({
+        gateways: [],
+        plans: [freePlan],
+        has_current_subscription: false,
+        current_subscription_status: null,
+      })),
+    });
+    const freeRequest = {
+      plan_code: plan.public_code,
+      duration_days: 30,
+      gateway_type: price.gateway_type,
+      ...confirmedPaymentOffer(freePlan, 30, giftPrice(free)),
+    };
+
+    await expect(executePaymentWorkflow(port, { kind: "GIFT", request: freeRequest }, "key-gift"))
+      .rejects.toMatchObject({ code: "PLAN_UNAVAILABLE" });
+    expect(port.dispatch).not.toHaveBeenCalled();
   });
 
   it("fails closed when operation creation returns no record", async () => {

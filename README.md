@@ -310,7 +310,7 @@ Node.js на сервере необязателен: при его отсутс
 совпадать с [`.node-version`](.node-version).
 
 Для новой установки сначала обновите Remnashop минимум до Alembic revision
-`0061` (пункт меню «Обновить Remnashop», версия `main`; если Remnashop ещё нет —
+`0062` (пункт меню «Обновить Remnashop», версия `main`; если Remnashop ещё нет —
 «Установить Remnashop с нуля»). Remnashop, поставленный по инструкции апстрима
 snoups, меню переведёт на сборку Clean Pay тем же пунктом; теги `v0.x` — это
 релизы апстрима без интеграции, меню их отклоняет. Проверено на сервере с
@@ -369,7 +369,7 @@ Production запускается из зафиксированного тега
 ветки.
 
 ```bash
-RELEASE_REF='refs/tags/v0.5.1'
+RELEASE_REF='refs/tags/v0.6.0'
 sudo mkdir -p /opt/clean-pay
 sudo chown "$USER":"$USER" /opt/clean-pay
 git clone https://github.com/flake92/clean-pay.git /opt/clean-pay
@@ -645,7 +645,7 @@ workers не редактируйте вручную.
 
 ```bash
 cd /opt/clean-pay
-git fetch -q origin tag v0.5.1 && CLEAN_PAY_MENU_ROOT="$PWD" bash <(git show v0.5.1:menu.sh) update
+git fetch -q origin tag v0.6.0 && CLEAN_PAY_MENU_ROOT="$PWD" bash <(git show v0.6.0:menu.sh) update
 ```
 
 Ручной порядок для тех, кто работает без меню:
@@ -668,7 +668,7 @@ workers. Если миграция завершается ошибкой, runtim
 
 ```bash
 cd /opt/clean-pay
-RELEASE_REF='refs/tags/v0.5.1'
+RELEASE_REF='refs/tags/v0.6.0'
 git fetch --depth=1 origin "$RELEASE_REF"
 RELEASE_SHA=$(git rev-parse FETCH_HEAD)
 git checkout --detach "$RELEASE_SHA"
@@ -708,10 +708,11 @@ volume и с сохранением существующей locale; база н
 запятую. Команда сохраняет существующие секреты, создаёт отдельные роли БД и
 оставляет очистку платёжных данных выключенной до отдельного решения.
 
-Обновите Remnashop минимум до revision `0061`. Revision `0059` исправляет DB-trigger,
+Обновите Remnashop минимум до revision `0062`. Revision `0059` исправляет DB-trigger,
 чтобы первое успешное подтверждение e-mail могло атомарно сохранить включённые
 по умолчанию напоминания. Существующие настройки она не переписывает: явный
 opt-out остаётся выключенным, а неподтверждённые адреса не получают напоминания.
+Revision `0062` добавляет подписку в подарок: тип покупки `GIFT` и коды подарков.
 Revision `0061` добавляет ленту уведомлений кабинета и отзыв push удалённой рассылки.
 Revision `0060` добавляет каналы уведомлений (служебные письма включены у всех,
 новости — только с согласия) и очередь e-mail и push.
@@ -735,7 +736,7 @@ PostgreSQL и проверьте его checksum и список объекто�
 
 Мастер обновления записывает `REMNASHOP_MINIMUM_ALEMBIC_REVISION=0059`, а
 preflight берёт большее из этого значения и требования текущей версии кода
-(`0061`) и не позволит запустить Clean Pay с более старой схемой Remnashop.
+(`0062`) и не позволит запустить Clean Pay с более старой схемой Remnashop.
 Значение в `.env` не повышается, чтобы откат к прежней версии Clean Pay
 оставался рабочим.
 Revision `0059` не выполняет data backfill и не меняет существующие значения

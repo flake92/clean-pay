@@ -26,7 +26,7 @@ const PAYMENT_STATES = [
   "UNKNOWN",
   "MANUAL_REQUIRED",
 ] as const;
-const PURCHASE_TYPES = ["NEW", "RENEW", "CHANGE"] as const;
+const PURCHASE_TYPES = ["NEW", "RENEW", "CHANGE", "GIFT"] as const;
 
 export type RemnashopPaymentOperation = "PURCHASE" | "EXTEND";
 type RemnashopPaymentRecoveryState = (typeof PAYMENT_STATES)[number];

@@ -1,4 +1,4 @@
-export type PaymentOperation = "purchase" | "extend";
+export type PaymentOperation = "purchase" | "extend" | "gift";
 
 export type PaymentOperationPayload = Readonly<
   Record<string, boolean | number | string | null>

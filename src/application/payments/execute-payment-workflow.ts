@@ -5,7 +5,7 @@ import type {
   PaymentWorkflowGateway,
   PaymentWorkflowInput,
 } from "@/application/payments/ports/payment-workflow";
-import { paymentOfferMatches } from "@/shared/domain/payment-offer";
+import { giftPrice, paymentOfferMatches } from "@/shared/domain/payment-offer";
 import { accountAccessIssue } from "@/shared/domain/account-access-policy";
 
 class PaymentWorkflowError extends Error {
@@ -63,9 +63,9 @@ export async function executePaymentWorkflow(
 ): Promise<PaymentExecution> {
   const actor = await gateway.loadActor();
   if (!actor) throw workflowError("UNAUTHORIZED", 401, "Payment session is required");
-  const operationRequest = input.kind === "PURCHASE"
-    ? { kind: "PURCHASE" as const, payload: input.request }
-    : { kind: "EXTEND" as const, payload: input.request };
+  const operationRequest = input.kind === "EXTEND"
+    ? { kind: "EXTEND" as const, payload: input.request }
+    : { kind: input.kind, payload: input.request };
   const operationInput = { userId: actor.userId, idempotencyKey, operation: operationRequest };
   let operation = await gateway.beginOperation({ ...operationInput, createIfMissing: false });
   let authorization: PaymentAuthorization | null = null;
@@ -106,13 +106,17 @@ export async function executePaymentWorkflow(
     });
 
     const offers = await gateway.loadOffers(authorization);
-    const plan = input.kind === "PURCHASE"
-      ? offers.plans.find((item) => item.public_code === input.request.plan_code)
-      : offers.plans.find((item) => item.recommended_purchase_type.toLowerCase() === "renew");
+    const plan = input.kind === "EXTEND"
+      ? offers.plans.find((item) => item.recommended_purchase_type.toLowerCase() === "renew")
+      : offers.plans.find((item) => item.public_code === input.request.plan_code);
     const duration = plan?.durations.find((item) => item.days === input.request.duration_days);
-    const price = duration?.prices.find((item) => item.gateway_type === input.request.gateway_type);
+    const offeredPrice = duration?.prices.find((item) => item.gateway_type === input.request.gateway_type);
+    const price = offeredPrice && input.kind === "GIFT" ? giftPrice(offeredPrice) : offeredPrice;
     if (!plan || !duration) throw workflowError("PLAN_UNAVAILABLE", 400, "Selected plan or duration is unavailable");
     if (!price) throw workflowError("PAYMENT_GATEWAY_UNAVAILABLE", 400, "Selected gateway is unavailable");
+    if (input.kind === "GIFT" && price.is_free) {
+      throw workflowError("PLAN_UNAVAILABLE", 400, "A free plan cannot be bought as a gift");
+    }
     if (!paymentOfferMatches(input.request, plan, duration.days, price)) {
       throw workflowError("OFFER_CHANGED", 409, "Confirmed offer no longer matches current price");
     }

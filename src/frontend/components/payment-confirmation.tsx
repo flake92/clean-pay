@@ -30,6 +30,7 @@ function pendingPaymentDestination(paymentId: string) {
 export function PaymentConfirmation({
   durationDays = null,
   gatewayType = null,
+  gift = false,
   model = defaultCheckoutModel,
   paymentRedirectTo = "/payment",
   planCode = null,
@@ -37,6 +38,7 @@ export function PaymentConfirmation({
 }: {
   durationDays?: string | null;
   gatewayType?: string | null;
+  gift?: boolean;
   model?: CheckoutViewModel;
   paymentRedirectTo?: string;
   planCode?: string | null;
@@ -51,6 +53,7 @@ export function PaymentConfirmation({
   } = usePaymentConfirmationController({
     durationDays,
     gatewayType,
+    gift,
     model,
     pendingOperationDestination,
     pendingPaymentDestination,
@@ -93,7 +96,7 @@ export function PaymentConfirmation({
     return (
       <div className="flex flex-column gap-4">
         <Message severity="info" text="Для оплаты сначала выберите тариф, срок и способ оплаты." />
-        <LinkButton className="w-fit" href="/tariffs" label="Выбрать тариф" />
+        <LinkButton className="w-fit" href={gift ? "/gift" : "/tariffs"} label="Выбрать тариф" />
       </div>
     );
   }
@@ -157,16 +160,22 @@ export function PaymentConfirmation({
           </div>
         </div>
       </Card>
+      {gift ? (
+        <Message
+          severity="info"
+          text="Это подарок: ваша подписка не изменится. После оплаты код появится на странице «Подарки», передайте его получателю."
+        />
+      ) : null}
       {submitError ? <Message severity="error" text={submitError} /> : null}
       <div className="flex flex-wrap gap-3">
         <Button
           disabled={submitting}
-          label="Перейти к оплате"
+          label={gift ? "Оплатить подарок" : "Перейти к оплате"}
           loading={submitting}
           onClick={createPayment}
           type="button"
         />
-        <LinkButton href="/tariffs" label="Изменить выбор" outlined />
+        <LinkButton href={gift ? "/gift" : "/tariffs"} label="Изменить выбор" outlined />
       </div>
     </div>
   );

@@ -161,7 +161,7 @@ export function paymentOperationDispatchFailureOutcome(
     return "UNKNOWN";
   }
   const paymentConflict = upstreamStatus === 409
-    && ["/subscription/purchase", "/subscription/extend"].some((path) =>
+    && ["/subscription/purchase", "/subscription/extend", "/subscription/gift/purchase"].some((path) =>
       error.debug?.upstreamPath?.toLowerCase().includes(path)
     );
   if (paymentConflict) {

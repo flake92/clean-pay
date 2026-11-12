@@ -40,6 +40,19 @@ export function confirmedPaymentOffer(
   };
 }
 
+/**
+ * A gift is sold at the list price: the buyer's personal and one-time discounts
+ * apply only to their own subscription, so Remnashop charges `original_amount`.
+ */
+export function giftPrice(price: DurationGatewayPrice): DurationGatewayPrice {
+  return {
+    ...price,
+    discount_percent: 0,
+    final_amount: price.original_amount,
+    is_free: Number(price.original_amount) <= 0,
+  };
+}
+
 export function paymentOfferMatches(
   confirmed: ConfirmedPaymentOffer,
   plan: Pick<PlanOffer, "id" | "public_code">,

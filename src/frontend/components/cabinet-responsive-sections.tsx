@@ -124,7 +124,7 @@ export function CabinetPaymentHistorySection({
                   <div className="cabinet-mobile-record__header">
                     <div>
                       <div className="cabinet-mobile-record__title">
-                        {payment.plan_name ?? payment.purchase_type}
+                        {payment.purchase_type === "GIFT" ? "🎁 Подарок · " : null}{payment.plan_name ?? payment.purchase_type}
                       </div>
                       <div className="cabinet-mobile-record__id">{payment.payment_id}</div>
                     </div>
@@ -181,7 +181,7 @@ export function CabinetPaymentHistorySection({
           <Column
             body={(payment: PaymentRecord) => (
               <div>
-                <div className="font-medium">{payment.plan_name ?? payment.purchase_type}</div>
+                <div className="font-medium">{payment.purchase_type === "GIFT" ? "🎁 Подарок · " : null}{payment.plan_name ?? payment.purchase_type}</div>
                 <div className="mt-1 text-xs text-500 break-all">{payment.payment_id}</div>
               </div>
             )}

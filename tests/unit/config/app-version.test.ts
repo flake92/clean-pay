@@ -12,7 +12,7 @@ describe("application version", () => {
       packages: Record<string, { version?: string }>;
     };
 
-    expect(APP_VERSION).toBe("0.5.1");
+    expect(APP_VERSION).toBe("0.6.0");
     expect(packageJson.version).toBe(APP_VERSION);
     expect(packageLock.version).toBe(APP_VERSION);
     expect(packageLock.packages[""]?.version).toBe(APP_VERSION);

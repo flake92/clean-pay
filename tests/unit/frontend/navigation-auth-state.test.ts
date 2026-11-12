@@ -66,6 +66,7 @@ describe("navigation authentication state", () => {
     expect(result.flatItems.map(({ label }) => label)).toEqual([
       "Кабинет",
       "Пригласить друзей",
+      "Подарить подписку",
       "Тарифы",
       "Продлить",
       "Уведомления",

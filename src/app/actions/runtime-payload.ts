@@ -311,17 +311,24 @@ function paymentRequest(value: unknown, purchase: boolean) {
 
 export function parsePaymentCommandPayload(value: unknown): PaymentCommand | null {
   const input = record(value);
-  if (!input || (input.kind !== "purchase" && input.kind !== "extend")) return null;
+  if (!input || (input.kind !== "purchase" && input.kind !== "extend" && input.kind !== "gift")) {
+    return null;
+  }
   const idempotencyKey = stringValue(input.idempotencyKey, {
     allowEmpty: true,
     maxLength: 200,
   });
   if (idempotencyKey === null) return null;
-  const request = paymentRequest(input.request, input.kind === "purchase");
+  const request = paymentRequest(input.request, input.kind !== "extend");
   if (!request) return null;
-  return input.kind === "purchase"
-    ? { kind: "purchase", request: request as PurchaseRequest, idempotencyKey }
-    : { kind: "extend", request: request as ExtendRequest, idempotencyKey };
+  if (input.kind === "extend") {
+    return { kind: "extend", request: request as ExtendRequest, idempotencyKey };
+  }
+  return {
+    kind: input.kind === "gift" ? "gift" : "purchase",
+    request: request as PurchaseRequest,
+    idempotencyKey,
+  };
 }
 
 const PAYMENT_ID_PATTERN =

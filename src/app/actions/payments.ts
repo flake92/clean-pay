@@ -21,6 +21,11 @@ const productionPaymentCommands: PaymentCommands = {
     { kind: "EXTEND", request },
     idempotencyKey,
   ),
+  gift: (request, idempotencyKey) => executePaymentWorkflow(
+    productionPaymentWorkflowGateway,
+    { kind: "GIFT", request },
+    idempotencyKey,
+  ),
 };
 
 export async function executePaymentAction(

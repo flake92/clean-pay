@@ -13,6 +13,7 @@ const postAuthPagePaths = new Set([
   "/link-account",
   "/offline",
   "/passkey/setup",
+  "/gift",
   "/payment",
   "/payment/fail",
   "/payment/pending",

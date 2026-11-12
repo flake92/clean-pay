@@ -116,7 +116,14 @@ function priceChoiceList(
   );
 }
 
-export function TariffsPanel({ model }: { model: TariffsViewModel }) {
+export function TariffsPanel({
+  model,
+  mode = "subscription",
+}: {
+  model: TariffsViewModel;
+  mode?: "subscription" | "gift";
+}) {
+  const gift = mode === "gift";
   const { selection, selectPrice } = useTariffsPanelController();
 
   if (model.status === "error") {
@@ -125,7 +132,7 @@ export function TariffsPanel({ model }: { model: TariffsViewModel }) {
         <AccountActionRequired
           action={model.action}
           message={model.message}
-          redirectTo="/tariffs"
+          redirectTo={gift ? "/gift" : "/tariffs"}
         />
       );
     }
@@ -141,7 +148,7 @@ export function TariffsPanel({ model }: { model: TariffsViewModel }) {
     return <Message severity="info" text="Доступных тарифов пока нет." />;
   }
 
-  const hasCurrentSubscription = model.offers.has_current_subscription;
+  const hasCurrentSubscription = !gift && model.offers.has_current_subscription;
 
   return (
     <div className="flex flex-column gap-4">
@@ -252,9 +259,9 @@ export function TariffsPanel({ model }: { model: TariffsViewModel }) {
                   </div>
                   <LinkButton
                     className="w-fit"
-                    href={paymentHref}
-                    icon="pi pi-arrow-right"
-                    label={hasCurrentSubscription ? "Изменить тариф" : "Выбрать"}
+                    href={gift && paymentHref !== "#" ? `${paymentHref}&gift=1` : paymentHref}
+                    icon={gift ? "pi pi-gift" : "pi pi-arrow-right"}
+                    label={gift ? "Подарить" : hasCurrentSubscription ? "Изменить тариф" : "Выбрать"}
                   />
                 </div>
               </Card>

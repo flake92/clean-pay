@@ -3,7 +3,8 @@ import type { PlanOffer, SubscriptionOffersResponse } from "@/shared/domain/subs
 
 type PaymentOperationRequest =
   | { kind: "PURCHASE"; payload: PurchaseRequest }
-  | { kind: "EXTEND"; payload: ExtendRequest };
+  | { kind: "EXTEND"; payload: ExtendRequest }
+  | { kind: "GIFT"; payload: PurchaseRequest };
 
 export type PaymentOperationErrorSnapshot = {
   code: string;
@@ -28,7 +29,8 @@ export type PaymentAuthorization = {
 
 export type PaymentWorkflowInput =
   | { kind: "PURCHASE"; request: PurchaseRequest }
-  | { kind: "EXTEND"; request: ExtendRequest };
+  | { kind: "EXTEND"; request: ExtendRequest }
+  | { kind: "GIFT"; request: PurchaseRequest };
 
 export interface PaymentWorkflowGateway {
   loadActor(): Promise<{ userId: string; email: string | null; emailVerified: boolean; telegramId: string | number | bigint | null } | null>;
