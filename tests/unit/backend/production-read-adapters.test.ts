@@ -96,6 +96,14 @@ describe("production read adapters", () => {
     expect(mocks.remnashopRequest).toHaveBeenNthCalledWith(2, "/subscription/offers", { accessToken: "access-token" });
   });
 
+  it("loads the gift codes the user bought with the authorized token", async () => {
+    const gifts = { gifts: [] };
+    mocks.remnashopRequest.mockResolvedValueOnce(gifts);
+
+    await expect(remnashopSubscriptionReader.loadGifts()).resolves.toBe(gifts);
+    expect(mocks.remnashopRequest).toHaveBeenCalledWith("/subscription/gifts", { accessToken: "access-token" });
+  });
+
   it("normalizes subscription catalog access failures", async () => {
     mocks.remnashopRequest.mockResolvedValueOnce(offers);
     await expect(remnashopSubscriptionCatalog.loadOffers()).resolves.toBe(offers);
