@@ -3,6 +3,7 @@ import type {
   SubscriptionOffersResponse,
 } from "@/shared/domain/subscriptions";
 import type { CheckoutViewModel } from "@/application/models/checkout";
+import { giftPrice } from "@/shared/domain/payment-offer";
 
 export type PaymentConfirmationViewState =
   | { kind: "verify-email" }
@@ -45,16 +46,18 @@ export function findPaymentSelection(
   planCode: string | null,
   durationDays: string | null,
   gatewayType: string | null,
+  gift = false,
 ) {
   const plan = offers.plans.find((item) => item.public_code === planCode);
   const duration = plan?.durations.find(
     (item) => String(item.days) === durationDays,
   );
-  const price = duration?.prices.find(
+  const offered = duration?.prices.find(
     (item) => item.gateway_type === gatewayType,
   );
+  const price = offered && gift ? giftPrice(offered) : offered;
 
-  if (!plan || !duration || !price) {
+  if (!plan || !duration || !price || (gift && price.is_free)) {
     return null;
   }
 
@@ -74,6 +77,7 @@ export function selectPaymentConfirmationView(
   planCode: string | null,
   durationDays: string | null,
   gatewayType: string | null,
+  gift = false,
 ): PaymentConfirmationViewState {
   if (model.status === "account-action-required") {
     if (model.action === "verifyEmail") return { kind: "verify-email" };
@@ -100,6 +104,7 @@ export function selectPaymentConfirmationView(
     planCode,
     durationDays,
     gatewayType,
+    gift,
   );
   return selection
     ? { kind: "ready", selection }

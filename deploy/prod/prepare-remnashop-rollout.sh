@@ -46,7 +46,7 @@ env_value() {
   fi
 }
 
-repository_minimum_revision=0061
+repository_minimum_revision=0062
 minimum_revision=$(env_value REMNASHOP_MINIMUM_ALEMBIC_REVISION "$repository_minimum_revision")
 case "$minimum_revision:$repository_minimum_revision" in
   *[!0-9:]*|:*|*:) fail "версии схемы должны быть числами (в настройках $minimum_revision, в коде $repository_minimum_revision)" "исправьте REMNASHOP_MINIMUM_ALEMBIC_REVISION в $ENV_FILE." ;;
@@ -136,6 +136,7 @@ for path in (
     "/api/v1/public/auth/identify",
     "/api/v1/public/auth/notification-preferences",
     "/api/v1/public/auth/notifications/feed",
+    "/api/v1/public/subscription/gifts",
 ):
     connection = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
     connection.request(
@@ -156,12 +157,12 @@ print(*statuses)
   ) || fail "не удалось обратиться к API Remnashop" "проверьте, что он запущен и здоров: docker ps и docker logs $api_container."
 
   case "$contract_statuses" in
-    "422 405 405") ;;
+    "422 405 405 405") ;;
     # 405 proves the Clean Pay build is running, so a 401 means only the shared key differs
-    "401 405 405")
+    "401 405 405 405")
       fail "Remnashop отклонил ключ Clean Pay (401): REMNASHOP_AUTH_SERVICE_KEY в $ENV_FILE не совпадает с APP_AUTH_SERVICE_KEY в $remnashop_env_file" "выполните ./menu.sh remnashop-link: команда выровняет ключи и перезапустит Remnashop." ;;
     *)
-      incompatible "API Remnashop устарел: ответы $contract_statuses вместо 422 405 405 (нужна схема 0061 с лентой уведомлений)" ;;
+      incompatible "API Remnashop устарел: ответы $contract_statuses вместо 422 405 405 405 (нужна схема 0062 с подарочными подписками)" ;;
   esac
 }
 

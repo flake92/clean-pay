@@ -60,6 +60,26 @@ function serviceError(error: unknown) {
   return error;
 }
 
+type PaymentKind = Parameters<PaymentWorkflowGateway["rateLimit"]>[0]["kind"];
+
+const paymentEndpoint: Record<PaymentKind, string> = {
+  PURCHASE: "/subscription/purchase",
+  EXTEND: "/subscription/extend",
+  GIFT: "/subscription/gift/purchase",
+};
+
+const paymentRateLimitAction: Record<PaymentKind, string> = {
+  PURCHASE: "subscription_purchase",
+  EXTEND: "subscription_extend",
+  GIFT: "subscription_gift",
+};
+
+const paymentAuditAction: Record<PaymentKind, string> = {
+  PURCHASE: "subscription_purchase_created",
+  EXTEND: "subscription_extend_created",
+  GIFT: "subscription_gift_created",
+};
+
 type PaymentAuthorizer = typeof getAuthorizedRemnashopTokens;
 
 export function createProductionPaymentWorkflowGateway(
@@ -81,7 +101,7 @@ export function createProductionPaymentWorkflowGateway(
     // Per user only: legitimate purchases across many users are never capped
     // by a shared service-wide budget.
     await assertTargetRateLimit({
-      action: input.kind === "PURCHASE" ? "subscription_purchase" : "subscription_extend",
+      action: paymentRateLimitAction[input.kind],
       sessionId: `user:${input.userId}`,
       limit: 10,
       windowSeconds: 15 * 60,
@@ -113,10 +133,8 @@ export function createProductionPaymentWorkflowGateway(
   },
 
   async dispatch({ authorization, operationId, upstreamKey, operation }) {
-    const endpoint = operation.kind === "PURCHASE"
-      ? "/subscription/purchase"
-      : "/subscription/extend";
-    const upstreamBody = operation.kind === "PURCHASE"
+    const endpoint = paymentEndpoint[operation.kind];
+    const upstreamBody = operation.kind !== "EXTEND"
       ? {
           plan_code: operation.request.plan_code,
           duration_days: operation.request.duration_days,
@@ -170,9 +188,7 @@ export function createProductionPaymentWorkflowGateway(
 
   async auditSuccess(input) {
     await auditLog({
-      action: input.kind === "PURCHASE"
-        ? "subscription_purchase_created"
-        : "subscription_extend_created",
+      action: paymentAuditAction[input.kind],
       userId: input.userId,
       metadata: {
         operationId: input.operationId,

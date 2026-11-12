@@ -14,7 +14,7 @@ const UUID_PATTERN =
 
 export type PaymentOperationRequest =
   | {
-      kind: "PURCHASE";
+      kind: "PURCHASE" | "GIFT";
       payload: Pick<
         PurchaseRequest,
         | "plan_code"
@@ -162,7 +162,8 @@ function normalizeOperation(
     2_048,
   );
 
-  if (operation.kind === "PURCHASE") {
+  if (operation.kind === "PURCHASE" || operation.kind === "GIFT") {
+    const gift = operation.kind === "GIFT";
     const payload: Prisma.InputJsonObject = {
       plan_code: normalizedString(operation.payload.plan_code, "plan_code", 200),
       duration_days: durationDays,
@@ -170,14 +171,19 @@ function normalizeOperation(
       confirmed_amount: confirmedAmount,
       confirmed_currency: confirmedCurrency,
       offer_version: offerVersion,
+      ...(gift ? { gift: true } : {}),
     };
+    // A gift is stored and reconciled as a PURCHASE operation (Remnashop
+    // registers it under the same operation name), so no database enum value is
+    // needed. The marker in the fingerprint still keeps one idempotency key from
+    // being reused between a gift and a purchase of the same offer.
     return {
-      kind: operation.kind,
+      kind: "PURCHASE",
       payload,
       fingerprint: sha256(JSON.stringify([
         "clean-pay.payment-operation",
         PAYMENT_OPERATION_CONTRACT_VERSION,
-        operation.kind,
+        gift ? "GIFT" : "PURCHASE",
         payload.plan_code,
         payload.duration_days,
         payload.gateway_type,

@@ -1,3 +1,5 @@
+import { isGiftStatus, type Gift, type GiftsResponse } from "@/shared/domain/gifts";
+
 function record(value: unknown, label: string): Record<string, unknown> {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     throw new TypeError(`${label} must be an object`);
@@ -340,6 +342,31 @@ function decodePaymentInit(value: unknown) {
   };
 }
 
+function decodeGift(value: unknown): Gift {
+  const input = record(value, "Remnashop gift");
+  const status = stringField(input, "status");
+  if (!isGiftStatus(status)) {
+    throw new TypeError("Remnashop gift has an unknown status");
+  }
+  return {
+    code: nonemptyStringField(input, "code"),
+    payment_id: nonemptyStringField(input, "payment_id"),
+    status,
+    plan_name: stringField(input, "plan_name"),
+    duration_days: numberField(input, "duration_days"),
+    traffic_limit: numberField(input, "traffic_limit"),
+    device_limit: numberField(input, "device_limit"),
+    created_at: optionalNullableStringField(input, "created_at") ?? null,
+    expires_at: optionalNullableStringField(input, "expires_at") ?? null,
+    activated_at: optionalNullableStringField(input, "activated_at") ?? null,
+  };
+}
+
+function decodeGifts(value: unknown): GiftsResponse {
+  const input = record(value, "Remnashop gifts response");
+  return { gifts: arrayField(input, "gifts").map(decodeGift) };
+}
+
 function decodeReferralProgram(value: unknown) {
   const input = record(value, "Remnashop referral program");
   return {
@@ -469,9 +496,14 @@ export function decodeRemnashopEndpointResponse(
       reward_type: stringField(input, "reward_type"),
     };
   }
-  if (normalizedPath === "/subscription/purchase" || normalizedPath === "/subscription/extend") {
+  if (
+    normalizedPath === "/subscription/purchase"
+    || normalizedPath === "/subscription/extend"
+    || normalizedPath === "/subscription/gift/purchase"
+  ) {
     return decodePaymentInit(value);
   }
+  if (normalizedPath === "/subscription/gifts") return decodeGifts(value);
   if (normalizedPath === "/referral/program") return decodeReferralProgram(value);
   if (normalizedPath === "/users/merge") return decodeMergeResponse(value);
 

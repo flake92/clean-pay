@@ -91,6 +91,7 @@ export function normalizeRemnashopError(
   const paymentMutationPath = includesAny(lowerPath, [
     '/subscription/purchase',
     '/subscription/extend',
+    '/subscription/gift/purchase',
   ]);
 
   // The provider has explicitly stated that dispatch outcome is unknown.

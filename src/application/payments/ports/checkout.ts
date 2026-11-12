@@ -13,4 +13,5 @@ export interface CheckoutReader {
 export interface PaymentCommands {
   purchase(request: PurchaseRequest, idempotencyKey: string): Promise<PaymentExecution>;
   extend(request: ExtendRequest, idempotencyKey: string): Promise<PaymentExecution>;
+  gift(request: PurchaseRequest, idempotencyKey: string): Promise<PaymentExecution>;
 }

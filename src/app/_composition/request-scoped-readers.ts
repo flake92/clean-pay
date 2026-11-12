@@ -41,6 +41,9 @@ const loadRequestSubscriptionOffers = cache(() => subscriptionCatalog.loadOffers
 export const requestSubscriptionCatalog = {
   loadOffers: loadRequestSubscriptionOffers,
 };
+export const requestGiftReader = {
+  loadGifts: () => subscriptions.loadGifts(),
+};
 const requestSubscriptions = {
   ...subscriptions,
   loadOffers: loadRequestSubscriptionOffers,

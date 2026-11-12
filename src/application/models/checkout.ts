@@ -9,7 +9,8 @@ export type CheckoutViewModel =
 
 export type PaymentCommand =
   | { kind: "purchase"; request: PurchaseRequest; idempotencyKey: string }
-  | { kind: "extend"; request: ExtendRequest; idempotencyKey: string };
+  | { kind: "extend"; request: ExtendRequest; idempotencyKey: string }
+  | { kind: "gift"; request: PurchaseRequest; idempotencyKey: string };
 
 export type PaymentCommandResult =
   | { ok: true; status: "completed"; payment: PaymentInitResponse; operationId: string }

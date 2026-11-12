@@ -7,6 +7,7 @@ import type {
   DevicesResponse,
   SubscriptionOffersResponse,
 } from "@/backend/integrations/remnashop/contracts";
+import type { GiftsResponse } from "@/shared/domain/gifts";
 
 type Authorized = Awaited<ReturnType<typeof getAuthorizedRemnashopTokens>>;
 type SubscriptionAuthorizer = () => Promise<Authorized>;
@@ -46,6 +47,11 @@ async function loadSubscriptionOffers(authorize: SubscriptionAuthorizer) {
   return remnashopValidatedRequest<SubscriptionOffersResponse>("/subscription/offers", { accessToken });
 }
 
+async function loadBoughtGifts(authorize: SubscriptionAuthorizer) {
+  const { accessToken } = await authorize();
+  return remnashopValidatedRequest<GiftsResponse>("/subscription/gifts", { accessToken });
+}
+
 export function createRemnashopSubscriptionReader(
   authorize: SubscriptionAuthorizer,
 ) {
@@ -53,5 +59,6 @@ export function createRemnashopSubscriptionReader(
     loadCurrent: () => loadCurrentSubscription(authorize),
     loadDevices: () => loadSubscriptionDevices(authorize),
     loadOffers: () => loadSubscriptionOffers(authorize),
+    loadGifts: () => loadBoughtGifts(authorize),
   };
 }

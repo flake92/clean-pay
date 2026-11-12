@@ -27,7 +27,9 @@ export async function executePayment(commands: PaymentCommands, command: Payment
   try {
     const result = command.kind === "purchase"
       ? await commands.purchase(command.request, command.idempotencyKey)
-      : await commands.extend(command.request, command.idempotencyKey);
+      : command.kind === "gift"
+        ? await commands.gift(command.request, command.idempotencyKey)
+        : await commands.extend(command.request, command.idempotencyKey);
     return { ok: true, ...result };
   } catch (error) {
     const candidate = error as { code?: unknown };

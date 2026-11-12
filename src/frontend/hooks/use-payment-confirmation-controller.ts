@@ -19,6 +19,7 @@ import { confirmedPaymentOffer } from "@/shared/domain/payment-offer";
 export function usePaymentConfirmationController({
   durationDays,
   gatewayType,
+  gift = false,
   model,
   pendingOperationDestination,
   pendingPaymentDestination,
@@ -27,6 +28,7 @@ export function usePaymentConfirmationController({
 }: {
   durationDays: string | null;
   gatewayType: string | null;
+  gift?: boolean;
   model: CheckoutViewModel;
   pendingOperationDestination: (operationId: string) => string;
   pendingPaymentDestination: (paymentId: string) => string;
@@ -42,10 +44,12 @@ export function usePaymentConfirmationController({
       planCode,
       durationDays,
       gatewayType,
+      gift,
     ),
-    [durationDays, gatewayType, model, planCode],
+    [durationDays, gatewayType, gift, model, planCode],
   );
   const selection = view.kind === "ready" ? view.selection : null;
+  const operation = gift ? "gift" as const : "purchase" as const;
   const verifyEmailRequired = view.kind === "verify-email";
 
   useEffect(() => {
@@ -81,7 +85,7 @@ export function usePaymentConfirmationController({
     let idempotencyKey: string;
 
     try {
-      idempotencyKey = getOrCreatePaymentIdempotencyKey("purchase", payload);
+      idempotencyKey = getOrCreatePaymentIdempotencyKey(operation, payload);
     } catch {
       finishSubmitting();
       setSubmitError(
@@ -94,7 +98,7 @@ export function usePaymentConfirmationController({
 
     try {
       const result = await executePaymentAction({
-        kind: "purchase",
+        kind: operation,
         request: payload,
         idempotencyKey,
       });
@@ -107,7 +111,7 @@ export function usePaymentConfirmationController({
           return;
         }
         if (!result.retainIdempotencyKey) {
-          clearPaymentIdempotencyKey("purchase", payload, idempotencyKey);
+          clearPaymentIdempotencyKey(operation, payload, idempotencyKey);
         }
         setSubmitError(result.message);
         return;
@@ -124,10 +128,10 @@ export function usePaymentConfirmationController({
         return;
       }
 
-      clearPaymentIdempotencyKey("purchase", payload, idempotencyKey);
+      clearPaymentIdempotencyKey(operation, payload, idempotencyKey);
       paymentConfirmed = true;
       if (result.payment.is_free) {
-        navigateTo("/cabinet");
+        navigateTo(gift ? "/gift" : "/cabinet");
         return;
       }
 

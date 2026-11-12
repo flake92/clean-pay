@@ -610,6 +610,7 @@ describe("server application flows", () => {
     const commands: PaymentCommands = {
       purchase: vi.fn(),
       extend: vi.fn(async () => ({ status: "pending" as const, operationId: "op-1", retryAfterSeconds: 5 })),
+      gift: vi.fn(),
     };
     await expect(executePayment(commands, { kind: "extend", request, idempotencyKey: "key-1" })).resolves.toEqual({
       ok: true, status: "pending", operationId: "op-1", retryAfterSeconds: 5,

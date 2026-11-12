@@ -37,7 +37,8 @@ export function useCleanPayMenu(navigation: NavigationViewModel) {
         ...(navigation.authenticated
             ? [
                 { label: "Кабинет", icon: "pi pi-fw pi-home", to: "/cabinet" },
-                { label: "Пригласить друзей", icon: "pi pi-fw pi-gift", to: "/referral" },
+                { label: "Пригласить друзей", icon: "pi pi-fw pi-users", to: "/referral" },
+                { label: "Подарить подписку", icon: "pi pi-fw pi-gift", to: "/gift" },
             ]
             : []),
         {

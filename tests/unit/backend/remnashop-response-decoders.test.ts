@@ -289,4 +289,40 @@ describe("Remnashop response decoders", () => {
       "Remnashop response decoder is not configured for POST /future/provider-contract",
     );
   });
+
+  it("projects bought gift codes and rejects unknown gift states", () => {
+    const gift = {
+      code: "GIFT-ABCD-EFGH-JKMN",
+      payment_id: "00000000-0000-4000-8000-000000000901",
+      status: "AVAILABLE",
+      plan_name: "Basic",
+      duration_days: 30,
+      traffic_limit: 0,
+      device_limit: 3,
+      created_at: "2026-11-12T10:00:00Z",
+      expires_at: "2027-11-12T10:00:00Z",
+      activated_at: null,
+      provider_secret: "must-not-project",
+    };
+    const projected: Record<string, unknown> = { ...gift };
+    delete projected.provider_secret;
+
+    expect(decodeRemnashopEndpointResponse("/subscription/gifts", "GET", { gifts: [gift] }))
+      .toEqual({ gifts: [projected] });
+    expect(() => decodeRemnashopEndpointResponse("/subscription/gifts", "GET", {
+      gifts: [{ ...gift, status: "REFUNDED" }],
+    })).toThrow("unknown status");
+    expect(() => decodeRemnashopEndpointResponse("/subscription/gifts", "GET", {
+      gifts: [{ ...gift, code: "" }],
+    })).toThrow();
+    expect(decodeRemnashopEndpointResponse("/subscription/gift/purchase", "POST", {
+      payment_id: "p-1",
+      payment_url: "https://pay.example/checkout",
+      purchase_type: "GIFT",
+      status: "PENDING",
+      is_free: false,
+      final_amount: "300",
+      currency: "₽",
+    })).toMatchObject({ purchase_type: "GIFT", payment_url: "https://pay.example/checkout" });
+  });
 });

@@ -157,7 +157,7 @@ describe("devcontainer e2e runner readiness", () => {
   it("keeps the default E2E source hermetic and accepts newer compatible schemas", () => {
     expect(runner).toContain('process.env.REMNASHOP_DISCOVER_HOST_SOURCE === "1"');
     expect(runner).toContain('"REMNASHOP_MINIMUM_ALEMBIC_REVISION"');
-    expect(shellRunner).toContain('REMNASHOP_MINIMUM_ALEMBIC_REVISION:-0061');
+    expect(shellRunner).toContain('REMNASHOP_MINIMUM_ALEMBIC_REVISION:-0062');
     expect(shellRunner).toContain('10#$current_revision >= 10#$minimum_revision');
     expect(shellRunner).not.toContain('current_revision <> \'0059\'');
   });
