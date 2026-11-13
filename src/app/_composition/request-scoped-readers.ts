@@ -44,6 +44,10 @@ export const requestSubscriptionCatalog = {
 export const requestGiftReader = {
   loadGifts: () => subscriptions.loadGifts(),
 };
+export const requestChangeQuoteReader = {
+  loadChangeQuote: (planCode: string, durationDays: number) =>
+    subscriptions.loadChangeQuote(planCode, durationDays),
+};
 const requestSubscriptions = {
   ...subscriptions,
   loadOffers: loadRequestSubscriptionOffers,

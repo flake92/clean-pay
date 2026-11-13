@@ -21,6 +21,7 @@ function commands(activation: Awaited<ReturnType<CabinetCommands["activatePromoc
     deleteAllDevices: vi.fn(async () => undefined),
     reissueSubscription: vi.fn(async () => undefined),
     activatePromocode: vi.fn(async () => activation),
+    previewPromocode: vi.fn(async () => null),
     logout: vi.fn(async () => undefined),
   };
 }

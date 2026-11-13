@@ -10,6 +10,8 @@ import { LinkButton } from "@/frontend/components/prime/link-button";
 import { usePaymentConfirmationController } from "@/frontend/hooks/use-payment-confirmation-controller";
 import { passkeySetupPath } from "@/shared/auth/account-setup-flow";
 import type { CheckoutViewModel } from "@/application/models/checkout";
+import { OutcomeSummaryBlock } from "@/frontend/components/outcome-summary";
+import { changeQuoteSummary, type ChangeQuote } from "@/shared/domain/plan-change";
 import {
   paymentDeviceLimitLabel,
   paymentDurationLabel,
@@ -31,6 +33,7 @@ export function PaymentConfirmation({
   durationDays = null,
   gatewayType = null,
   gift = false,
+  changeQuote = null,
   model = defaultCheckoutModel,
   paymentRedirectTo = "/payment",
   planCode = null,
@@ -39,11 +42,14 @@ export function PaymentConfirmation({
   durationDays?: string | null;
   gatewayType?: string | null;
   gift?: boolean;
+  /** What a plan change does to the current subscription (null: not a change or unknown). */
+  changeQuote?: ChangeQuote | null;
   model?: CheckoutViewModel;
   paymentRedirectTo?: string;
   planCode?: string | null;
   showAccountSetupNotice?: boolean;
 }) {
+  const changeSummary = !gift && changeQuote ? changeQuoteSummary(changeQuote) : null;
   const {
     createPayment,
     selection,
@@ -160,6 +166,7 @@ export function PaymentConfirmation({
           </div>
         </div>
       </Card>
+      {changeSummary ? <OutcomeSummaryBlock summary={changeSummary} /> : null}
       {gift ? (
         <Message
           severity="info"

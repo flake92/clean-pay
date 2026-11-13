@@ -6,10 +6,12 @@ import { releaseDevicePush } from "@/frontend/lib/push-logout";
 import {
   activatePromocodeAction,
   deleteAllDevicesAction,
+  previewPromocodeAction,
   deleteDeviceAction,
   reissueSubscriptionAction,
 } from "@/app/actions/cabinet";
 import type { PaymentHistorySnapshotStatus } from "@/application/models/cabinet";
+import type { GiftOutcome } from "@/shared/domain/plan-change";
 import type { CurrentSubscription } from "@/frontend/components/cabinet-presentation";
 import {
   beginCabinetPendingAction,
@@ -48,6 +50,8 @@ export function useCabinetPanelController({
   const pendingActionRef = useRef<string | null>(null);
   const paymentHistoryRefreshAttempts = useRef(0);
   const [promocode, setPromocode] = useState("");
+  // A gift code waiting for the recipient's confirmation of what it will do.
+  const [pendingGift, setPendingGift] = useState<{ code: string; outcome: GiftOutcome } | null>(null);
 
   useEffect(() => {
     if (paymentHistoryStatus !== "refreshing") {
@@ -222,19 +226,52 @@ export function useCabinetPanelController({
       return;
     }
     setPromocodeMessage(null);
+    setPendingGift(null);
 
     try {
-      const result = await activatePromocodeAction(code);
-      setPromocodeMessage(result.message);
-      if (shouldRefreshCabinetAfterAction(result.status)) {
-        setPromocode("");
-        router.refresh();
+      const preview = await previewPromocodeAction(code);
+      if (preview.status === "gift") {
+        setPendingGift({ code: preview.code, outcome: preview.outcome });
+        return;
       }
+      if (preview.status === "error") {
+        setPromocodeMessage(preview.message);
+        return;
+      }
+      await redeemPromocode(code);
     } catch {
       setPromocodeMessage("Сеть недоступна. Не удалось активировать промокод.");
     } finally {
       finishPendingAction(action);
     }
+  }
+
+  async function redeemPromocode(code: string) {
+    const result = await activatePromocodeAction(code);
+    setPromocodeMessage(result.message);
+    if (shouldRefreshCabinetAfterAction(result.status)) {
+      setPromocode("");
+      router.refresh();
+    }
+  }
+
+  async function confirmGift() {
+    if (!pendingGift || pendingActionRef.current) return;
+    const action = "promocode";
+    if (!beginPendingAction(action)) return;
+    const { code } = pendingGift;
+    setPendingGift(null);
+    try {
+      await redeemPromocode(code);
+    } catch {
+      setPromocodeMessage("Сеть недоступна. Не удалось активировать промокод.");
+    } finally {
+      finishPendingAction(action);
+    }
+  }
+
+  function cancelGift() {
+    setPendingGift(null);
   }
 
   async function logout() {
@@ -246,12 +283,15 @@ export function useCabinetPanelController({
   return {
     actionMessage,
     activatePromocode,
+    cancelGift,
+    confirmGift,
     copyStatus,
     copySubscriptionUrl,
     deleteAllDevices,
     deleteDevice,
     logout,
     pendingAction,
+    pendingGift,
     promocode,
     promocodeMessage,
     reissueSubscription,

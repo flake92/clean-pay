@@ -96,6 +96,22 @@ describe("cabinet command adapter", () => {
       .resolves.toEqual({ isGift: false });
   });
 
+  it("previews a code without redeeming it and falls back when it cannot", async () => {
+    const preview = { reward_type: "SUBSCRIPTION", is_gift: true, gift: null };
+    mocks.remnashopRequest.mockResolvedValueOnce(preview);
+    await expect(productionCabinetCommands.previewPromocode("GIFT-A")).resolves.toEqual(preview);
+    expect(mocks.remnashopRequest).toHaveBeenLastCalledWith("/subscription/promocode/preview", {
+      method: "POST", accessToken: "access-token", body: { code: "GIFT-A" },
+    });
+    expect(mocks.auditedMutation).not.toHaveBeenCalled();
+    expect(mocks.assertTargetRateLimit).toHaveBeenCalledWith({
+      action: "promocode_preview", sessionId: "user:user-1", limit: 20, windowSeconds: 900,
+    });
+
+    mocks.remnashopRequest.mockRejectedValueOnce(new ServiceError("PROMOCODE_NOT_FOUND", 404, "Not Found"));
+    await expect(productionCabinetCommands.previewPromocode("NOPE")).resolves.toBeNull();
+  });
+
   it("rejects promocode enumeration before calling the provider", async () => {
     mocks.assertTargetRateLimit.mockRejectedValueOnce(
       new ServiceError("RATE_LIMITED", 429, "Too many attempts. Try again later."),

@@ -6,12 +6,14 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const actionMocks = vi.hoisted(() => ({
   activatePromocodeAction: vi.fn(),
+  previewPromocodeAction: vi.fn(),
   refresh: vi.fn(),
 }));
 
 vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh: actionMocks.refresh }) }));
 vi.mock("@/app/actions/cabinet", () => ({
   activatePromocodeAction: actionMocks.activatePromocodeAction,
+  previewPromocodeAction: actionMocks.previewPromocodeAction,
   deleteAllDevicesAction: vi.fn(),
   deleteDeviceAction: vi.fn(),
   logoutAction: vi.fn(),
@@ -120,6 +122,10 @@ describe("cabinet promocode activation", () => {
       status: "success",
       message: "Промокод активирован. Данные кабинета обновлены.",
     });
+    actionMocks.previewPromocodeAction.mockImplementation(async (code: string) => ({
+      status: "activate",
+      code,
+    }));
     container = document.createElement("div");
     document.body.append(container);
     root = createRoot(container);
@@ -194,6 +200,67 @@ describe("cabinet promocode activation", () => {
     );
 
     expect(actionMocks.refresh).toHaveBeenCalledOnce();
+  });
+
+  it("shows what a gift code does and redeems it only after confirmation", async () => {
+    actionMocks.previewPromocodeAction.mockResolvedValueOnce({
+      status: "gift",
+      code: "GIFT-AAAA-BBBB-CCCC",
+      outcome: {
+        kind: "CONVERT",
+        plan_name: "Семья",
+        gift_days: 30,
+        expire_at: "2027-01-22T12:00:00Z",
+        current_plan_name: "Соло",
+        remaining_days: 20,
+        credit_days: 40,
+      },
+    });
+    actionMocks.activatePromocodeAction.mockResolvedValueOnce({
+      status: "success",
+      message: "Подарок активирован. Подписка обновлена.",
+    });
+    const input = container.querySelector<HTMLInputElement>("#promocode")!;
+
+    await setInputValue(input, "GIFT-AAAA-BBBB-CCCC");
+    await submit(input.closest("form")!);
+    await settle();
+
+    expect(actionMocks.activatePromocodeAction).not.toHaveBeenCalled();
+    expect(container.textContent).toContain("с «Соло» на «Семья» с перерасчётом");
+    expect(container.textContent).toContain("Перерасчёт: +40 дн. по стоимости тарифа подарка");
+
+    const confirm = Array.from(container.querySelectorAll("button"))
+      .find((button) => button.textContent === "Активировать подарок")!;
+    await act(async () => confirm.click());
+    await settle();
+
+    expect(actionMocks.activatePromocodeAction).toHaveBeenCalledWith("GIFT-AAAA-BBBB-CCCC");
+    expect(container.textContent).toContain("Подарок активирован. Подписка обновлена.");
+    expect(container.textContent).not.toContain("Активировать подарок");
+  });
+
+  it("cancels a gift confirmation without redeeming the code", async () => {
+    actionMocks.previewPromocodeAction.mockResolvedValueOnce({
+      status: "gift",
+      code: "GIFT-AAAA-BBBB-CCCC",
+      outcome: {
+        kind: "NEW", plan_name: "Семья", gift_days: 30, expire_at: null,
+        current_plan_name: null, remaining_days: 0, credit_days: 0,
+      },
+    });
+    const input = container.querySelector<HTMLInputElement>("#promocode")!;
+    await setInputValue(input, "GIFT-AAAA-BBBB-CCCC");
+    await submit(input.closest("form")!);
+    await settle();
+
+    const cancel = Array.from(container.querySelectorAll("button"))
+      .find((button) => button.textContent === "Отмена")!;
+    await act(async () => cancel.click());
+    await settle();
+
+    expect(actionMocks.activatePromocodeAction).not.toHaveBeenCalled();
+    expect(container.textContent).not.toContain("Активировать подарок");
   });
 
   it("refreshes a pending payment snapshot with a finite polling budget", async () => {

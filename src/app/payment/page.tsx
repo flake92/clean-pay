@@ -3,8 +3,10 @@ import { Card } from "primereact/card";
 import { loadCheckout } from "@/application/payments/checkout";
 import {
   requestAuthProfileGateway,
+  requestChangeQuoteReader,
   requestCheckoutReader,
 } from "@/app/_composition/request-scoped-readers";
+import { loadChangeQuote } from "@/application/payments/load-change-quote";
 import { AppShell } from "@/app/_components/app-shell";
 import { PageHeader } from "@/frontend/components/page-header";
 import { PaymentConfirmation } from "@/frontend/components/payment-confirmation";
@@ -30,6 +32,9 @@ export default async function PaymentPage({ searchParams }: { searchParams: Prom
   if (gift) paymentParams.set("gift", "1");
   const paymentRedirectTo = `/payment${paymentParams.size ? `?${paymentParams}` : ""}`;
   const model = await loadCheckout(requestCheckoutReader, requestAuthProfileGateway);
+  const changeQuote = gift || model.status !== "ready" || !model.offers.has_current_subscription
+    ? null
+    : await loadChangeQuote(requestChangeQuoteReader, planCode, durationDays);
   if (model.status === "account-action-required" && model.action === "login") {
     redirect(sessionRefreshPath(paymentRedirectTo));
   }
@@ -49,6 +54,7 @@ export default async function PaymentPage({ searchParams }: { searchParams: Prom
           <PaymentConfirmation
             durationDays={durationDays}
             gatewayType={gatewayType}
+            changeQuote={changeQuote}
             gift={gift}
             model={model}
             paymentRedirectTo={paymentRedirectTo}

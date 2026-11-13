@@ -8,6 +8,7 @@ import type {
   SubscriptionOffersResponse,
 } from "@/backend/integrations/remnashop/contracts";
 import type { GiftsResponse } from "@/shared/domain/gifts";
+import type { ChangeQuote } from "@/shared/domain/plan-change";
 
 type Authorized = Awaited<ReturnType<typeof getAuthorizedRemnashopTokens>>;
 type SubscriptionAuthorizer = () => Promise<Authorized>;
@@ -52,6 +53,16 @@ async function loadBoughtGifts(authorize: SubscriptionAuthorizer) {
   return remnashopValidatedRequest<GiftsResponse>("/subscription/gifts", { accessToken });
 }
 
+async function loadPlanChangeQuote(
+  authorize: SubscriptionAuthorizer,
+  planCode: string,
+  durationDays: number,
+) {
+  const { accessToken } = await authorize();
+  const params = new URLSearchParams({ plan_code: planCode, duration_days: String(durationDays) });
+  return remnashopValidatedRequest<ChangeQuote>(`/subscription/change-quote?${params}`, { accessToken });
+}
+
 export function createRemnashopSubscriptionReader(
   authorize: SubscriptionAuthorizer,
 ) {
@@ -60,5 +71,7 @@ export function createRemnashopSubscriptionReader(
     loadDevices: () => loadSubscriptionDevices(authorize),
     loadOffers: () => loadSubscriptionOffers(authorize),
     loadGifts: () => loadBoughtGifts(authorize),
+    loadChangeQuote: (planCode: string, durationDays: number) =>
+      loadPlanChangeQuote(authorize, planCode, durationDays),
   };
 }
