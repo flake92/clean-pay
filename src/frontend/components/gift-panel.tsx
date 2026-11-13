@@ -13,7 +13,7 @@ import {
 } from "@/frontend/components/payment-confirmation-presentation";
 import { TariffsPanel } from "@/frontend/components/tariffs-panel";
 import type { GiftsViewModel } from "@/application/models/gifts";
-import type { Gift, GiftStatus } from "@/shared/domain/gifts";
+import type { Gift, GiftStatus, ReceivedGift } from "@/shared/domain/gifts";
 
 const statusLabel: Record<GiftStatus, { text: string; severity: "success" | "info" | "warning" }> = {
   AVAILABLE: { text: "Ждёт активации", severity: "success" },
@@ -78,6 +78,7 @@ function GiftCodeCard({ gift }: { gift: Gift }) {
           {gift.status === "ACTIVATED" && activated ? `Активирован ${activated}.` : null}
           {gift.status === "AVAILABLE" && expires ? `Действует до ${expires}.` : null}
           {gift.status === "EXPIRED" && expires ? `Срок активации истёк ${expires}.` : null}
+          {gift.anonymous ? " Анонимный подарок." : null}
         </p>
         {gift.status === "AVAILABLE" ? (
           <div className="flex flex-wrap gap-2">
@@ -105,7 +106,71 @@ function GiftCodeCard({ gift }: { gift: Gift }) {
   );
 }
 
+function ReceivedGiftCard({ gift }: { gift: ReceivedGift }) {
+  const activated = formatDate(gift.activated_at);
+  return (
+    <Card className="shadow-1">
+      <div className="flex flex-column gap-2">
+        <div className="flex flex-wrap align-items-center justify-content-between gap-2">
+          <h3 className="m-0 text-lg font-semibold break-words">{gift.plan_name}</h3>
+          <Tag icon="pi pi-gift" severity="info" value="Получен" />
+        </div>
+        <p className="m-0 text-sm text-600">
+          {paymentDurationLabel(gift.duration_days)} ·{" "}
+          {paymentDeviceLimitLabel(gift.device_limit)} устройств ·{" "}
+          {paymentTrafficLabel(gift.traffic_limit)}
+        </p>
+        <p className="m-0 text-900">
+          {gift.gifted_by ? <>От: <strong>{gift.gifted_by}</strong></> : "От: анонимный даритель"}
+        </p>
+        <p className="m-0 text-sm text-600">
+          Код <code>{gift.code}</code>{activated ? ` активирован ${activated}.` : "."}
+        </p>
+      </div>
+    </Card>
+  );
+}
+
+function GiftPrivacyChoice({
+  anonymous,
+  onChange,
+}: {
+  anonymous: boolean;
+  onChange: (anonymous: boolean) => void;
+}) {
+  const options = [
+    { value: false, icon: "pi pi-user", title: "От моего имени", text: "Получатель увидит ваше имя." },
+    { value: true, icon: "pi pi-eye-slash", title: "Анонимно", text: "Получатель не узнает, от кого подарок." },
+  ];
+  return (
+    <fieldset aria-label="Кто подарил" className="border-none p-0 m-0 flex flex-column gap-2">
+      <legend className="text-lg font-semibold mb-2">Должен ли получатель видеть, от кого подарок?</legend>
+      <div className="flex flex-wrap gap-3">
+        {options.map((option) => (
+          <label
+            className={`flex align-items-start gap-2 border-1 border-round-lg p-3 cursor-pointer ${anonymous === option.value ? "border-primary surface-100" : "border-200"}`}
+            key={String(option.value)}
+          >
+            <input
+              checked={anonymous === option.value}
+              className="mt-1"
+              name="gift-privacy"
+              onChange={() => onChange(option.value)}
+              type="radio"
+            />
+            <span className="flex flex-column gap-1">
+              <span className="font-semibold"><i className={`${option.icon} mr-2`} />{option.title}</span>
+              <span className="text-sm text-600">{option.text}</span>
+            </span>
+          </label>
+        ))}
+      </div>
+    </fieldset>
+  );
+}
+
 export function GiftPanel({ model }: { model: GiftsViewModel }) {
+  const [anonymous, setAnonymous] = useState(false);
   if (model.status === "error") {
     if (model.action) {
       return (
@@ -121,7 +186,12 @@ export function GiftPanel({ model }: { model: GiftsViewModel }) {
         severity="info"
         text="Код действует 1 год и активируется один раз. Если у получателя уже есть подписка, подарок продлит её на свой срок, а тариф станет тарифом подарка. Подарок оплачивается по полной цене: личные скидки на него не действуют."
       />
-      <TariffsPanel mode="gift" model={{ status: "ready", offers: model.offers }} />
+      <GiftPrivacyChoice anonymous={anonymous} onChange={setAnonymous} />
+      <TariffsPanel
+        giftAnonymous={anonymous}
+        mode="gift"
+        model={{ status: "ready", offers: model.offers }}
+      />
       <section aria-labelledby="bought-gifts" className="flex flex-column gap-3">
         <h2 className="m-0 text-xl font-semibold" id="bought-gifts">Купленные подарки</h2>
         {model.giftsError ? <Message severity="warn" text={model.giftsError} /> : null}
@@ -137,7 +207,22 @@ export function GiftPanel({ model }: { model: GiftsViewModel }) {
             </div>
           ))}
         </div>
+        <p className="m-0 text-sm text-600">
+          Вы видите, активирован ли код, но не кем: это знает только получатель.
+        </p>
       </section>
+      {model.received.length > 0 ? (
+        <section aria-labelledby="received-gifts" className="flex flex-column gap-3">
+          <h2 className="m-0 text-xl font-semibold" id="received-gifts">Полученные подарки</h2>
+          <div className="grid">
+            {model.received.map((gift) => (
+              <div className="col-12 xl:col-6" key={gift.code}>
+                <ReceivedGiftCard gift={gift} />
+              </div>
+            ))}
+          </div>
+        </section>
+      ) : null}
     </div>
   );
 }

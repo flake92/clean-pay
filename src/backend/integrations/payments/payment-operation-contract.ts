@@ -23,6 +23,7 @@ export type PaymentOperationRequest =
         | "confirmed_amount"
         | "confirmed_currency"
         | "offer_version"
+        | "anonymous"
       >;
     }
   | {
@@ -164,6 +165,7 @@ function normalizeOperation(
 
   if (operation.kind === "PURCHASE" || operation.kind === "GIFT") {
     const gift = operation.kind === "GIFT";
+    const anonymous = gift && operation.payload.anonymous === true;
     const payload: Prisma.InputJsonObject = {
       plan_code: normalizedString(operation.payload.plan_code, "plan_code", 200),
       duration_days: durationDays,
@@ -172,6 +174,7 @@ function normalizeOperation(
       confirmed_currency: confirmedCurrency,
       offer_version: offerVersion,
       ...(gift ? { gift: true } : {}),
+      ...(anonymous ? { anonymous: true } : {}),
     };
     // A gift is stored and reconciled as a PURCHASE operation (Remnashop
     // registers it under the same operation name), so no database enum value is
@@ -190,6 +193,8 @@ function normalizeOperation(
         payload.confirmed_amount,
         payload.confirmed_currency,
         payload.offer_version,
+        // Appended only when set, so named gifts keep their earlier fingerprint.
+        ...(anonymous ? ["ANONYMOUS"] : []),
       ])),
     };
   }

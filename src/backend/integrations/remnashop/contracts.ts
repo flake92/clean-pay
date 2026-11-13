@@ -187,6 +187,9 @@ export type ReissueResponse = {
 export type PromocodeActivateResponse = {
   success: boolean;
   reward_type: string;
+  /** Remnashop 0063+: a paid gift code and its buyer's display name. */
+  is_gift?: boolean;
+  gifted_by?: string | null;
 };
 
 export type ReferralProgramResponse = {

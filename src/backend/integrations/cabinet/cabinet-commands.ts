@@ -29,7 +29,7 @@ export function createProductionCabinetCommands(
     action: string,
     mutate: (accessToken: string) => Promise<T>,
     limit?: { limit: number; windowSeconds: number },
-  ) {
+  ): Promise<T> {
     try {
       const { accessToken, session } = await authorize();
       if (limit) {
@@ -39,7 +39,7 @@ export function createProductionCabinetCommands(
           ...limit,
         });
       }
-      await auditedMutation({ action, userId: session.userId, mutate: () => mutate(accessToken) });
+      return await auditedMutation({ action, userId: session.userId, mutate: () => mutate(accessToken) });
     } catch (error) {
       if (error instanceof ServiceError) {
         throw new CabinetCommandError(error.prodMessage);
@@ -59,15 +59,22 @@ export function createProductionCabinetCommands(
         method: "DELETE", accessToken,
       }));
   },
-  deleteAllDevices: () => authorizedMutation("devices_delete_all", (accessToken) =>
-    remnashopValidatedRequest<DevicesDeleteAllResponse>("/subscription/devices", { method: "DELETE", accessToken })),
-  reissueSubscription: () => authorizedMutation("subscription_reissue", (accessToken) =>
-    remnashopValidatedRequest<ReissueResponse>("/subscription/reissue", { method: "POST", accessToken })),
+  async deleteAllDevices() {
+    await authorizedMutation("devices_delete_all", (accessToken) =>
+      remnashopValidatedRequest<DevicesDeleteAllResponse>("/subscription/devices", { method: "DELETE", accessToken }));
+  },
+  async reissueSubscription() {
+    await authorizedMutation("subscription_reissue", (accessToken) =>
+      remnashopValidatedRequest<ReissueResponse>("/subscription/reissue", { method: "POST", accessToken }));
+  },
   // Bounded per user so promo codes cannot be enumerated from one account.
-  activatePromocode: (code) => authorizedMutation("promocode_activation", (accessToken) =>
-    remnashopValidatedRequest<PromocodeActivateResponse>("/subscription/promocode", {
-      method: "POST", accessToken, body: { code },
-    }), { limit: 10, windowSeconds: 15 * 60 }),
+  async activatePromocode(code) {
+    const response = await authorizedMutation("promocode_activation", (accessToken) =>
+      remnashopValidatedRequest<PromocodeActivateResponse>("/subscription/promocode", {
+        method: "POST", accessToken, body: { code },
+      }), { limit: 10, windowSeconds: 15 * 60 });
+    return { isGift: response.is_gift === true, giftedBy: response.gifted_by ?? null };
+  },
   async logout() {
     const userId = await getWebSessionUserIdFromAccessCookie();
     await auditLog({ action: "auth_logout", userId });

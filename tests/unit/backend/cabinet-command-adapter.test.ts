@@ -84,6 +84,18 @@ describe("cabinet command adapter", () => {
     });
   });
 
+  it("reports who gave a redeemed gift code", async () => {
+    mocks.remnashopRequest.mockResolvedValueOnce({
+      success: true, reward_type: "SUBSCRIPTION", is_gift: true, gifted_by: "Alice (@alice)",
+    });
+    await expect(productionCabinetCommands.activatePromocode("GIFT-AAAA-BBBB-CCCC"))
+      .resolves.toEqual({ isGift: true, giftedBy: "Alice (@alice)" });
+
+    mocks.remnashopRequest.mockResolvedValueOnce({ success: true, reward_type: "DURATION" });
+    await expect(productionCabinetCommands.activatePromocode("SPRING"))
+      .resolves.toEqual({ isGift: false, giftedBy: null });
+  });
+
   it("rejects promocode enumeration before calling the provider", async () => {
     mocks.assertTargetRateLimit.mockRejectedValueOnce(
       new ServiceError("RATE_LIMITED", 429, "Too many attempts. Try again later."),

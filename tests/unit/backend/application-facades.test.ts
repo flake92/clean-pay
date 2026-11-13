@@ -103,7 +103,7 @@ function cabinetCommands(overrides: Partial<CabinetCommands> = {}): CabinetComma
     deleteDevice: vi.fn(async () => undefined),
     deleteAllDevices: vi.fn(async () => undefined),
     reissueSubscription: vi.fn(async () => undefined),
-    activatePromocode: vi.fn(async () => undefined),
+    activatePromocode: vi.fn(async () => ({ isGift: false, giftedBy: null })),
     logout: vi.fn(async () => undefined),
     ...overrides,
   };

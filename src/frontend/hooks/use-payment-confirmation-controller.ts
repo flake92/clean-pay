@@ -20,6 +20,7 @@ export function usePaymentConfirmationController({
   durationDays,
   gatewayType,
   gift = false,
+  giftAnonymous = false,
   model,
   pendingOperationDestination,
   pendingPaymentDestination,
@@ -29,6 +30,7 @@ export function usePaymentConfirmationController({
   durationDays: string | null;
   gatewayType: string | null;
   gift?: boolean;
+  giftAnonymous?: boolean;
   model: CheckoutViewModel;
   pendingOperationDestination: (operationId: string) => string;
   pendingPaymentDestination: (paymentId: string) => string;
@@ -80,6 +82,8 @@ export function usePaymentConfirmationController({
         selection.duration.days,
         selection.price,
       ),
+      // A named and an anonymous gift are different payments (and keys).
+      ...(gift && giftAnonymous ? { anonymous: true } : {}),
     };
 
     let idempotencyKey: string;

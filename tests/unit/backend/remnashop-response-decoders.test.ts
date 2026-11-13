@@ -304,11 +304,47 @@ describe("Remnashop response decoders", () => {
       activated_at: null,
       provider_secret: "must-not-project",
     };
-    const projected: Record<string, unknown> = { ...gift };
+    const projected: Record<string, unknown> = { ...gift, anonymous: false };
     delete projected.provider_secret;
 
+    // Remnashop before 0063: no "received" list and no "anonymous" flag.
     expect(decodeRemnashopEndpointResponse("/subscription/gifts", "GET", { gifts: [gift] }))
-      .toEqual({ gifts: [projected] });
+      .toEqual({ gifts: [projected], received: [] });
+    expect(decodeRemnashopEndpointResponse("/subscription/gifts", "GET", {
+      gifts: [{ ...gift, anonymous: true }],
+      received: [{
+        code: "GIFT-RECV-RECV-RECV",
+        plan_name: "Basic",
+        duration_days: 30,
+        traffic_limit: 0,
+        device_limit: 3,
+        activated_at: "2026-11-13T10:00:00Z",
+        gifted_by: "Alice (@alice)",
+        anonymous: false,
+        buyer_id: 7,
+      }],
+    })).toEqual({
+      gifts: [{ ...projected, anonymous: true }],
+      received: [{
+        code: "GIFT-RECV-RECV-RECV",
+        plan_name: "Basic",
+        duration_days: 30,
+        traffic_limit: 0,
+        device_limit: 3,
+        activated_at: "2026-11-13T10:00:00Z",
+        gifted_by: "Alice (@alice)",
+        anonymous: false,
+      }],
+    });
+    expect(() => decodeRemnashopEndpointResponse("/subscription/gifts", "GET", {
+      gifts: [], received: [{ code: "GIFT-X", plan_name: "B", duration_days: 1, traffic_limit: 0, device_limit: 1, anonymous: "yes" }],
+    })).toThrow("anonymous must be a boolean");
+    expect(decodeRemnashopEndpointResponse("/subscription/promocode", "POST", {
+      success: true, reward_type: "SUBSCRIPTION", is_gift: true, gifted_by: null,
+    })).toEqual({ success: true, reward_type: "SUBSCRIPTION", is_gift: true, gifted_by: null });
+    expect(decodeRemnashopEndpointResponse("/subscription/promocode", "POST", {
+      success: true, reward_type: "DURATION",
+    })).toEqual({ success: true, reward_type: "DURATION" });
     expect(() => decodeRemnashopEndpointResponse("/subscription/gifts", "GET", {
       gifts: [{ ...gift, status: "REFUNDED" }],
     })).toThrow("unknown status");

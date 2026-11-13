@@ -1,4 +1,4 @@
-import { isGiftStatus, type Gift, type GiftsResponse } from "@/shared/domain/gifts";
+import { isGiftStatus, type Gift, type GiftsResponse, type ReceivedGift } from "@/shared/domain/gifts";
 
 function record(value: unknown, label: string): Record<string, unknown> {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
@@ -359,12 +359,32 @@ function decodeGift(value: unknown): Gift {
     created_at: optionalNullableStringField(input, "created_at") ?? null,
     expires_at: optionalNullableStringField(input, "expires_at") ?? null,
     activated_at: optionalNullableStringField(input, "activated_at") ?? null,
+    anonymous: optionalBooleanField(input, "anonymous") ?? false,
+  };
+}
+
+function decodeReceivedGift(value: unknown): ReceivedGift {
+  const input = record(value, "Remnashop received gift");
+  return {
+    code: nonemptyStringField(input, "code"),
+    plan_name: stringField(input, "plan_name"),
+    duration_days: numberField(input, "duration_days"),
+    traffic_limit: numberField(input, "traffic_limit"),
+    device_limit: numberField(input, "device_limit"),
+    activated_at: optionalNullableStringField(input, "activated_at") ?? null,
+    gifted_by: optionalNullableStringField(input, "gifted_by") ?? null,
+    anonymous: optionalBooleanField(input, "anonymous") ?? false,
   };
 }
 
 function decodeGifts(value: unknown): GiftsResponse {
   const input = record(value, "Remnashop gifts response");
-  return { gifts: arrayField(input, "gifts").map(decodeGift) };
+  // Remnashop before 0063 has no "received" list.
+  const received = input.received === undefined ? [] : arrayField(input, "received");
+  return {
+    gifts: arrayField(input, "gifts").map(decodeGift),
+    received: received.map(decodeReceivedGift),
+  };
 }
 
 function decodeReferralProgram(value: unknown) {
@@ -491,9 +511,13 @@ export function decodeRemnashopEndpointResponse(
   if (normalizedPath === "/subscription/reissue") return simpleBooleanResponse(value, "success");
   if (normalizedPath === "/subscription/promocode") {
     const input = record(value, "Remnashop promocode response");
+    const isGift = optionalBooleanField(input, "is_gift");
+    const giftedBy = optionalNullableStringField(input, "gifted_by");
     return {
       success: booleanField(input, "success"),
       reward_type: stringField(input, "reward_type"),
+      ...(isGift !== undefined ? { is_gift: isGift } : {}),
+      ...(giftedBy !== undefined ? { gifted_by: giftedBy } : {}),
     };
   }
   if (
