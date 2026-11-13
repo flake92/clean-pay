@@ -1010,7 +1010,7 @@ jobs:
     env:
       CLEAN_PAY_DEVCONTAINER_PROJECT: clean-pay-e2e-${{ github.run_id }}-${{ github.run_attempt }}
       REMNASHOP_HOST_SOURCE: ${{ github.workspace }}/.e2e-remnashop
-      REMNASHOP_BUILD_REVISION: ad3afa2b99dbb5471e708753acb890fe6f30b93b
+      REMNASHOP_BUILD_REVISION: 15107d3d09868eb80054a0fff4922418849e4efd
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
@@ -1019,7 +1019,7 @@ jobs:
         uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
           repository: flake92/remnashop
-          ref: ad3afa2b99dbb5471e708753acb890fe6f30b93b
+          ref: 15107d3d09868eb80054a0fff4922418849e4efd
           path: .e2e-remnashop
           fetch-depth: 1
           persist-credentials: false
