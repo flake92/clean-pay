@@ -104,6 +104,17 @@ describe("production read adapters", () => {
     expect(mocks.remnashopRequest).toHaveBeenCalledWith("/subscription/gifts", { accessToken: "access-token" });
   });
 
+  it("loads the plan-change quote for one plan and duration", async () => {
+    const quote = { mode: "CREDIT", left_days: 5, credit_days: 7, expire_at: null };
+    mocks.remnashopRequest.mockResolvedValueOnce(quote);
+
+    await expect(remnashopSubscriptionReader.loadChangeQuote("pro family", 30)).resolves.toBe(quote);
+    expect(mocks.remnashopRequest).toHaveBeenCalledWith(
+      "/subscription/change-quote?plan_code=pro+family&duration_days=30",
+      { accessToken: "access-token" },
+    );
+  });
+
   it("normalizes subscription catalog access failures", async () => {
     mocks.remnashopRequest.mockResolvedValueOnce(offers);
     await expect(remnashopSubscriptionCatalog.loadOffers()).resolves.toBe(offers);
