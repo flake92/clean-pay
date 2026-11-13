@@ -56,13 +56,14 @@ const gift: Gift = {
   created_at: null,
   expires_at: null,
   activated_at: null,
+  anonymous: false,
 };
 
 describe("gift page", () => {
   it("offers paid plans at the list price and lists bought codes", async () => {
     const model = await loadGiftsViewModel(
       { loadOffers: vi.fn(async () => offers) },
-      { loadGifts: vi.fn(async () => ({ gifts: [gift] })) },
+      { loadGifts: vi.fn(async () => ({ gifts: [gift], received: [] })) },
     );
 
     expect(model.status).toBe("ready");

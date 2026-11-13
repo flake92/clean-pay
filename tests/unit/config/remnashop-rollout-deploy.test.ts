@@ -51,8 +51,8 @@ describe("Remnashop payment rollout deployment", () => {
     expect(rollout).toContain("для проверки прав на файл настроек нужен node или python3");
     expect(rollout.indexOf("run_remnashop_env_preflight"))
       .toBeLessThan(rollout.indexOf("command -v docker"));
-    expect(rollout).toContain("repository_minimum_revision=0062");
-    expect(rollout.indexOf("repository_minimum_revision=0062"))
+    expect(rollout).toContain("repository_minimum_revision=0063");
+    expect(rollout.indexOf("repository_minimum_revision=0063"))
       .toBeLessThan(rollout.indexOf("run_remnashop_env_preflight"));
     expect(rollout).toContain(
       'if [ "$minimum_revision" -lt "$repository_minimum_revision" ]; then\n  minimum_revision=$repository_minimum_revision',
@@ -75,7 +75,7 @@ describe("Remnashop payment rollout deployment", () => {
     expect(rollout).toContain("/api/v1/public/auth/notification-preferences");
     expect(rollout).toContain('"422 405 405 405") ;;');
     expect(rollout).toContain("/api/v1/public/auth/notifications/feed");
-    // 0062 adds gift subscriptions: GET-only, so the POST probe answers 405
+    // 0062 added gift subscriptions (0063: anonymous gifts): GET-only, so the POST probe answers 405
     expect(rollout).toContain("/api/v1/public/subscription/gifts");
     // a 401 next to the 405 is a key mismatch on the fork, not an upstream image
     expect(rollout).toContain('"401 405 405 405")');

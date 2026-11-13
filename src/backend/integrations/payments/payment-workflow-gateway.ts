@@ -140,6 +140,9 @@ export function createProductionPaymentWorkflowGateway(
           duration_days: operation.request.duration_days,
           gateway_type: operation.request.gateway_type,
           return_url: paymentReturnUrl(operationId),
+          ...(operation.kind === "GIFT" && operation.request.anonymous === true
+            ? { anonymous: true }
+            : {}),
         }
       : {
           duration_days: operation.request.duration_days,

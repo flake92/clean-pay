@@ -27,10 +27,12 @@ export async function loadGiftsViewModel(
   if (tariffs.status === "error") return tariffs;
 
   try {
+    const history = await gifts.loadGifts();
     return {
       status: "ready",
       offers: giftOffers(tariffs.offers),
-      gifts: (await gifts.loadGifts()).gifts,
+      gifts: history.gifts,
+      received: history.received,
       giftsError: null,
     };
   } catch {
@@ -39,6 +41,7 @@ export async function loadGiftsViewModel(
       status: "ready",
       offers: giftOffers(tariffs.offers),
       gifts: [],
+      received: [],
       giftsError: "Не удалось загрузить купленные подарки. Обновите страницу позже.",
     };
   }

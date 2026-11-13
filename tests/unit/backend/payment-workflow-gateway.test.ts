@@ -147,6 +147,30 @@ describe("productionPaymentWorkflowGateway", () => {
     expect(mocks.assertPaymentReturnUrl).toHaveBeenCalledWith(body.return_url, payment.return_url);
   });
 
+  it("asks Remnashop to hide the buyer only for an anonymous gift", async () => {
+    const payment = { payment_id: "payment-1", return_url: "https://pay.test/payment/op-1" };
+    mocks.remnashopRequest.mockResolvedValue({ raw: true });
+    mocks.parsePaymentInit.mockReturnValue(payment);
+    const request = {
+      plan_code: "pro", duration_days: 30, gateway_type: "CARD", confirmed_amount: "100",
+      confirmed_currency: "RUB", offer_version: "v1", anonymous: true,
+    };
+
+    await gateway.dispatch({
+      authorization, operationId: "op-1", upstreamKey: "upstream-key", operation: { kind: "GIFT", request },
+    });
+    await gateway.dispatch({
+      authorization, operationId: "op-1", upstreamKey: "upstream-key", operation: { kind: "PURCHASE", request },
+    });
+
+    const bodies = mocks.remnashopRequest.mock.calls.map(([, options]) => (options as { body: unknown }).body);
+    expect(bodies[0]).toEqual({
+      plan_code: "pro", duration_days: 30, gateway_type: "CARD",
+      return_url: "https://pay.test/payment/op-1", anonymous: true,
+    });
+    expect(bodies[1]).not.toHaveProperty("anonymous");
+  });
+
   it("completes and audits purchase and extension operations", async () => {
     const payment = {
       payment_id: "payment-1", payment_url: "https://provider.test/pay", purchase_type: "NEW",

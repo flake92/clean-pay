@@ -6,6 +6,8 @@ export type PurchaseRequest = {
   confirmed_currency: string;
   offer_version: string;
   return_url?: string;
+  /** Gift only: the recipient does not see who bought the gift. */
+  anonymous?: boolean;
 };
 
 export type ExtendRequest = {

@@ -46,7 +46,7 @@ env_value() {
   fi
 }
 
-repository_minimum_revision=0062
+repository_minimum_revision=0063
 minimum_revision=$(env_value REMNASHOP_MINIMUM_ALEMBIC_REVISION "$repository_minimum_revision")
 case "$minimum_revision:$repository_minimum_revision" in
   *[!0-9:]*|:*|*:) fail "версии схемы должны быть числами (в настройках $minimum_revision, в коде $repository_minimum_revision)" "исправьте REMNASHOP_MINIMUM_ALEMBIC_REVISION в $ENV_FILE." ;;
@@ -162,7 +162,7 @@ print(*statuses)
     "401 405 405 405")
       fail "Remnashop отклонил ключ Clean Pay (401): REMNASHOP_AUTH_SERVICE_KEY в $ENV_FILE не совпадает с APP_AUTH_SERVICE_KEY в $remnashop_env_file" "выполните ./menu.sh remnashop-link: команда выровняет ключи и перезапустит Remnashop." ;;
     *)
-      incompatible "API Remnashop устарел: ответы $contract_statuses вместо 422 405 405 405 (нужна схема 0062 с подарочными подписками)" ;;
+      incompatible "API Remnashop устарел: ответы $contract_statuses вместо 422 405 405 405 (нужна схема 0063 с подарочными подписками)" ;;
   esac
 }
 

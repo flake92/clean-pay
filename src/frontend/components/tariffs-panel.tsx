@@ -119,9 +119,11 @@ function priceChoiceList(
 export function TariffsPanel({
   model,
   mode = "subscription",
+  giftAnonymous = false,
 }: {
   model: TariffsViewModel;
   mode?: "subscription" | "gift";
+  giftAnonymous?: boolean;
 }) {
   const gift = mode === "gift";
   const { selection, selectPrice } = useTariffsPanelController();
@@ -259,7 +261,9 @@ export function TariffsPanel({
                   </div>
                   <LinkButton
                     className="w-fit"
-                    href={gift && paymentHref !== "#" ? `${paymentHref}&gift=1` : paymentHref}
+                    href={gift && paymentHref !== "#"
+                      ? `${paymentHref}&gift=1${giftAnonymous ? "&anonymous=1" : ""}`
+                      : paymentHref}
                     icon={gift ? "pi pi-gift" : "pi pi-arrow-right"}
                     label={gift ? "Подарить" : hasCurrentSubscription ? "Изменить тариф" : "Выбрать"}
                   />

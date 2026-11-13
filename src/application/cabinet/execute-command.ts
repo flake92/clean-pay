@@ -57,7 +57,15 @@ export async function activateCabinetPromocode(commands: CabinetCommands, code: 
   const validCode = printable(code, 256);
   if (!validCode) return { status: "error", message: "Введите корректный промокод." };
   try {
-    await commands.activatePromocode(validCode);
+    const activation = await commands.activatePromocode(validCode);
+    if (activation.isGift) {
+      return {
+        status: "success",
+        message: activation.giftedBy
+          ? `Подарок от ${activation.giftedBy} активирован. Подписка обновлена.`
+          : "Подарок активирован. Подписка обновлена.",
+      };
+    }
     return { status: "success", message: "Промокод активирован. Данные кабинета обновлены." };
   } catch (error) {
     return { status: "error", message: errorMessage(error, "Не удалось активировать промокод.") };
