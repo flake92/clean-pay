@@ -30,30 +30,15 @@ describe("gift payment operation identity", () => {
   });
 });
 
-describe("anonymous gift operation identity", () => {
-  it("keeps the named gift fingerprint and gives an anonymous gift its own", () => {
+describe("gift operation identity without a privacy choice", () => {
+  it("ignores a stale anonymous flag from an old browser tab", () => {
     const named = operationIdentity({ idempotencyKey, operation: { kind: "GIFT", payload } });
-    const explicitNamed = operationIdentity({
-      idempotencyKey, operation: { kind: "GIFT", payload: { ...payload, anonymous: false } },
-    });
-    const anonymous = operationIdentity({
-      idempotencyKey, operation: { kind: "GIFT", payload: { ...payload, anonymous: true } },
+    const stale = operationIdentity({
+      idempotencyKey,
+      operation: { kind: "GIFT", payload: { ...payload, anonymous: true } as typeof payload },
     });
 
-    expect(explicitNamed.fingerprint).toBe(named.fingerprint);
-    expect(explicitNamed.payload).not.toHaveProperty("anonymous");
-    expect(anonymous.fingerprint).not.toBe(named.fingerprint);
-    expect(anonymous.payload).toEqual({ ...payload, gift: true, anonymous: true });
-  });
-
-  it("never lets an ordinary purchase carry the anonymous flag", () => {
-    const purchase = operationIdentity({
-      idempotencyKey, operation: { kind: "PURCHASE", payload: { ...payload, anonymous: true } },
-    });
-
-    expect(purchase.payload).not.toHaveProperty("anonymous");
-    expect(purchase.fingerprint).toBe(
-      operationIdentity({ idempotencyKey, operation: { kind: "PURCHASE", payload } }).fingerprint,
-    );
+    expect(stale.fingerprint).toBe(named.fingerprint);
+    expect(stale.payload).toEqual({ ...payload, gift: true });
   });
 });

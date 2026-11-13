@@ -78,7 +78,6 @@ function GiftCodeCard({ gift }: { gift: Gift }) {
           {gift.status === "ACTIVATED" && activated ? `Активирован ${activated}.` : null}
           {gift.status === "AVAILABLE" && expires ? `Действует до ${expires}.` : null}
           {gift.status === "EXPIRED" && expires ? `Срок активации истёк ${expires}.` : null}
-          {gift.anonymous ? " Анонимный подарок." : null}
         </p>
         {gift.status === "AVAILABLE" ? (
           <div className="flex flex-wrap gap-2">
@@ -120,9 +119,6 @@ function ReceivedGiftCard({ gift }: { gift: ReceivedGift }) {
           {paymentDeviceLimitLabel(gift.device_limit)} устройств ·{" "}
           {paymentTrafficLabel(gift.traffic_limit)}
         </p>
-        <p className="m-0 text-900">
-          {gift.gifted_by ? <>От: <strong>{gift.gifted_by}</strong></> : "От: анонимный даритель"}
-        </p>
         <p className="m-0 text-sm text-600">
           Код <code>{gift.code}</code>{activated ? ` активирован ${activated}.` : "."}
         </p>
@@ -131,46 +127,7 @@ function ReceivedGiftCard({ gift }: { gift: ReceivedGift }) {
   );
 }
 
-function GiftPrivacyChoice({
-  anonymous,
-  onChange,
-}: {
-  anonymous: boolean;
-  onChange: (anonymous: boolean) => void;
-}) {
-  const options = [
-    { value: false, icon: "pi pi-user", title: "От моего имени", text: "Получатель увидит ваше имя." },
-    { value: true, icon: "pi pi-eye-slash", title: "Анонимно", text: "Получатель не узнает, от кого подарок." },
-  ];
-  return (
-    <fieldset aria-label="Кто подарил" className="border-none p-0 m-0 flex flex-column gap-2">
-      <legend className="text-lg font-semibold mb-2">Должен ли получатель видеть, от кого подарок?</legend>
-      <div className="flex flex-wrap gap-3">
-        {options.map((option) => (
-          <label
-            className={`flex align-items-start gap-2 border-1 border-round-lg p-3 cursor-pointer ${anonymous === option.value ? "border-primary surface-100" : "border-200"}`}
-            key={String(option.value)}
-          >
-            <input
-              checked={anonymous === option.value}
-              className="mt-1"
-              name="gift-privacy"
-              onChange={() => onChange(option.value)}
-              type="radio"
-            />
-            <span className="flex flex-column gap-1">
-              <span className="font-semibold"><i className={`${option.icon} mr-2`} />{option.title}</span>
-              <span className="text-sm text-600">{option.text}</span>
-            </span>
-          </label>
-        ))}
-      </div>
-    </fieldset>
-  );
-}
-
 export function GiftPanel({ model }: { model: GiftsViewModel }) {
-  const [anonymous, setAnonymous] = useState(false);
   if (model.status === "error") {
     if (model.action) {
       return (
@@ -184,14 +141,9 @@ export function GiftPanel({ model }: { model: GiftsViewModel }) {
     <div className="flex flex-column gap-6">
       <Message
         severity="info"
-        text="Код действует 1 год и активируется один раз. Если у получателя уже есть подписка, подарок продлит её на свой срок, а тариф станет тарифом подарка. Подарок оплачивается по полной цене: личные скидки на него не действуют."
+        text="Код действует 1 год и активируется один раз. Если у получателя уже есть подписка, подарок продлит её на свой срок, а тариф станет тарифом подарка. Подарок оплачивается по полной цене: личные скидки на него не действуют. Получатель не увидит, от кого подарок: если хотите, скажите ему сами."
       />
-      <GiftPrivacyChoice anonymous={anonymous} onChange={setAnonymous} />
-      <TariffsPanel
-        giftAnonymous={anonymous}
-        mode="gift"
-        model={{ status: "ready", offers: model.offers }}
-      />
+      <TariffsPanel mode="gift" model={{ status: "ready", offers: model.offers }} />
       <section aria-labelledby="bought-gifts" className="flex flex-column gap-3">
         <h2 className="m-0 text-xl font-semibold" id="bought-gifts">Купленные подарки</h2>
         {model.giftsError ? <Message severity="warn" text={model.giftsError} /> : null}
@@ -208,7 +160,7 @@ export function GiftPanel({ model }: { model: GiftsViewModel }) {
           ))}
         </div>
         <p className="m-0 text-sm text-600">
-          Вы видите, активирован ли код, но не кем: это знает только получатель.
+          Вы видите, активирован ли код, но не кем, а получатель не видит, кто его купил.
         </p>
       </section>
       {model.received.length > 0 ? (

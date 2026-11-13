@@ -31,7 +31,6 @@ export function PaymentConfirmation({
   durationDays = null,
   gatewayType = null,
   gift = false,
-  giftAnonymous = false,
   model = defaultCheckoutModel,
   paymentRedirectTo = "/payment",
   planCode = null,
@@ -40,7 +39,6 @@ export function PaymentConfirmation({
   durationDays?: string | null;
   gatewayType?: string | null;
   gift?: boolean;
-  giftAnonymous?: boolean;
   model?: CheckoutViewModel;
   paymentRedirectTo?: string;
   planCode?: string | null;
@@ -56,7 +54,6 @@ export function PaymentConfirmation({
     durationDays,
     gatewayType,
     gift,
-    giftAnonymous,
     model,
     pendingOperationDestination,
     pendingPaymentDestination,
@@ -166,7 +163,7 @@ export function PaymentConfirmation({
       {gift ? (
         <Message
           severity="info"
-          text={`Это подарок: ваша подписка не изменится. После оплаты код появится на странице «Подарки», передайте его получателю. ${giftAnonymous ? "Подарок анонимный: получатель не увидит, от кого он." : "Получатель увидит ваше имя."}`}
+          text="Это подарок: ваша подписка не изменится. После оплаты код появится на странице «Подарки», передайте его получателю. Получатель не увидит, от кого подарок."
         />
       ) : null}
       {submitError ? <Message severity="error" text={submitError} /> : null}

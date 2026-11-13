@@ -56,7 +56,6 @@ const gift: Gift = {
   created_at: null,
   expires_at: null,
   activated_at: null,
-  anonymous: false,
 };
 
 describe("gift page", () => {

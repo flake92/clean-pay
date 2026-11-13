@@ -277,7 +277,7 @@ function paymentString(
   return stringValue(input[key], { maxLength });
 }
 
-function paymentRequest(value: unknown, purchase: boolean, gift = false) {
+function paymentRequest(value: unknown, purchase: boolean) {
   const input = record(value);
   if (!input || !Number.isSafeInteger(input.duration_days) || Number(input.duration_days) < 0) {
     return null;
@@ -288,10 +288,6 @@ function paymentRequest(value: unknown, purchase: boolean, gift = false) {
   const offerVersion = paymentString(input, "offer_version", 2_048);
   const planCode = purchase ? paymentString(input, "plan_code", 200) : null;
   const returnUrl = optionalString(input, "return_url", { maxLength: 2_048 });
-  // Only a gift may be anonymous; anything but a strict boolean is rejected.
-  if (input.anonymous !== undefined && (!gift || typeof input.anonymous !== "boolean")) {
-    return null;
-  }
   if (
     !gatewayType
     || !confirmedAmount
@@ -310,7 +306,6 @@ function paymentRequest(value: unknown, purchase: boolean, gift = false) {
     confirmed_currency: confirmedCurrency,
     offer_version: offerVersion,
     ...(returnUrl !== undefined ? { return_url: returnUrl } : {}),
-    ...(gift && input.anonymous === true ? { anonymous: true } : {}),
   };
 }
 
@@ -324,7 +319,7 @@ export function parsePaymentCommandPayload(value: unknown): PaymentCommand | nul
     maxLength: 200,
   });
   if (idempotencyKey === null) return null;
-  const request = paymentRequest(input.request, input.kind !== "extend", input.kind === "gift");
+  const request = paymentRequest(input.request, input.kind !== "extend");
   if (!request) return null;
   if (input.kind === "extend") {
     return { kind: "extend", request: request as ExtendRequest, idempotencyKey };

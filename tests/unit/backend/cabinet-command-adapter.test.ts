@@ -84,16 +84,16 @@ describe("cabinet command adapter", () => {
     });
   });
 
-  it("reports who gave a redeemed gift code", async () => {
+  it("reports a redeemed gift code without naming its buyer", async () => {
     mocks.remnashopRequest.mockResolvedValueOnce({
       success: true, reward_type: "SUBSCRIPTION", is_gift: true, gifted_by: "Alice (@alice)",
     });
     await expect(productionCabinetCommands.activatePromocode("GIFT-AAAA-BBBB-CCCC"))
-      .resolves.toEqual({ isGift: true, giftedBy: "Alice (@alice)" });
+      .resolves.toEqual({ isGift: true });
 
     mocks.remnashopRequest.mockResolvedValueOnce({ success: true, reward_type: "DURATION" });
     await expect(productionCabinetCommands.activatePromocode("SPRING"))
-      .resolves.toEqual({ isGift: false, giftedBy: null });
+      .resolves.toEqual({ isGift: false });
   });
 
   it("rejects promocode enumeration before calling the provider", async () => {

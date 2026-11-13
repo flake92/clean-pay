@@ -359,7 +359,6 @@ function decodeGift(value: unknown): Gift {
     created_at: optionalNullableStringField(input, "created_at") ?? null,
     expires_at: optionalNullableStringField(input, "expires_at") ?? null,
     activated_at: optionalNullableStringField(input, "activated_at") ?? null,
-    anonymous: optionalBooleanField(input, "anonymous") ?? false,
   };
 }
 
@@ -372,8 +371,6 @@ function decodeReceivedGift(value: unknown): ReceivedGift {
     traffic_limit: numberField(input, "traffic_limit"),
     device_limit: numberField(input, "device_limit"),
     activated_at: optionalNullableStringField(input, "activated_at") ?? null,
-    gifted_by: optionalNullableStringField(input, "gifted_by") ?? null,
-    anonymous: optionalBooleanField(input, "anonymous") ?? false,
   };
 }
 
@@ -512,12 +509,10 @@ export function decodeRemnashopEndpointResponse(
   if (normalizedPath === "/subscription/promocode") {
     const input = record(value, "Remnashop promocode response");
     const isGift = optionalBooleanField(input, "is_gift");
-    const giftedBy = optionalNullableStringField(input, "gifted_by");
     return {
       success: booleanField(input, "success"),
       reward_type: stringField(input, "reward_type"),
       ...(isGift !== undefined ? { is_gift: isGift } : {}),
-      ...(giftedBy !== undefined ? { gifted_by: giftedBy } : {}),
     };
   }
   if (

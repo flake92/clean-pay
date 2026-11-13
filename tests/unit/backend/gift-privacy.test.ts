@@ -25,30 +25,19 @@ function commands(activation: Awaited<ReturnType<CabinetCommands["activatePromoc
   };
 }
 
-describe("anonymous gift payment command", () => {
-  it("accepts the anonymous flag only on a gift", () => {
+describe("gift payment command", () => {
+  it("drops a stale anonymous flag instead of rejecting the payment", () => {
     expect(parsePaymentCommandPayload({
       kind: "gift", idempotencyKey, request: { ...request, anonymous: true },
-    })).toEqual({ kind: "gift", idempotencyKey, request: { ...request, anonymous: true } });
-    expect(parsePaymentCommandPayload({
-      kind: "gift", idempotencyKey, request: { ...request, anonymous: false },
     })).toEqual({ kind: "gift", idempotencyKey, request });
-    expect(parsePaymentCommandPayload({
-      kind: "purchase", idempotencyKey, request: { ...request, anonymous: true },
-    })).toBeNull();
-    expect(parsePaymentCommandPayload({
-      kind: "gift", idempotencyKey, request: { ...request, anonymous: "yes" },
-    })).toBeNull();
   });
 });
 
 describe("gift activation message", () => {
-  it("names the giver unless the gift is anonymous", async () => {
-    await expect(activateCabinetPromocode(commands({ isGift: true, giftedBy: "Alice (@alice)" }), "GIFT-A"))
-      .resolves.toEqual({ status: "success", message: "Подарок от Alice (@alice) активирован. Подписка обновлена." });
-    await expect(activateCabinetPromocode(commands({ isGift: true, giftedBy: null }), "GIFT-A"))
+  it("never names who bought the gift", async () => {
+    await expect(activateCabinetPromocode(commands({ isGift: true }), "GIFT-A"))
       .resolves.toEqual({ status: "success", message: "Подарок активирован. Подписка обновлена." });
-    await expect(activateCabinetPromocode(commands({ isGift: false, giftedBy: null }), "SPRING"))
+    await expect(activateCabinetPromocode(commands({ isGift: false }), "SPRING"))
       .resolves.toEqual({ status: "success", message: "Промокод активирован. Данные кабинета обновлены." });
   });
 });
@@ -62,8 +51,6 @@ describe("received gifts on the gift page", () => {
       traffic_limit: 0,
       device_limit: 3,
       activated_at: null,
-      gifted_by: null,
-      anonymous: true,
     };
     const model = await loadGiftsViewModel(
       { loadOffers: vi.fn(async () => ({ gateways: [], has_current_subscription: false, current_subscription_status: null, plans: [] })) },
