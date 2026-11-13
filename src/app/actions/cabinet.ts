@@ -5,6 +5,7 @@ import { revalidatePath } from "next/cache";
 import {
   activateCabinetPromocode,
   deleteAllCabinetDevices,
+  previewCabinetPromocode,
   deleteCabinetDevice,
   reissueCabinetSubscription,
 } from "@/application/cabinet/execute-command";
@@ -44,4 +45,12 @@ export async function activatePromocodeAction(code: string) {
   const result = await activateCabinetPromocode(productionCabinetCommands, parsed);
   if (result.status === "success") revalidatePath("/cabinet");
   return result;
+}
+
+export async function previewPromocodeAction(code: string) {
+  const parsed = parseBoundedIdentifier(code, 256);
+  if (!parsed) {
+    return { status: "error" as const, message: "Введите корректный промокод." };
+  }
+  return previewCabinetPromocode(productionCabinetCommands, parsed);
 }

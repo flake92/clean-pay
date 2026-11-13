@@ -67,6 +67,24 @@ export async function activateCabinetPromocode(commands: CabinetCommands, code: 
   }
 }
 
+export type CabinetPromocodePreviewResult =
+  | { status: "gift"; code: string; outcome: import("@/shared/domain/plan-change").GiftOutcome }
+  | { status: "activate"; code: string };
+
+/** A gift code is confirmed before it changes the subscription; anything else activates at once. */
+export async function previewCabinetPromocode(
+  commands: CabinetCommands,
+  code: string,
+): Promise<CabinetPromocodePreviewResult | CabinetCommandResult> {
+  const validCode = printable(code, 256);
+  if (!validCode) return { status: "error", message: "Введите корректный промокод." };
+  const preview = await commands.previewPromocode(validCode);
+  if (preview?.is_gift && preview.gift) {
+    return { status: "gift", code: validCode, outcome: preview.gift };
+  }
+  return { status: "activate", code: validCode };
+}
+
 export function endCabinetSession(commands: CabinetCommands) {
   return commands.logout();
 }

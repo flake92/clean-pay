@@ -145,7 +145,7 @@ export function ExtendConfirmation({ model = defaultCheckoutModel, requestedDura
       <div className="flex flex-column gap-4">
         <Message
           severity="info"
-          text="Продление текущего тарифа недоступно. Можно изменить тариф: новый тариф заменит текущий без перерасчёта."
+          text="Продление текущего тарифа недоступно. Можно изменить тариф: расчёт оставшихся дней покажем на шаге оплаты."
         />
         <LinkButton className="w-fit" href="/tariffs" label="Изменить тариф" />
       </div>

@@ -1,4 +1,11 @@
 import { isGiftStatus, type Gift, type GiftsResponse, type ReceivedGift } from "@/shared/domain/gifts";
+import {
+  CHANGE_QUOTE_MODES,
+  GIFT_OUTCOME_KINDS,
+  type ChangeQuote,
+  type GiftOutcome,
+  type PromocodePreview,
+} from "@/shared/domain/plan-change";
 
 function record(value: unknown, label: string): Record<string, unknown> {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
@@ -374,6 +381,45 @@ function decodeReceivedGift(value: unknown): ReceivedGift {
   };
 }
 
+function decodeGiftOutcome(value: unknown): GiftOutcome {
+  const input = record(value, "Remnashop gift outcome");
+  const kind = stringField(input, "kind");
+  const known = GIFT_OUTCOME_KINDS.find((item) => item === kind);
+  if (!known) throw new TypeError("Remnashop gift outcome has an unknown kind");
+  return {
+    kind: known,
+    plan_name: stringField(input, "plan_name"),
+    gift_days: numberField(input, "gift_days"),
+    expire_at: optionalNullableStringField(input, "expire_at") ?? null,
+    current_plan_name: optionalNullableStringField(input, "current_plan_name") ?? null,
+    remaining_days: numberField(input, "remaining_days"),
+    credit_days: numberField(input, "credit_days"),
+  };
+}
+
+function decodePromocodePreview(value: unknown): PromocodePreview {
+  const input = record(value, "Remnashop promocode preview");
+  const gift = input.gift === undefined || input.gift === null ? null : decodeGiftOutcome(input.gift);
+  return {
+    reward_type: stringField(input, "reward_type"),
+    is_gift: optionalBooleanField(input, "is_gift") ?? false,
+    gift,
+  };
+}
+
+function decodeChangeQuote(value: unknown): ChangeQuote {
+  const input = record(value, "Remnashop change quote");
+  const mode = stringField(input, "mode");
+  const known = CHANGE_QUOTE_MODES.find((item) => item === mode);
+  if (!known) throw new TypeError("Remnashop change quote has an unknown mode");
+  return {
+    mode: known,
+    left_days: numberField(input, "left_days"),
+    credit_days: numberField(input, "credit_days"),
+    expire_at: optionalNullableStringField(input, "expire_at") ?? null,
+  };
+}
+
 function decodeGifts(value: unknown): GiftsResponse {
   const input = record(value, "Remnashop gifts response");
   // Remnashop before 0063 has no "received" list.
@@ -506,6 +552,8 @@ export function decodeRemnashopEndpointResponse(
     return simpleBooleanResponse(value, "deleted");
   }
   if (normalizedPath === "/subscription/reissue") return simpleBooleanResponse(value, "success");
+  if (normalizedPath === "/subscription/promocode/preview") return decodePromocodePreview(value);
+  if (normalizedPath === "/subscription/change-quote") return decodeChangeQuote(value);
   if (normalizedPath === "/subscription/promocode") {
     const input = record(value, "Remnashop promocode response");
     const isGift = optionalBooleanField(input, "is_gift");

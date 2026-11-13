@@ -34,6 +34,8 @@ import {
   Message,
 } from "@/frontend/components/sakai/form-foundation";
 import { CabinetPromocodeFields } from "@/frontend/components/cabinet-promocode-fields";
+import { OutcomeConfirmation } from "@/frontend/components/outcome-summary";
+import { giftOutcomeSummary } from "@/shared/domain/plan-change";
 import { useCabinetPanelController } from "@/frontend/hooks/use-cabinet-panel-controller";
 
 export function CabinetPanel({ model }: { model: CabinetViewModel }) {
@@ -52,12 +54,15 @@ export function CabinetPanel({ model }: { model: CabinetViewModel }) {
   const {
     actionMessage,
     activatePromocode,
+    cancelGift,
+    confirmGift,
     copyStatus,
     copySubscriptionUrl,
     deleteAllDevices,
     deleteDevice,
     logout,
     pendingAction,
+    pendingGift,
     promocode,
     promocodeMessage,
     reissueSubscription,
@@ -275,12 +280,22 @@ export function CabinetPanel({ model }: { model: CabinetViewModel }) {
           {promocodeMessage ? <Message severity="info" text={promocodeMessage} /> : null}
           <form className="mt-3 flex w-full flex-column gap-2 md:w-30rem" onSubmit={activatePromocode}>
             <CabinetPromocodeFields
-              disabled={pendingAction !== null}
+              disabled={pendingAction !== null || pendingGift !== null}
               loading={pendingAction === "promocode"}
               onValueChange={setPromocode}
               value={promocode}
             />
           </form>
+          {pendingGift ? (
+            <OutcomeConfirmation
+              confirmLabel="Активировать подарок"
+              disabled={pendingAction !== null}
+              onCancel={cancelGift}
+              onConfirm={confirmGift}
+              summary={giftOutcomeSummary(pendingGift.outcome)}
+              title={`Подарочный код ${pendingGift.code}`}
+            />
+          ) : null}
         </div>
       </div>
 

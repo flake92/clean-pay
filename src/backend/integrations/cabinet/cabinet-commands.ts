@@ -2,6 +2,7 @@ import {
   CabinetCommandError,
   type CabinetCommands,
 } from "@/application/cabinet/ports/cabinet-commands";
+import type { PromocodePreview } from "@/shared/domain/plan-change";
 import { ServiceError } from "@/backend/errors/service-error";
 import { remnashopValidatedRequest } from "@/backend/integrations/remnashop/api-client-runtime";
 import { getAuthorizedRemnashopTokens } from "@/backend/integrations/remnashop/client";
@@ -74,6 +75,25 @@ export function createProductionCabinetCommands(
         method: "POST", accessToken, body: { code },
       }), { limit: 10, windowSeconds: 15 * 60 });
     return { isGift: response.is_gift === true };
+  },
+  async previewPromocode(code) {
+    try {
+      const { accessToken, session } = await authorize();
+      // Bounded like activation, so the preview cannot be used to enumerate codes.
+      await assertTargetRateLimit({
+        action: "promocode_preview",
+        sessionId: `user:${session.userId}`,
+        limit: 20,
+        windowSeconds: 15 * 60,
+      });
+      return await remnashopValidatedRequest<PromocodePreview>("/subscription/promocode/preview", {
+        method: "POST", accessToken, body: { code },
+      });
+    } catch {
+      // Older Remnashop, an invalid code or the preview limit: activation (with its
+      // own limit) reports the real reason.
+      return null;
+    }
   },
   async logout() {
     const userId = await getWebSessionUserIdFromAccessCookie();
