@@ -73,7 +73,7 @@ export function createProductionCabinetCommands(
       remnashopValidatedRequest<PromocodeActivateResponse>("/subscription/promocode", {
         method: "POST", accessToken, body: { code },
       }), { limit: 10, windowSeconds: 15 * 60 });
-    return { isGift: response.is_gift === true, giftedBy: response.gifted_by ?? null };
+    return { isGift: response.is_gift === true };
   },
   async logout() {
     const userId = await getWebSessionUserIdFromAccessCookie();

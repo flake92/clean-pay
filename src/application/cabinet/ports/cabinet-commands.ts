@@ -5,10 +5,9 @@ export class CabinetCommandError extends Error {
   }
 }
 
-/** What a redeemed code turned out to be; `giftedBy` is null for an anonymous gift. */
+/** What a redeemed code turned out to be; a gift never names its buyer. */
 export type PromocodeActivation = {
   isGift: boolean;
-  giftedBy: string | null;
 };
 
 export interface CabinetCommands {

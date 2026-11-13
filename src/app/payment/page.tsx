@@ -23,13 +23,11 @@ export default async function PaymentPage({ searchParams }: { searchParams: Prom
   const durationDays = first(params.duration) ?? null;
   const gatewayType = first(params.gateway) ?? null;
   const gift = first(params.gift) === "1";
-  const giftAnonymous = gift && first(params.anonymous) === "1";
   const paymentParams = new URLSearchParams();
   if (planCode) paymentParams.set("plan", planCode);
   if (durationDays) paymentParams.set("duration", durationDays);
   if (gatewayType) paymentParams.set("gateway", gatewayType);
   if (gift) paymentParams.set("gift", "1");
-  if (giftAnonymous) paymentParams.set("anonymous", "1");
   const paymentRedirectTo = `/payment${paymentParams.size ? `?${paymentParams}` : ""}`;
   const model = await loadCheckout(requestCheckoutReader, requestAuthProfileGateway);
   if (model.status === "account-action-required" && model.action === "login") {
@@ -52,7 +50,6 @@ export default async function PaymentPage({ searchParams }: { searchParams: Prom
             durationDays={durationDays}
             gatewayType={gatewayType}
             gift={gift}
-            giftAnonymous={giftAnonymous}
             model={model}
             paymentRedirectTo={paymentRedirectTo}
             planCode={planCode}

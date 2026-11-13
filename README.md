@@ -369,7 +369,7 @@ Production запускается из зафиксированного тега
 ветки.
 
 ```bash
-RELEASE_REF='refs/tags/v0.6.1'
+RELEASE_REF='refs/tags/v0.6.2'
 sudo mkdir -p /opt/clean-pay
 sudo chown "$USER":"$USER" /opt/clean-pay
 git clone https://github.com/flake92/clean-pay.git /opt/clean-pay
@@ -645,7 +645,7 @@ workers не редактируйте вручную.
 
 ```bash
 cd /opt/clean-pay
-git fetch -q origin tag v0.6.1 && CLEAN_PAY_MENU_ROOT="$PWD" bash <(git show v0.6.1:menu.sh) update
+git fetch -q origin tag v0.6.2 && CLEAN_PAY_MENU_ROOT="$PWD" bash <(git show v0.6.2:menu.sh) update
 ```
 
 Ручной порядок для тех, кто работает без меню:
@@ -668,7 +668,7 @@ workers. Если миграция завершается ошибкой, runtim
 
 ```bash
 cd /opt/clean-pay
-RELEASE_REF='refs/tags/v0.6.1'
+RELEASE_REF='refs/tags/v0.6.2'
 git fetch --depth=1 origin "$RELEASE_REF"
 RELEASE_SHA=$(git rev-parse FETCH_HEAD)
 git checkout --detach "$RELEASE_SHA"
@@ -712,7 +712,7 @@ volume и с сохранением существующей locale; база н
 чтобы первое успешное подтверждение e-mail могло атомарно сохранить включённые
 по умолчанию напоминания. Существующие настройки она не переписывает: явный
 opt-out остаётся выключенным, а неподтверждённые адреса не получают напоминания.
-Revision `0063` добавляет анонимные подарки (даритель решает, видит ли получатель его имя).
+Revision `0063` добавляет поля анонимности подарка (с Clean Pay 0.6.2 не используются: получатель никогда не видит покупателя).
 Revision `0062` добавляет подписку в подарок: тип покупки `GIFT` и коды подарков.
 Revision `0061` добавляет ленту уведомлений кабинета и отзыв push удалённой рассылки.
 Revision `0060` добавляет каналы уведомлений (служебные письма включены у всех,

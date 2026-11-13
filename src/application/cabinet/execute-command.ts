@@ -59,12 +59,7 @@ export async function activateCabinetPromocode(commands: CabinetCommands, code: 
   try {
     const activation = await commands.activatePromocode(validCode);
     if (activation.isGift) {
-      return {
-        status: "success",
-        message: activation.giftedBy
-          ? `Подарок от ${activation.giftedBy} активирован. Подписка обновлена.`
-          : "Подарок активирован. Подписка обновлена.",
-      };
+      return { status: "success", message: "Подарок активирован. Подписка обновлена." };
     }
     return { status: "success", message: "Промокод активирован. Данные кабинета обновлены." };
   } catch (error) {
